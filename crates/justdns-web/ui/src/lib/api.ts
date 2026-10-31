@@ -41,6 +41,9 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 export const api = {
   stats: (signal?: AbortSignal) => getJson<Stats>("/api/stats", signal),
   activity: (signal?: AbortSignal) => getJson<ActivityBucket[]>("/api/activity", signal),
-  queries: (limit = 50, signal?: AbortSignal) =>
-    getJson<QueryRow[]>(`/api/queries?limit=${limit}`, signal),
+  queries: (limit = 50, query = "", signal?: AbortSignal) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query.trim()) params.set("q", query.trim());
+    return getJson<QueryRow[]>(`/api/queries?${params}`, signal);
+  },
 };

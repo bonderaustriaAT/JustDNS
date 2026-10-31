@@ -92,6 +92,8 @@ async fn activity(State(store): State<Store>) -> Json<Vec<ActivityBucket>> {
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
+    /// Optional case-insensitive filter on the queried name or client address.
+    q: Option<String>,
 }
 
 async fn queries(
@@ -102,7 +104,11 @@ async fn queries(
         .limit
         .unwrap_or(DEFAULT_QUERY_LIMIT)
         .min(MAX_QUERY_LIMIT);
-    Json(store.recent(limit))
+    let events = match params.q.as_deref().map(str::trim) {
+        Some(needle) if !needle.is_empty() => store.search(needle, limit),
+        _ => store.recent(limit),
+    };
+    Json(events)
 }
 
 /// Serve the requested asset, falling back to `index.html` for client-side
@@ -209,6 +215,35 @@ mod tests {
 
         let response = get(store, "/api/queries?limit=2").await;
         let body = body_of(response).await;
+        assert_eq!(body.matches("\"name\"").count(), 2, "{body}");
+    }
+
+    #[tokio::test]
+    async fn queries_filter_matches_name_or_client() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "news.example",
+            QuerySource::Upstream,
+        ));
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 2),
+            "shop.other",
+            QuerySource::Cache,
+        ));
+
+        // Match on the queried name, case-insensitively.
+        let body = body_of(get(store.clone(), "/api/queries?q=NEWS").await).await;
+        assert!(body.contains("news.example"), "{body}");
+        assert!(!body.contains("shop.other"), "{body}");
+
+        // Match on the client address.
+        let body = body_of(get(store.clone(), "/api/queries?q=0.0.2").await).await;
+        assert!(body.contains("shop.other"), "{body}");
+        assert!(!body.contains("news.example"), "{body}");
+
+        // A blank filter behaves like no filter.
+        let body = body_of(get(store, "/api/queries?q=").await).await;
         assert_eq!(body.matches("\"name\"").count(), 2, "{body}");
     }
 

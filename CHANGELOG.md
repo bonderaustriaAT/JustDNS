@@ -61,3 +61,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and pushes it to the registry, and a `docker-compose.yml` runs that published
   image — so a deployment pulls a ready-made image instead of compiling the
   bundled DuckDB sources locally.
+- Query filter (`justdns-web`): `/api/queries` takes an optional `q` that keeps
+  only entries whose queried name or client address contains it (case-
+  insensitive), so the UI can search the recent log.
+- DNS log page: a `Protokoll` view lists the 100 newest queries — time, client,
+  domain, record type, source and timing — with a search box that filters by
+  domain or client address and a live toggle that streams new entries in as
+  they are handled.

@@ -1,0 +1,250 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+}
+
+/* Live switch: a labelled status that pulses only while running. */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.liveLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.liveLabel[data-on="true"] {
+  color: var(--signal-strong);
+}
+
+.liveDot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.liveLabel[data-on="true"] .liveDot {
+  background: var(--signal);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--signal) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveLabel[data-on="true"] .liveDot {
+    animation: none;
+  }
+}
+
+.input {
+  inline-size: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+  font-family: var(--font-body);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.count {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: var(--step-1);
+  padding-block: var(--space-4);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Column labels and every row share one grid so headings line up with data. */
+.columns,
+.row {
+  display: grid;
+  grid-template-columns: 4.75rem minmax(6.5rem, 10rem) minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: center;
+}
+
+.columns {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  padding-block: var(--space-2);
+  border-block-end: 1px solid var(--line-strong);
+}
+
+.detailsHead {
+  justify-self: end;
+}
+
+.row {
+  padding-block: var(--space-2);
+  border-block-start: 1px solid var(--line);
+}
+
+.row:first-of-type {
+  border-block-start: none;
+}
+
+.time {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.client {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.type {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+/* Where the answer came from, tinted so a scan reads cache vs. upstream fast. */
+.source {
+  font-size: 0.72rem;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
+.source[data-source="cache"] {
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+}
+
+.source[data-source="local"] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+}
+
+.rcode {
+  font-size: 0.72rem;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+}
+
+.duration {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-inline-size: 3.5rem;
+  text-align: end;
+}
+
+@media (max-width: 600px) {
+  .columns {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "domain domain meta"
+      "time   client meta";
+    column-gap: var(--space-2);
+    row-gap: 2px;
+    padding-block: var(--space-3);
+  }
+
+  .domain {
+    grid-area: domain;
+  }
+
+  /* A quiet second line: when the query happened, and who asked. */
+  .time {
+    grid-area: time;
+  }
+
+  .client {
+    grid-area: client;
+    justify-self: start;
+  }
+
+  .meta {
+    grid-area: meta;
+    align-self: center;
+    max-inline-size: 10rem;
+  }
+}

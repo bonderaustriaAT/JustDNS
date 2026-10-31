@@ -107,6 +107,24 @@ impl Recorder {
         state.recent.iter().rev().take(limit).cloned().collect()
     }
 
+    /// The most recent events whose queried name or client address contains
+    /// `needle` (case-insensitive), newest first, up to `limit`.
+    pub fn search(&self, needle: &str, limit: usize) -> Vec<QueryEvent> {
+        let needle = needle.to_lowercase();
+        let state = self.state.lock().expect("recorder lock poisoned");
+        state
+            .recent
+            .iter()
+            .rev()
+            .filter(|event| {
+                event.name.to_lowercase().contains(&needle)
+                    || event.client.to_string().contains(&needle)
+            })
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
     /// A snapshot of the running totals.
     pub fn stats(&self) -> Stats {
         self.state.lock().expect("recorder lock poisoned").stats
@@ -183,6 +201,38 @@ mod tests {
             recorder.record(event(at, QuerySource::Upstream, 0));
         }
         assert_eq!(recorder.recent(3).len(), 3);
+    }
+
+    #[test]
+    fn search_filters_by_name_or_client_newest_first() {
+        let recorder = Recorder::new(100);
+        let mut first = event(1, QuerySource::Upstream, 0);
+        first.name = "news.example.".to_owned();
+        first.client = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
+        let mut second = event(2, QuerySource::Cache, 0);
+        second.name = "shop.other.".to_owned();
+        second.client = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 20));
+        let mut third = event(3, QuerySource::Upstream, 0);
+        third.name = "news.again.".to_owned();
+        third.client = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        recorder.record(first);
+        recorder.record(second);
+        recorder.record(third);
+
+        // Name match, case-insensitive, newest first.
+        let names: Vec<String> = recorder
+            .search("NEWS", 10)
+            .into_iter()
+            .map(|event| event.name)
+            .collect();
+        assert_eq!(names, vec!["news.again.", "news.example."]);
+
+        // Client-address match.
+        let by_client = recorder.search("192.168.20", 10);
+        assert_eq!(by_client.len(), 2);
+
+        // The limit is honoured on matches.
+        assert_eq!(recorder.search("192.168.20", 1).len(), 1);
     }
 
     #[test]
