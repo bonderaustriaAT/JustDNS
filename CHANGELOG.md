@@ -10,3 +10,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Initial Cargo workspace: `justdns-dns`, `justdns-filter`, `justdns-store`,
   `justdns-web` and the `justdns` binary.
+- Response cache (`justdns-dns`): per-entry TTL expiry via `moka`, record TTLs
+  counted down on read, and negative-answer caching.
