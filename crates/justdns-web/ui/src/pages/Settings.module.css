@@ -112,8 +112,21 @@
   gap: 3px;
 }
 
+.labelLine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .label {
   font-weight: 500;
+}
+
+/* A dependent setting is dimmed and inert while its parent feature is off, so
+   it reads as "available once that is on". */
+.row[data-disabled] .text,
+.row[data-disabled] .control {
+  opacity: 0.45;
 }
 
 .description {
@@ -174,6 +187,11 @@
   border-radius: 999px;
 }
 
+.resolverTag[data-warn] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
 .number {
   display: inline-flex;
   align-items: center;
@@ -191,6 +209,10 @@
   border-radius: var(--radius-sm);
   padding: var(--space-2);
   font-variant-numeric: tabular-nums;
+}
+
+.number input:disabled {
+  cursor: not-allowed;
 }
 
 .hint {

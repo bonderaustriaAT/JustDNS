@@ -19,6 +19,7 @@
   --focus: color-mix(in srgb, var(--signal) 55%, transparent);
 
   --danger: #c2473f;
+  --warn: #9a6a12;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "Hanken Grotesk", system-ui, sans-serif;
@@ -58,6 +59,7 @@
     --signal-strong: #4cc193;
     --focus: color-mix(in srgb, #37a97e 60%, transparent);
     --danger: #e0695f;
+    --warn: #e6a532;
   }
 }
 
@@ -74,4 +76,5 @@
   --signal-strong: #4cc193;
   --focus: color-mix(in srgb, #37a97e 60%, transparent);
   --danger: #e0695f;
+  --warn: #e6a532;
 }

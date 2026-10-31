@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { useSettings, type UpstreamMode } from "../state/settings";
 import styles from "./Settings.module.css";
@@ -36,16 +37,23 @@ function Category({
 function Row({
   label,
   description,
+  details,
   control,
+  disabled = false,
 }: {
   label: string;
   description: string;
+  details: string;
   control: ReactNode;
+  disabled?: boolean;
 }) {
   return (
-    <div className={styles.row}>
+    <div className={styles.row} data-disabled={disabled || undefined}>
       <div className={styles.text}>
-        <span className={styles.label}>{label}</span>
+        <span className={styles.labelLine}>
+          <span className={styles.label}>{label}</span>
+          <InfoHint label={label} text={details} />
+        </span>
         <span className={styles.description}>{description}</span>
       </div>
       <div className={styles.control}>{control}</div>
@@ -152,6 +160,7 @@ export function Settings() {
             <Row
               label="Werbung & Tracker blockieren"
               description="Filtert bekannte Werbe- und Trackingdienste."
+              details="Gleicht jede DNS-Anfrage gegen Listen bekannter Werbe- und Tracking-Domains ab. Treffer werden nicht aufgelöst, sondern geblockt — für alle Geräte im Netzwerk, ohne dort etwas zu installieren."
               control={
                 <Toggle
                   label="Werbung & Tracker blockieren"
@@ -163,6 +172,7 @@ export function Settings() {
             <Row
               label="Schadsoftware blockieren"
               description="Sperrt Domains, die für Phishing und Schadsoftware bekannt sind."
+              details="Vergleicht Anfragen mit Listen von Phishing-, Malware- und Betrugs-Domains. Verbindungen zu diesen Zielen werden gar nicht erst aufgebaut, weil der Name nicht aufgelöst wird."
               control={
                 <Toggle
                   label="Schadsoftware blockieren"
@@ -174,6 +184,7 @@ export function Settings() {
             <Row
               label="Sichere Suche erzwingen"
               description="Erzwingt den Jugendschutzmodus bei großen Suchmaschinen."
+              details="Leitet Google, Bing und YouTube per DNS auf ihre jugendsicheren Adressen um, sodass explizite Ergebnisse ausgefiltert werden — unabhängig von den Einstellungen am einzelnen Gerät."
               control={
                 <Toggle
                   label="Sichere Suche erzwingen"
@@ -194,6 +205,7 @@ export function Settings() {
                 <Row
                   label="Auswahlmodus"
                   description="Wie zwischen den konfigurierten Resolvern gewählt wird."
+                  details="Racing fragt alle Resolver gleichzeitig und nimmt die erste Antwort. Fallback geht sie der Reihe nach durch. Lastverteilt wechselt reihum. Regelbasiert wählt den Resolver anhand von Domain-Regeln."
                   control={
                     <select
                       className={styles.select}
@@ -214,7 +226,10 @@ export function Settings() {
                     <li key={resolver.ip} className={styles.resolver}>
                       <span className={styles.resolverIp}>{resolver.ip}</span>
                       <span className={styles.resolverHost}>{resolver.host}</span>
-                      <span className={styles.resolverTag}>
+                      <span
+                        className={styles.resolverTag}
+                        data-warn={!settings.encryptUpstream || undefined}
+                      >
                         {settings.encryptUpstream ? "DoT" : "Klartext"}
                       </span>
                     </li>
@@ -230,6 +245,7 @@ export function Settings() {
                 <Row
                   label="Upstream verschlüsseln"
                   description="Anfragen über DNS-over-TLS statt im Klartext senden."
+                  details="Sendet Anfragen an die Resolver über DNS-over-TLS (Port 853), sodass niemand im Netzweg mitlesen kann, welche Domains abgefragt werden. Ausgeschaltet gehen die Anfragen im Klartext über Port 53."
                   control={
                     <Toggle
                       label="Upstream verschlüsseln"
@@ -248,6 +264,7 @@ export function Settings() {
                 <Row
                   label="Abgelaufene Einträge weiterreichen"
                   description="Serve-Stale: bei nicht erreichbarem Upstream vorübergehend abgelaufene Antworten ausliefern."
+                  details="Ist kein Resolver erreichbar, liefert der Cache vorübergehend bereits abgelaufene Antworten weiter, damit die Namensauflösung bei kurzen Ausfällen nicht komplett stoppt."
                   control={
                     <Toggle
                       label="Abgelaufene Einträge weiterreichen"
@@ -266,6 +283,7 @@ export function Settings() {
                 <Row
                   label="Anfrageprotokoll"
                   description="Speichert aufgelöste Anfragen für den Abfrage-Explorer."
+                  details="Hält zu jeder Anfrage Zeitpunkt, Gerät, Domain und das Ergebnis (aufgelöst oder geblockt) fest, damit der Abfrage-Explorer sie später anzeigen kann."
                   control={
                     <Toggle
                       label="Anfrageprotokoll"
@@ -277,6 +295,8 @@ export function Settings() {
                 <Row
                   label="Aufbewahrung"
                   description="Wie lange Protokolleinträge gespeichert bleiben."
+                  details="Legt fest, nach wie vielen Tagen Protokolleinträge automatisch gelöscht werden. Nur einstellbar, wenn das Anfrageprotokoll aktiv ist."
+                  disabled={!settings.queryLog}
                   control={
                     <label className={styles.number}>
                       <input
@@ -284,6 +304,7 @@ export function Settings() {
                         min={1}
                         max={365}
                         value={settings.logRetentionDays}
+                        disabled={!settings.queryLog}
                         onChange={(e) => update("logRetentionDays", Number(e.target.value))}
                         aria-label="Aufbewahrung in Tagen"
                       />
