@@ -75,6 +75,12 @@ impl Store {
         self.recorder.recent(limit)
     }
 
+    /// The most recent events whose name or client address contains `needle`
+    /// (case-insensitive), newest first, up to `limit`.
+    pub fn search(&self, needle: &str, limit: usize) -> Vec<QueryEvent> {
+        self.recorder.search(needle, limit)
+    }
+
     /// A snapshot of the running totals.
     pub fn stats(&self) -> Stats {
         self.recorder.stats()
