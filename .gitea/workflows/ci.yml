@@ -8,19 +8,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Rust stable with a C++ toolchain already present, so the bundled DuckDB
+    # build needs no extra setup per run.
+    container: rust:1-bookworm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools
-        # The DuckDB query log is compiled from its bundled C++ sources.
-        run: |
-          apt-get update
-          apt-get install -y g++
+      # Reuse compiled dependencies across runs. The first run pays the full
+      # DuckDB/Arrow C++ build; later runs restore it and recompile only what
+      # changed. CARGO_HOME is /usr/local/cargo in this image.
+      - name: Cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
-      - name: Install Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component rustfmt,clippy
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Rust components
+        run: rustup component add rustfmt clippy
 
       - name: Format
         run: cargo fmt --all --check
