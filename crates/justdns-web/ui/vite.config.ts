@@ -10,6 +10,11 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    // Forward API calls to a locally running justdns binary during development;
+    // in production the Rust crate serves the UI and API on the same origin.
+    proxy: {
+      "/api": "http://127.0.0.1:8080",
+    },
   },
   build: {
     outDir: "dist",

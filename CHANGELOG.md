@@ -54,3 +54,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/api/activity` (queries per hour over the last 24 hours) and `/api/queries`
   (the most recent queries) read the query log so the dashboard can show live
   figures. Blocked counts stay zero until filtering exists.
+- The overview now shows live data from the API instead of placeholders:
+  resolved-query total, cache share, active devices, the 24-hour activity trace
+  and the most recent queries, refreshed every few seconds.
