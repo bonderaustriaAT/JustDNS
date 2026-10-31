@@ -1147,8 +1147,11 @@ name = "justdns-web"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "justdns-store",
  "rust-embed",
+ "serde",
  "tokio",
+ "tower",
  "tracing",
 ]
 

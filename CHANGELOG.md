@@ -50,3 +50,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   through an observer hook, and the binary records it to the store at
   `JUSTDNS_DB_PATH` (default `queries.duckdb`; the container keeps it on a
   `/data` volume).
+- JSON API (`justdns-web`): `/api/stats` (totals, sources and active clients),
+  `/api/activity` (queries per hour over the last 24 hours) and `/api/queries`
+  (the most recent queries) read the query log so the dashboard can show live
+  figures. Blocked counts stay zero until filtering exists.
