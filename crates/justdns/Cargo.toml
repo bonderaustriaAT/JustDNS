@@ -1,0 +1,12 @@
+[package]
+name = "justdns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+justdns-dns = { path = "../justdns-dns" }
+justdns-filter = { path = "../justdns-filter" }
+justdns-store = { path = "../justdns-store" }
+justdns-web = { path = "../justdns-web" }

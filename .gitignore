@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+
+# Web UI
+/frontend/node_modules/
+/frontend/dist/
+
+# Runtime data
+*.db
+*.db-wal
+*.db-shm
+*.duckdb
+/backups/
+
+# Local
+.env
+.DS_Store
