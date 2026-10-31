@@ -11,6 +11,10 @@ jobs:
     # Rust stable with a C++ toolchain already present, so the bundled DuckDB
     # build needs no extra setup per run.
     container: rust:1-bookworm
+    env:
+      # Cap parallel codegen (Rust and the bundled C++) to keep peak memory in
+      # reach of a small runner; the Arrow/DuckDB build otherwise risks an OOM.
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
 
