@@ -37,7 +37,8 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_WEB_LISTEN=0.0.0.0:8080 \
     JUSTDNS_IPV6=false \
     JUSTDNS_DB_PATH=/data/queries.duckdb \
-    JUSTDNS_CONFIG_PATH=/data/config.json
+    JUSTDNS_CONFIG_PATH=/data/config.json \
+    JUSTDNS_AUTH_PATH=/data/auth.json
 
 # The query log persists here; mount a volume to keep it across restarts.
 VOLUME /data
