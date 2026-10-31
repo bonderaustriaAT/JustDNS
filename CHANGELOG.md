@@ -69,6 +69,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   domain or client address and a live toggle that streams new entries in as
   they are handled.
 
+### Changed
+
+- Faster image rebuilds (`Dockerfile`): the release build now caches the Cargo
+  registry and the `target` directory with BuildKit cache mounts, so a source
+  change recompiles only the crates that changed instead of rebuilding every
+  dependency — the bundled DuckDB C++ sources (the slow part) stay compiled
+  between builds.
+
 ### Fixed
 
 - Negative answers no longer become SERVFAIL (`justdns-dns`): the upstream

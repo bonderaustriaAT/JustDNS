@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # SPDX-FileCopyrightText: 2026 JustDNS contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -17,12 +18,20 @@ RUN apt-get update && apt-get install -y g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 COPY --from=ui /ui/dist crates/justdns-web/ui/dist
-RUN cargo build --release --locked --bin justdns
+# Cache the Cargo registry and the target directory across builds so a source
+# change recompiles only the crates that actually changed — the bundled DuckDB
+# C++ sources (the slow part) stay compiled. target/ lives in the cache mount,
+# so the finished binary is copied out to a real path for the runtime stage.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --locked --bin justdns \
+    && cp target/release/justdns /usr/local/bin/justdns
 
 # Runtime: just the binary. TLS roots are compiled in (webpki-roots), so no
 # system certificate store is needed for DoT/DoH upstreams.
 FROM debian:bookworm-slim AS runtime
-COPY --from=build /src/target/release/justdns /usr/local/bin/justdns
+COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
 
 ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_WEB_LISTEN=0.0.0.0:8080 \
