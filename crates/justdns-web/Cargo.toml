@@ -7,6 +7,12 @@ license.workspace = true
 
 [dependencies]
 axum = "0.8.4"
+justdns-store = { path = "../justdns-store" }
 rust-embed = { version = "8.7.2", features = ["mime-guess"] }
+serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.54.1", features = ["net", "rt"] }
 tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["macros", "rt"] }
+tower = { version = "0.5.2", features = ["util"] }
