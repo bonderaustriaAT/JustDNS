@@ -43,3 +43,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rust-embed` and served over HTTP (SPA fallback to `index.html`), listening on
   `0.0.0.0:8080` by default (`JUSTDNS_WEB_LISTEN`). The binary runs it alongside
   the DNS server, and the Docker build bundles the UI via a Node build stage.
+- Query log (`justdns-store`): records each handled query — client, name, type,
+  response code, source and timing — into a bounded in-memory view for the
+  dashboard and a batched, persistent DuckDB log that survives restarts.
