@@ -17,6 +17,8 @@ pub enum AnswerSource {
     Upstream,
     /// Answered locally without a lookup (for example a suppressed AAAA).
     Local,
+    /// Refused by the blocking engine without a lookup.
+    Blocked,
 }
 
 /// One handled query, as the resolver saw it. Record and response codes are the

@@ -1,0 +1,59 @@
+# JustDNS starter block list: advertising and tracking.
+#
+# A small, deliberately conservative seed so the ad/tracker blocker works out
+# of the box with no network access. Only clear ad-serving and analytics hosts
+# are listed; entries match the domain and every sub-domain of it. The list
+# updater (a later milestone) fetches the large community feeds on top of this.
+#
+# Lines may be a bare domain, a hosts-file line (0.0.0.0 domain) or an
+# Adblock-style rule (||domain^). Blank lines and lines starting with # or !
+# are ignored.
+
+# Google advertising and analytics
+doubleclick.net
+googlesyndication.com
+googleadservices.com
+googletagservices.com
+google-analytics.com
+googletagmanager.com
+adservice.google.com
+2mdn.net
+
+# Large ad exchanges and SSPs
+adnxs.com
+adsrvr.org
+rubiconproject.com
+pubmatic.com
+openx.net
+casalemedia.com
+bidswitch.net
+contextweb.com
+smartadserver.com
+adform.net
+serving-sys.com
+advertising.com
+yieldmanager.com
+3lift.com
+
+# Networks and retargeting
+criteo.com
+criteo.net
+taboola.com
+outbrain.com
+amazon-adsystem.com
+scorecardresearch.com
+quantserve.com
+moatads.com
+adcolony.com
+applovin.com
+inmobi.com
+
+# Analytics and app attribution
+hotjar.com
+mixpanel.com
+fullstory.com
+demdex.net
+omtrdc.net
+appsflyer.com
+adjust.com
+branch.io

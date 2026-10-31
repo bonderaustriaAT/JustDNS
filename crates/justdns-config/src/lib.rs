@@ -99,9 +99,12 @@ pub enum ConfigError {
 struct Inner {
     path: PathBuf,
     settings: RwLock<Settings>,
-    /// Live IPv6 flag the DNS pipeline reads per query, kept in step with
-    /// `settings.ipv6` on every load and save.
+    /// Live flags the DNS path reads per query, kept in step with the matching
+    /// `settings` field on every load and save so a dashboard change takes
+    /// effect without a restart.
     ipv6: Arc<AtomicBool>,
+    block_ads_trackers: Arc<AtomicBool>,
+    block_malware: Arc<AtomicBool>,
 }
 
 /// A cheap, cloneable handle to the persistent configuration.
@@ -134,12 +137,13 @@ impl ConfigStore {
             }
         };
 
-        let ipv6 = Arc::new(AtomicBool::new(settings.ipv6));
         Ok(Self {
             inner: Arc::new(Inner {
                 path,
+                ipv6: Arc::new(AtomicBool::new(settings.ipv6)),
+                block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
+                block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
                 settings: RwLock::new(settings),
-                ipv6,
             }),
         })
     }
@@ -159,6 +163,12 @@ impl ConfigStore {
     /// report that it was not saved durably.
     pub fn set(&self, settings: Settings) -> Result<(), ConfigError> {
         self.inner.ipv6.store(settings.ipv6, Ordering::Relaxed);
+        self.inner
+            .block_ads_trackers
+            .store(settings.block_ads_trackers, Ordering::Relaxed);
+        self.inner
+            .block_malware
+            .store(settings.block_malware, Ordering::Relaxed);
         *self.inner.settings.write().expect("config lock poisoned") = settings.clone();
         write_atomic(&self.inner.path, &settings)
     }
@@ -166,6 +176,16 @@ impl ConfigStore {
     /// The shared IPv6 flag for the DNS pipeline to read per query.
     pub fn ipv6_flag(&self) -> Arc<AtomicBool> {
         self.inner.ipv6.clone()
+    }
+
+    /// The shared flag gating the advertising/tracking blocker.
+    pub fn block_ads_trackers_flag(&self) -> Arc<AtomicBool> {
+        self.inner.block_ads_trackers.clone()
+    }
+
+    /// The shared flag gating the malware/phishing blocker.
+    pub fn block_malware_flag(&self) -> Arc<AtomicBool> {
+        self.inner.block_malware.clone()
     }
 }
 
@@ -244,6 +264,28 @@ mod tests {
         );
         let reopened = ConfigStore::load(&path, Settings::default()).unwrap();
         assert_eq!(reopened.get(), next);
+    }
+
+    #[test]
+    fn set_publishes_block_flags_live() {
+        let (_dir, path) = temp_path();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let ads = store.block_ads_trackers_flag();
+        let malware = store.block_malware_flag();
+        // Both block categories default to on.
+        assert!(ads.load(Ordering::Relaxed));
+        assert!(malware.load(Ordering::Relaxed));
+
+        let mut next = store.get();
+        next.block_ads_trackers = false;
+        next.block_malware = false;
+        store.set(next).unwrap();
+
+        assert!(!ads.load(Ordering::Relaxed), "ads flag follows the setting");
+        assert!(
+            !malware.load(Ordering::Relaxed),
+            "malware flag follows the setting"
+        );
     }
 
     #[test]

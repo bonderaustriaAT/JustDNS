@@ -90,8 +90,7 @@ async fn put_settings(
     }
 }
 
-/// Totals for the dashboard. `blocked` is always zero until a filter exists;
-/// the field is present so the UI need not change when blocking lands.
+/// Totals for the dashboard.
 #[derive(Serialize)]
 struct StatsResponse {
     total: u64,
@@ -120,7 +119,7 @@ async fn stats(State(store): State<Store>) -> Json<StatsResponse> {
         local: stats.local,
         nxdomain: stats.nxdomain,
         servfail: stats.servfail,
-        blocked: 0,
+        blocked: stats.blocked,
         active_clients,
     })
 }

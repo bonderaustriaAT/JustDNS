@@ -33,7 +33,7 @@ export interface ServerSettings {
   cacheServeStale: boolean;
 }
 
-export type QuerySource = "cache" | "upstream" | "local";
+export type QuerySource = "cache" | "upstream" | "local" | "blocked";
 
 export interface QueryRow {
   at_ms: number;

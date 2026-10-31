@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::RecordType;
+use justdns_filter::Blocker;
 
 use crate::cache::{CacheKey, CachedEntry, CachedResponse, DnsCache};
 use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
@@ -54,6 +55,7 @@ pub struct Pipeline<R> {
     router: Router<R>,
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
+    blocker: Option<Arc<Blocker>>,
 }
 
 impl<R: Resolve + Sync> Pipeline<R> {
@@ -63,6 +65,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
             router,
             options,
             observer: None,
+            blocker: None,
         }
     }
 
@@ -70,6 +73,15 @@ impl<R: Resolve + Sync> Pipeline<R> {
     #[must_use]
     pub fn with_observer(mut self, observer: Arc<dyn QueryObserver>) -> Self {
         self.observer = Some(observer);
+        self
+    }
+
+    /// Filter queries through `blocker`: a blocked name is answered with
+    /// NXDOMAIN before any cache or upstream lookup. Without one, nothing is
+    /// blocked.
+    #[must_use]
+    pub fn with_blocker(mut self, blocker: Arc<Blocker>) -> Self {
+        self.blocker = Some(blocker);
         self
     }
 
@@ -110,6 +122,15 @@ impl<R: Resolve + Sync> Pipeline<R> {
 
     /// Fill `response` with the answer to `query` and report where it came from.
     async fn answer(&self, query: &Query, response: &mut Message) -> AnswerSource {
+        // Blocked names are refused with NXDOMAIN before any lookup, for every
+        // record type, so a blocked host resolves to nothing on IPv4 and IPv6.
+        if let Some(blocker) = &self.blocker {
+            if blocker.blocks(&query.name().to_string()) {
+                response.set_response_code(ResponseCode::NXDomain);
+                return AnswerSource::Blocked;
+            }
+        }
+
         // IPv6 off: answer AAAA with NODATA without touching cache or upstream.
         if query.query_type() == RecordType::AAAA
             && !self.options.ipv6_enabled.load(Ordering::Relaxed)
@@ -367,6 +388,43 @@ mod tests {
             .await;
 
         assert_eq!(response.answers().len(), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn blocked_name_is_nxdomain_without_lookup() {
+        use justdns_filter::{Blocker, DomainSet};
+
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let blocker = Arc::new(Blocker::new(
+            DomainSet::from_rules("ads.example\n"),
+            Arc::new(AtomicBool::new(true)),
+            DomainSet::new(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_blocker(blocker);
+
+        // A blocked name (and a sub-domain of it) is refused without a lookup.
+        let blocked = pipe
+            .handle(&request("sub.ads.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(blocked.response_code(), ResponseCode::NXDomain);
+        assert!(blocked.answers().is_empty());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "blocked name must not reach upstream"
+        );
+
+        // An allowed name still resolves normally.
+        let allowed = pipe
+            .handle(&request("example.com.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(allowed.response_code(), ResponseCode::NoError);
+        assert_eq!(allowed.answers().len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 

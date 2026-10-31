@@ -39,6 +39,7 @@ fn map_source(source: AnswerSource) -> QuerySource {
         AnswerSource::Cache => QuerySource::Cache,
         AnswerSource::Upstream => QuerySource::Upstream,
         AnswerSource::Local => QuerySource::Local,
+        AnswerSource::Blocked => QuerySource::Blocked,
     }
 }
 

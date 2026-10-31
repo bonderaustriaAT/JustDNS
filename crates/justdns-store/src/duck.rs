@@ -108,6 +108,7 @@ impl DuckStore {
                 COUNT(*) FILTER (WHERE source = 'cache'),
                 COUNT(*) FILTER (WHERE source = 'upstream'),
                 COUNT(*) FILTER (WHERE source = 'local'),
+                COUNT(*) FILTER (WHERE source = 'blocked'),
                 COUNT(*) FILTER (WHERE response_code = 3),
                 COUNT(*) FILTER (WHERE response_code = 2)
              FROM queries",
@@ -118,8 +119,9 @@ impl DuckStore {
                     cache_hits: count(row, 1)?,
                     upstream: count(row, 2)?,
                     local: count(row, 3)?,
-                    nxdomain: count(row, 4)?,
-                    servfail: count(row, 5)?,
+                    blocked: count(row, 4)?,
+                    nxdomain: count(row, 5)?,
+                    servfail: count(row, 6)?,
                 })
             },
         )?;

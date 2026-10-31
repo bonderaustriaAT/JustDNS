@@ -16,6 +16,7 @@ use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::Router;
 use justdns_dns::server::Server;
+use justdns_filter::Blocker;
 use justdns_store::Store;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -76,6 +77,19 @@ async fn main() -> ExitCode {
     };
     let observer: Arc<dyn QueryObserver> = Arc::new(StoreObserver::new(store.clone()));
 
+    // The blocking engine loads the compiled-in starter lists once; each
+    // category is gated by a live flag from the config store, so toggling it in
+    // the dashboard takes effect on the next query without a restart.
+    let blocker = Arc::new(Blocker::with_bundled_lists(
+        config_store.block_ads_trackers_flag(),
+        config_store.block_malware_flag(),
+    ));
+    info!(
+        ads = blocker.ads_len(),
+        malware = blocker.malware_len(),
+        "loaded block lists"
+    );
+
     let router = Router::from_config(&config.upstreams);
     let cache = DnsCache::new(config.cache_capacity);
     let pipeline = Pipeline::new(
@@ -85,7 +99,8 @@ async fn main() -> ExitCode {
             ipv6_enabled: config_store.ipv6_flag(),
         },
     )
-    .with_observer(observer);
+    .with_observer(observer)
+    .with_blocker(blocker);
     let server = Server::new(pipeline);
 
     tokio::select! {
