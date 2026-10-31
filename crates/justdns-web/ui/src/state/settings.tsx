@@ -18,6 +18,7 @@ export interface Settings {
   // Expert-only, mirrors the DNS core's options.
   upstreamMode: UpstreamMode;
   encryptUpstream: boolean;
+  ipv6: boolean;
   queryLog: boolean;
   logRetentionDays: number;
   cacheServeStale: boolean;
@@ -30,6 +31,7 @@ const DEFAULTS: Settings = {
   blockMalware: true,
   upstreamMode: "racing",
   encryptUpstream: true,
+  ipv6: false,
   queryLog: true,
   logRetentionDays: 7,
   cacheServeStale: false,

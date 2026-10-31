@@ -83,6 +83,7 @@ export function Settings() {
       base.push(
         { id: "upstream", title: "Upstream-Resolver" },
         { id: "verschluesselung", title: "Verschlüsselung" },
+        { id: "netzwerk", title: "Netzwerk" },
         { id: "cache", title: "Cache" },
         { id: "protokoll", title: "Protokollierung" },
       );
@@ -236,6 +237,27 @@ export function Settings() {
                     label="Upstream verschlüsseln"
                     checked={settings.encryptUpstream}
                     onChange={(v) => update("encryptUpstream", v)}
+                  />
+                }
+              />
+            </Category>
+          )}
+
+          {active === "netzwerk" && (
+            <Category
+              id="netzwerk"
+              title="Netzwerk"
+              description="Wie der Resolver mit IP-Protokollen umgeht."
+            >
+              <Row
+                label="IPv6 (AAAA-Antworten)"
+                description="AAAA-Anfragen beantworten. Standardmäßig aus, Geräte nutzen dann IPv4."
+                details="Ausgeschaltet beantwortet JustDNS AAAA-Anfragen mit einer leeren Antwort, sodass Geräte auf IPv4 ausweichen. Einschalten, wenn im Netzwerk echtes IPv6 genutzt werden soll — dann werden AAAA-Anfragen an die Resolver weitergereicht."
+                control={
+                  <Toggle
+                    label="IPv6 (AAAA-Antworten)"
+                    checked={settings.ipv6}
+                    onChange={(v) => update("ipv6", v)}
                   />
                 }
               />
