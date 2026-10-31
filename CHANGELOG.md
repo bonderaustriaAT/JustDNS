@@ -21,3 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Upstream router (`justdns-dns`): racing, fallback, load-balanced and
   rule-based selection across the upstream pool, with domain rules routed by
   longest matching suffix.
+- Query pipeline (`justdns-dns`): turns a request into a response via cache
+  lookup, upstream forwarding and cache store, with negative answers cached for
+  the SOA minimum TTL (capped) and upstream errors returned as SERVFAIL.
+- IPv6 toggle (`justdns-dns`): off by default, answering AAAA queries with an
+  empty NODATA response so clients fall back to IPv4; enable it to forward AAAA
+  upstream.
