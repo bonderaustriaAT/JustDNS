@@ -33,6 +33,26 @@ pub enum BlockCategory {
     Malware,
 }
 
+impl BlockCategory {
+    /// A stable machine key for the category, used by the API.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BlockCategory::AdsTrackers => "ads",
+            BlockCategory::Malware => "malware",
+        }
+    }
+}
+
+/// Why a name is on a block list: the category whose list holds it and the
+/// exact rule that matched. Returned by [`Blocker::explain`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockMatch {
+    /// The list the rule belongs to.
+    pub category: BlockCategory,
+    /// The list entry that matched — the queried name or a parent domain of it.
+    pub rule: String,
+}
+
 /// The blocking engine. Holds one domain set per category and a live flag for
 /// each; a category only blocks while its flag is on. Cheap to share: clone the
 /// [`Arc`] the binary wraps it in.
@@ -87,6 +107,27 @@ impl Blocker {
     /// Whether `name` is blocked under the current flags.
     pub fn blocks(&self, name: &str) -> bool {
         self.classify(name).is_some()
+    }
+
+    /// Explain why `name` is on a list, *ignoring* the on/off flags, so a query
+    /// already logged as blocked can be explained even if the category was since
+    /// switched off. Malware takes precedence over ads, matching [`classify`].
+    ///
+    /// [`classify`]: Self::classify
+    pub fn explain(&self, name: &str) -> Option<BlockMatch> {
+        if let Some(rule) = self.malware.matching(name) {
+            return Some(BlockMatch {
+                category: BlockCategory::Malware,
+                rule,
+            });
+        }
+        if let Some(rule) = self.ads.matching(name) {
+            return Some(BlockMatch {
+                category: BlockCategory::AdsTrackers,
+                rule,
+            });
+        }
+        None
     }
 
     /// Number of domains in the advertising/tracking list.
@@ -173,5 +214,20 @@ mod tests {
     fn disabled_blocker_allows_everything() {
         let b = Blocker::with_bundled_lists(flag(false), flag(false));
         assert!(!b.blocks("doubleclick.net"));
+    }
+
+    #[test]
+    fn explain_names_the_list_and_rule_regardless_of_flags() {
+        // Both flags off, yet explain still reports why a name is on a list.
+        let b = blocker(false, false);
+        let m = b.explain("sub.ads.example").expect("on the ads list");
+        assert_eq!(m.category, BlockCategory::AdsTrackers);
+        assert_eq!(m.category.as_str(), "ads");
+        assert_eq!(m.rule, "ads.example", "reports the parent rule that hit");
+
+        let m = b.explain("malware.example").expect("on the malware list");
+        assert_eq!(m.category, BlockCategory::Malware);
+
+        assert_eq!(b.explain("allowed.example"), None);
     }
 }

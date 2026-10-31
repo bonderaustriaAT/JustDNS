@@ -54,12 +54,19 @@ impl DomainSet {
     /// Whether `name` is blocked: true when the normalised name equals a stored
     /// domain or is a sub-domain of one.
     pub fn blocks(&self, name: &str) -> bool {
+        self.matching(name).is_some()
+    }
+
+    /// The stored rule that blocks `name` — the name itself or the parent domain
+    /// it is a sub-domain of — or `None` if nothing matches. This is the "why"
+    /// behind a block: for `ad.doubleclick.net` it returns `doubleclick.net`.
+    pub fn matching(&self, name: &str) -> Option<String> {
         if self.domains.is_empty() {
-            return false;
+            return None;
         }
         let name = normalise(name);
         if name.is_empty() {
-            return false;
+            return None;
         }
 
         // Check the full name, then each parent suffix: for `a.b.example.com`
@@ -67,12 +74,11 @@ impl DomainSet {
         let mut candidate = name.as_str();
         loop {
             if self.domains.contains(candidate) {
-                return true;
+                return Some(candidate.to_owned());
             }
-            match candidate.find('.') {
-                Some(dot) => candidate = &candidate[dot + 1..],
-                None => return false,
-            }
+            // No dot left means no parent suffix to try, so nothing matched.
+            let dot = candidate.find('.')?;
+            candidate = &candidate[dot + 1..];
         }
     }
 }
@@ -187,6 +193,22 @@ mod tests {
         let set = DomainSet::new();
         assert!(set.is_empty());
         assert!(!set.blocks("doubleclick.net"));
+        assert_eq!(set.matching("doubleclick.net"), None);
+    }
+
+    #[test]
+    fn matching_returns_the_rule_that_hit() {
+        let set = DomainSet::from_rules("doubleclick.net\n");
+        assert_eq!(
+            set.matching("doubleclick.net").as_deref(),
+            Some("doubleclick.net")
+        );
+        // A sub-domain reports the parent rule, not the queried name.
+        assert_eq!(
+            set.matching("ad.doubleclick.net").as_deref(),
+            Some("doubleclick.net")
+        );
+        assert_eq!(set.matching("example.com"), None);
     }
 
     #[test]

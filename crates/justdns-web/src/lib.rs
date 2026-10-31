@@ -11,6 +11,7 @@
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{FromRef, Query, State};
@@ -18,6 +19,7 @@ use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use justdns_config::{ConfigStore, Settings};
+use justdns_filter::Blocker;
 use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -35,12 +37,14 @@ const ACTIVE_CLIENT_WINDOW: usize = 1000;
 #[folder = "ui/dist/"]
 struct Assets;
 
-/// What the API handlers share: the query log and the editable configuration.
-/// Each handler extracts just the piece it needs via [`FromRef`].
+/// What the API handlers share: the query log, the editable configuration and
+/// the blocking engine (to explain why a name was blocked). Each handler
+/// extracts just the piece it needs via [`FromRef`].
 #[derive(Clone)]
 struct AppState {
     store: Store,
     config: ConfigStore,
+    blocker: Arc<Blocker>,
 }
 
 impl FromRef<AppState> for Store {
@@ -55,11 +59,30 @@ impl FromRef<AppState> for ConfigStore {
     }
 }
 
+impl FromRef<AppState> for Arc<Blocker> {
+    fn from_ref(state: &AppState) -> Self {
+        state.blocker.clone()
+    }
+}
+
 /// Bind `addr` and serve the API and embedded UI until the listener fails.
-pub async fn serve(addr: SocketAddr, store: Store, config: ConfigStore) -> std::io::Result<()> {
+pub async fn serve(
+    addr: SocketAddr,
+    store: Store,
+    config: ConfigStore,
+    blocker: Arc<Blocker>,
+) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
-    axum::serve(listener, router(AppState { store, config })).await
+    axum::serve(
+        listener,
+        router(AppState {
+            store,
+            config,
+            blocker,
+        }),
+    )
+    .await
 }
 
 fn router(state: AppState) -> Router {
@@ -68,8 +91,33 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
+        .route("/api/classify", get(classify))
         .fallback(static_handler)
         .with_state(state)
+}
+
+/// Explain why a name is on a block list: the category (`"ads"`/`"malware"`)
+/// and the rule that matched. Returns `null` when the name is on no list. Used
+/// by the log's detail view to show why an entry was blocked.
+#[derive(Serialize)]
+struct ClassifyResponse {
+    list: &'static str,
+    rule: String,
+}
+
+#[derive(Deserialize)]
+struct ClassifyParams {
+    name: String,
+}
+
+async fn classify(
+    State(blocker): State<Arc<Blocker>>,
+    Query(params): Query<ClassifyParams>,
+) -> Json<Option<ClassifyResponse>> {
+    Json(blocker.explain(&params.name).map(|hit| ClassifyResponse {
+        list: hit.category.as_str(),
+        rule: hit.rule,
+    }))
 }
 
 /// Return the current settings so the dashboard can show them.
@@ -193,6 +241,17 @@ mod tests {
     use justdns_store::QuerySource;
     use tower::ServiceExt;
 
+    /// A blocker with a tiny ads list, for the handler tests.
+    fn test_blocker() -> Arc<Blocker> {
+        use std::sync::atomic::AtomicBool;
+        Arc::new(Blocker::new(
+            justdns_filter::DomainSet::from_rules("doubleclick.net\n"),
+            Arc::new(AtomicBool::new(true)),
+            justdns_filter::DomainSet::new(),
+            Arc::new(AtomicBool::new(true)),
+        ))
+    }
+
     /// A throwaway config store backed by a unique temp file.
     fn test_config() -> ConfigStore {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -208,6 +267,7 @@ mod tests {
         router(AppState {
             store,
             config: test_config(),
+            blocker: test_blocker(),
         })
     }
 
@@ -313,6 +373,7 @@ mod tests {
         let app = router(AppState {
             store,
             config: test_config(),
+            blocker: test_blocker(),
         });
 
         let body = body_of(
@@ -350,6 +411,21 @@ mod tests {
             body.contains("\"logRetentionDays\":14"),
             "persisted: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn classify_reports_the_list_and_rule() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+
+        // A sub-domain of a listed ad domain: reports the category and the rule.
+        let body =
+            body_of(get(store.clone(), "/api/classify?name=ad.doubleclick.net.").await).await;
+        assert!(body.contains("\"list\":\"ads\""), "{body}");
+        assert!(body.contains("\"rule\":\"doubleclick.net\""), "{body}");
+
+        // A name on no list classifies to null.
+        let body = body_of(get(store, "/api/classify?name=example.com").await).await;
+        assert_eq!(body, "null", "{body}");
     }
 
     #[test]

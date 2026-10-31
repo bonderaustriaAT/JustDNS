@@ -100,7 +100,7 @@ async fn main() -> ExitCode {
         },
     )
     .with_observer(observer)
-    .with_blocker(blocker);
+    .with_blocker(blocker.clone());
     let server = Server::new(pipeline);
 
     tokio::select! {
@@ -110,7 +110,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
