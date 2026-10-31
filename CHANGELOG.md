@@ -10,3 +10,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Initial Cargo workspace: `justdns-dns`, `justdns-filter`, `justdns-store`,
   `justdns-web` and the `justdns` binary.
+- Web UI scaffold (React/Vite/TypeScript): overview with protection status and
+  blocked-query activity, and settings with an expert toggle that reveals the
+  technical options.
