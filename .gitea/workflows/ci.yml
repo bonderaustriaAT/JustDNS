@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Prebuilt CI image with Rust (+ rustfmt, clippy), g++ and git baked in, so
+    # the toolchain is not reinstalled on every run. Built from ci-base/Dockerfile
+    # and published to the registry.
+    container: 192.168.20.143:3000/bonderosa/ci-base:latest
     env:
       # DuckDB's bundled C++ sources compile into multi-gigabyte objects when
       # debug info is on, which overflows the runner's disk (and /tmp). Drop
@@ -17,17 +21,6 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install build tools
-        # The DuckDB query log is compiled from its bundled C++ sources.
-        run: |
-          apt-get update
-          apt-get install -y g++
-
-      - name: Install Rust
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component rustfmt,clippy
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       # Reuse compiled dependencies across runs. The first run pays the full
       # DuckDB C++ build; later runs restore it and recompile only what changed.
@@ -53,18 +46,24 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    # Same prebuilt CI image: Node 20 and npm are already installed, so the
+    # runtime is not downloaded on every run.
+    container: 192.168.20.143:3000/bonderosa/ci-base:latest
     defaults:
       run:
         working-directory: crates/justdns-web/ui
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Node
-        uses: actions/setup-node@v4
+      # The Node runtime lives in the image; cache only the npm download store
+      # so repeat installs skip the network.
+      - name: Cache npm
+        uses: actions/cache@v4
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: crates/justdns-web/ui/package-lock.json
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('crates/justdns-web/ui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
 
       - name: Install dependencies
         run: npm ci
