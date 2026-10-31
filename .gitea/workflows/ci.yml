@@ -11,6 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install build tools
+        # The DuckDB query log is compiled from its bundled C++ sources.
+        run: |
+          apt-get update
+          apt-get install -y g++
+
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component rustfmt,clippy
