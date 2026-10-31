@@ -14,10 +14,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{FromRef, Query, State};
+use axum::extract::{FromRef, Query, Request, State};
 use axum::http::{StatusCode, Uri, header};
+use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use justdns_auth::{SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
 use justdns_filter::Blocker;
 use justdns_store::{ActivityBucket, QueryEvent, Store};
@@ -25,6 +28,11 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
+
+/// Name of the cookie that carries the session token. HttpOnly and
+/// SameSite=Strict; not marked Secure because the dashboard is served over
+/// plain HTTP on the LAN, where a Secure cookie would never be sent back.
+const SESSION_COOKIE: &str = "justdns_session";
 
 /// Default number of recent queries returned by `/api/queries`.
 const DEFAULT_QUERY_LIMIT: usize = 50;
@@ -37,14 +45,17 @@ const ACTIVE_CLIENT_WINDOW: usize = 1000;
 #[folder = "ui/dist/"]
 struct Assets;
 
-/// What the API handlers share: the query log, the editable configuration and
-/// the blocking engine (to explain why a name was blocked). Each handler
-/// extracts just the piece it needs via [`FromRef`].
+/// What the API handlers share: the query log, the editable configuration, the
+/// blocking engine (to explain why a name was blocked), the account list and
+/// the live session table. Each handler extracts just the piece it needs via
+/// [`FromRef`].
 #[derive(Clone)]
 struct AppState {
     store: Store,
     config: ConfigStore,
     blocker: Arc<Blocker>,
+    users: UserStore,
+    sessions: SessionStore,
 }
 
 impl FromRef<AppState> for Store {
@@ -65,12 +76,26 @@ impl FromRef<AppState> for Arc<Blocker> {
     }
 }
 
+impl FromRef<AppState> for UserStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.users.clone()
+    }
+}
+
+impl FromRef<AppState> for SessionStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.sessions.clone()
+    }
+}
+
 /// Bind `addr` and serve the API and embedded UI until the listener fails.
 pub async fn serve(
     addr: SocketAddr,
     store: Store,
     config: ConfigStore,
     blocker: Arc<Blocker>,
+    users: UserStore,
+    sessions: SessionStore,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
@@ -80,20 +105,154 @@ pub async fn serve(
             store,
             config,
             blocker,
+            users,
+            sessions,
         }),
     )
     .await
 }
 
 fn router(state: AppState) -> Router {
-    Router::new()
+    // The data API sits behind a login guard. The auth endpoints and the static
+    // UI (so the login screen itself can load) stay public.
+    let protected = Router::new()
         .route("/api/stats", get(stats))
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
         .route("/api/classify", get(classify))
-        .fallback(static_handler)
-        .with_state(state)
+        .layer(from_fn_with_state(state.clone(), require_auth));
+
+    let public = Router::new()
+        .route("/api/auth/state", get(auth_state))
+        .route("/api/auth/setup", post(auth_setup))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/logout", post(auth_logout))
+        .fallback(static_handler);
+
+    protected.merge(public).with_state(state)
+}
+
+/// Guard the data API: let a request through only when its session cookie names
+/// a live session, otherwise answer 401 so the UI redirects to the login page.
+async fn require_auth(
+    State(sessions): State<SessionStore>,
+    jar: CookieJar,
+    request: Request,
+    next: Next,
+) -> Response {
+    match jar.get(SESSION_COOKIE) {
+        Some(cookie) if sessions.username_for(cookie.value()).is_some() => next.run(request).await,
+        _ => StatusCode::UNAUTHORIZED.into_response(),
+    }
+}
+
+/// Build the session cookie carrying `token`. Short-lived cookies are session
+/// cookies in the browser; the server-side expiry is what really bounds a login.
+fn session_cookie(token: String) -> Cookie<'static> {
+    let mut cookie = Cookie::new(SESSION_COOKIE, token);
+    cookie.set_http_only(true);
+    cookie.set_same_site(SameSite::Strict);
+    cookie.set_path("/");
+    cookie
+}
+
+/// Whether the box has an admin yet, and who (if anyone) the caller is logged in
+/// as. The UI reads this on load to choose between first-run setup, the login
+/// screen and the dashboard.
+#[derive(Serialize)]
+struct AuthState {
+    configured: bool,
+    authenticated: bool,
+    username: Option<String>,
+}
+
+async fn auth_state(
+    State(users): State<UserStore>,
+    State(sessions): State<SessionStore>,
+    jar: CookieJar,
+) -> Json<AuthState> {
+    let username = jar
+        .get(SESSION_COOKIE)
+        .and_then(|cookie| sessions.username_for(cookie.value()));
+    Json(AuthState {
+        configured: users.is_configured(),
+        authenticated: username.is_some(),
+        username,
+    })
+}
+
+#[derive(Deserialize)]
+struct Credentials {
+    username: String,
+    password: String,
+}
+
+/// What a successful login or setup returns.
+#[derive(Serialize)]
+struct SessionResponse {
+    username: String,
+}
+
+/// Create the first administrator on an unconfigured box and log them straight
+/// in. Refused once an admin exists, so this cannot be used to take over.
+async fn auth_setup(
+    State(users): State<UserStore>,
+    State(sessions): State<SessionStore>,
+    jar: CookieJar,
+    Json(creds): Json<Credentials>,
+) -> Result<(CookieJar, Json<SessionResponse>), (StatusCode, String)> {
+    use justdns_auth::AuthError;
+    match users.create_admin(&creds.username, &creds.password) {
+        Ok(()) => {
+            let token = sessions.create(&creds.username);
+            Ok((
+                jar.add(session_cookie(token)),
+                Json(SessionResponse {
+                    username: creds.username,
+                }),
+            ))
+        }
+        Err(AuthError::AlreadyConfigured) => {
+            Err((StatusCode::CONFLICT, "already configured".into()))
+        }
+        Err(AuthError::Invalid(message)) => Err((StatusCode::BAD_REQUEST, message)),
+        Err(error) => Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
+    }
+}
+
+/// Check a username and password; on success start a session and set the cookie.
+async fn auth_login(
+    State(users): State<UserStore>,
+    State(sessions): State<SessionStore>,
+    jar: CookieJar,
+    Json(creds): Json<Credentials>,
+) -> Result<(CookieJar, Json<SessionResponse>), StatusCode> {
+    match users.verify(&creds.username, &creds.password) {
+        Some(username) => {
+            let token = sessions.create(&username);
+            Ok((
+                jar.add(session_cookie(token)),
+                Json(SessionResponse { username }),
+            ))
+        }
+        None => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+/// End the current session and clear the cookie. Always succeeds, even without a
+/// valid session, so a stale cookie can always be cleared.
+async fn auth_logout(
+    State(sessions): State<SessionStore>,
+    jar: CookieJar,
+) -> (CookieJar, StatusCode) {
+    if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        sessions.remove(cookie.value());
+    }
+    (
+        jar.remove(Cookie::from(SESSION_COOKIE)),
+        StatusCode::NO_CONTENT,
+    )
 }
 
 /// Explain why a name is on a block list: the category (`"ads"`/`"malware"`)
@@ -263,12 +422,35 @@ mod tests {
         ConfigStore::load(path, Settings::default()).unwrap()
     }
 
-    fn app(store: Store) -> Router {
-        router(AppState {
+    /// A throwaway user store backed by a unique temp file (no admin yet).
+    fn test_users() -> UserStore {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "justdns-web-auth-{}-{}.json",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        UserStore::load(path).unwrap()
+    }
+
+    fn test_state(store: Store) -> AppState {
+        AppState {
             store,
             config: test_config(),
             blocker: test_blocker(),
-        })
+            users: test_users(),
+            sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
+        }
+    }
+
+    /// A router whose data API is already unlocked, plus the `Cookie` header
+    /// value that unlocks it: the state carries an admin and a live session for
+    /// them. Handler tests that predate the login guard attach this cookie.
+    fn app_and_cookie(store: Store) -> (Router, String) {
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let token = state.sessions.create("admin");
+        (router(state.clone()), format!("{SESSION_COOKIE}={token}"))
     }
 
     fn sample(client: Ipv4Addr, name: &str, source: QuerySource) -> QueryEvent {
@@ -290,10 +472,15 @@ mod tests {
     }
 
     async fn get(store: Store, path: &str) -> Response {
-        app(store)
-            .oneshot(Request::get(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap()
+        let (app, cookie) = app_and_cookie(store);
+        app.oneshot(
+            Request::get(path)
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -369,16 +556,17 @@ mod tests {
     async fn settings_round_trip() {
         let (store, _writer) = Store::in_memory(100).unwrap();
         // Clone the router (not rebuild it) so PUT and the later GET share one
-        // config handle.
-        let app = router(AppState {
-            store,
-            config: test_config(),
-            blocker: test_blocker(),
-        });
+        // config handle, and reuse one session cookie across the requests.
+        let (app, cookie) = app_and_cookie(store);
 
         let body = body_of(
             app.clone()
-                .oneshot(Request::get("/api/settings").body(Body::empty()).unwrap())
+                .oneshot(
+                    Request::get("/api/settings")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
                 .await
                 .unwrap(),
         )
@@ -387,6 +575,7 @@ mod tests {
 
         let put = Request::put("/api/settings")
             .header("content-type", "application/json")
+            .header("cookie", &cookie)
             .body(Body::from(
                 r#"{"blockAdsTrackers":true,"safeSearch":false,"blockMalware":true,"upstreamMode":"fallback","encryptUpstream":true,"ipv6":true,"queryLog":true,"logRetentionDays":14,"cacheServeStale":false}"#,
             ))
@@ -401,9 +590,14 @@ mod tests {
         );
 
         let body = body_of(
-            app.oneshot(Request::get("/api/settings").body(Body::empty()).unwrap())
-                .await
-                .unwrap(),
+            app.oneshot(
+                Request::get("/api/settings")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
         )
         .await;
         assert!(body.contains("\"ipv6\":true"), "persisted: {body}");
@@ -426,6 +620,174 @@ mod tests {
         // A name on no list classifies to null.
         let body = body_of(get(store, "/api/classify?name=example.com").await).await;
         assert_eq!(body, "null", "{body}");
+    }
+
+    /// The `Set-Cookie` value a response sends for the session cookie, if any.
+    fn set_cookie(response: &Response) -> Option<String> {
+        response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .find(|value| value.starts_with(SESSION_COOKIE))
+            .map(|value| value.to_owned())
+    }
+
+    #[tokio::test]
+    async fn data_api_is_locked_without_a_session() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        // An admin exists, but this request carries no cookie.
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let app = router(state);
+
+        let res = app
+            .oneshot(Request::get("/api/stats").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn setup_creates_admin_logs_in_then_guards_the_api() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let app = router(test_state(store));
+
+        // Before setup: unconfigured and unauthenticated.
+        let body = body_of(
+            app.clone()
+                .oneshot(Request::get("/api/auth/state").body(Body::empty()).unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"configured\":false"), "{body}");
+
+        // Setup succeeds and hands back a session cookie.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/setup")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"admin","password":"hunter2hunter2"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let cookie = set_cookie(&res).expect("setup sets a session cookie");
+        assert!(cookie.contains("HttpOnly"), "{cookie}");
+        assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+
+        // That cookie unlocks the data API.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/stats")
+                    .header("cookie", cookie.split(';').next().unwrap())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // A second setup attempt is refused now that an admin exists.
+        let res = app
+            .oneshot(
+                Request::post("/api/auth/setup")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"eve","password":"hunter2hunter2"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn login_rejects_bad_credentials_and_accepts_good_ones() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let app = router(state);
+
+        // Wrong password: 401, no cookie.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"username":"admin","password":"wrong"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert!(set_cookie(&res).is_none());
+
+        // Right password: 200 with a session cookie.
+        let res = app
+            .oneshot(
+                Request::post("/api/auth/login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"admin","password":"hunter2hunter2"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(set_cookie(&res).is_some());
+    }
+
+    #[tokio::test]
+    async fn logout_ends_the_session() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+        let bare = cookie.split(';').next().unwrap().to_owned();
+
+        // Logged in: the API is reachable.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/stats")
+                    .header("cookie", &bare)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Log out, then the same cookie no longer unlocks the API.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/auth/logout")
+                    .header("cookie", &bare)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let res = app
+            .oneshot(
+                Request::get("/api/stats")
+                    .header("cookie", &bare)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]

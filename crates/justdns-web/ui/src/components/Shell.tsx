@@ -1,9 +1,12 @@
 import { NavLink } from "react-router-dom";
 import type { ReactNode } from "react";
 
+import { useAuth } from "../state/auth";
 import styles from "./Shell.module.css";
 
 export function Shell({ children }: { children: ReactNode }) {
+  const { username, logout } = useAuth();
+
   return (
     <div className={styles.shell}>
       <header className={styles.bar}>
@@ -33,6 +36,12 @@ export function Shell({ children }: { children: ReactNode }) {
               Einstellungen
             </NavLink>
           </nav>
+          <div className={styles.account}>
+            {username && <span className={styles.user}>{username}</span>}
+            <button type="button" className={styles.logout} onClick={() => logout()}>
+              Abmelden
+            </button>
+          </div>
         </div>
       </header>
       <main className={styles.main}>{children}</main>

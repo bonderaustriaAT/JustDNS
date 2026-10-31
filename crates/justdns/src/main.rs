@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use justdns_auth::{DEFAULT_SESSION_TTL, SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::observer::QueryObserver;
@@ -68,6 +69,19 @@ async fn main() -> ExitCode {
         }
     };
 
+    // The account list lives next to the config. On first run it is empty, and
+    // the web UI's setup screen creates the single administrator; logins are
+    // tracked in memory, so a restart simply asks for the password again.
+    let users = match UserStore::load(&config.auth_path) {
+        Ok(users) => users,
+        Err(error) => {
+            error!(%error, "cannot load the account store");
+            return ExitCode::FAILURE;
+        }
+    };
+    info!(configured = users.is_configured(), "loaded account store");
+    let sessions = SessionStore::new(DEFAULT_SESSION_TTL);
+
     let (store, writer) = match Store::open(&config.db_path, RECENT_CAPACITY) {
         Ok(pair) => pair,
         Err(error) => {
@@ -110,7 +124,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), users.clone(), sessions.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

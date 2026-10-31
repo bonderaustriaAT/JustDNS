@@ -54,10 +54,41 @@ export interface ClassifyResult {
   rule: string;
 }
 
+/** Whether an admin exists yet and who, if anyone, the caller is logged in as. */
+export interface AuthState {
+  configured: boolean;
+  authenticated: boolean;
+  username: string | null;
+}
+
+/** An API call that failed, carrying the HTTP status so callers can branch. */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// A session can expire while the dashboard is open. Any guarded call that comes
+// back 401 notifies this handler, so the app can drop back to the login screen
+// instead of leaving broken widgets on the page.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+function failed(path: string, status: number): ApiError {
+  if (status === 401) onUnauthorized?.();
+  return new ApiError(status, `${path} antwortete mit ${status}`);
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
   if (!response.ok) {
-    throw new Error(`${path} antwortete mit ${response.status}`);
+    throw failed(path, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -70,9 +101,24 @@ async function putJson<T>(path: string, body: T, signal?: AbortSignal): Promise<
     signal,
   });
   if (!response.ok) {
-    throw new Error(`${path} antwortete mit ${response.status}`);
+    throw failed(path, response.status);
   }
   return response.json() as Promise<T>;
+}
+
+/** POST JSON without expecting a 401 to bounce the user (used by the auth
+ * endpoints themselves, where a 401 means "wrong password", not "logged out"). */
+async function postJson<Res>(path: string, body: unknown): Promise<Res> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `${path} antwortete mit ${response.status}`);
+  }
+  // 204 No Content (logout) has no body to parse.
+  return (response.status === 204 ? undefined : await response.json()) as Res;
 }
 
 export const api = {
@@ -90,4 +136,10 @@ export const api = {
     const params = new URLSearchParams({ name });
     return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);
   },
+  authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
+  setup: (username: string, password: string) =>
+    postJson<{ username: string }>("/api/auth/setup", { username, password }),
+  login: (username: string, password: string) =>
+    postJson<{ username: string }>("/api/auth/login", { username, password }),
+  logout: () => postJson<void>("/api/auth/logout", {}),
 };

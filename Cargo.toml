@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/justdns-auth",
     "crates/justdns-config",
     "crates/justdns-dns",
     "crates/justdns-filter",
