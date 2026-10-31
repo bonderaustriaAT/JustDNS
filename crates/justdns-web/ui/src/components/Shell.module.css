@@ -3,17 +3,22 @@
 }
 
 .bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
+  padding-block: var(--space-3);
   border-block-end: 1px solid var(--line);
   position: sticky;
   inset-block-start: 0;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(8px);
   z-index: 10;
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  max-inline-size: 960px;
+  margin-inline: auto;
+  padding-inline: var(--space-4);
 }
 
 .brand {

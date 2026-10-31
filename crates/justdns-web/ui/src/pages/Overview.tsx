@@ -1,4 +1,4 @@
-import { Sparkline } from "../components/Sparkline";
+import { ActivityChart } from "../components/ActivityChart";
 import { blockRate, overview } from "../lib/mockData";
 import styles from "./Overview.module.css";
 
@@ -24,10 +24,7 @@ export function Overview() {
         <p className={styles.caption}>Anfragen heute blockiert</p>
       </section>
 
-      <section className={styles.activity} aria-label="Aktivität der letzten 24 Stunden">
-        <Sparkline values={data.activity} />
-        <p className={styles.activityNote}>Anfragen pro Stunde, letzte 24 Stunden</p>
-      </section>
+      <ActivityChart values={data.activity} />
 
       <dl className={styles.stats}>
         <div className={styles.stat}>
