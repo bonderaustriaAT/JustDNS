@@ -27,3 +27,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - IPv6 toggle (`justdns-dns`): off by default, answering AAAA queries with an
   empty NODATA response so clients fall back to IPv4; enable it to forward AAAA
   upstream.
+- UDP and TCP listeners on port 53 (`justdns-dns`): oversized UDP replies are
+  truncated so clients retry over TCP; TCP messages use the two-byte length
+  prefix.
+- `justdns` binary: reads listen address, IPv6 toggle, cache size and upstreams
+  from the environment, then serves. Stops cleanly on SIGTERM or Ctrl-C.
+- Container image: multi-stage `Dockerfile`, `.dockerignore` and `docs/docker.md`
+  with build, run and `dig` instructions.
