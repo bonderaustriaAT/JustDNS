@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Toggle } from "../components/Toggle";
 import { LOG_LIMIT, useLogs } from "../lib/useLogs";
+import { LogDetail } from "./LogDetail";
 import styles from "./Logs.module.css";
 
 /** Wait this long after the last keystroke before filtering, so typing a word
@@ -12,6 +13,7 @@ export function Logs() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setTimeout(() => setQuery(input), SEARCH_DEBOUNCE_MS);
@@ -69,23 +71,42 @@ export function Logs() {
               <span>Domain</span>
               <span className={styles.detailsHead}>Details</span>
             </li>
-            {rows.map((row, index) => (
-              <li key={`${row.at_ms}-${index}`} className={styles.row}>
-                <span className={styles.time}>{row.time}</span>
-                <span className={styles.client}>{row.client}</span>
-                <span className={styles.domain} title={row.name}>
-                  {row.name}
-                </span>
-                <span className={styles.meta}>
-                  <span className={styles.type}>{row.type}</span>
-                  <span className={styles.source} data-source={row.source}>
-                    {row.sourceText}
-                  </span>
-                  {row.isError && <span className={styles.rcode}>{row.rcode}</span>}
-                  <span className={styles.duration}>{row.durationMs}&thinsp;ms</span>
-                </span>
-              </li>
-            ))}
+            {rows.map((row, index) => {
+              const key = `${row.at_ms}-${index}`;
+              const open = openKey === key;
+              return (
+                <li key={key} className={styles.item} data-blocked={row.isBlocked || undefined}>
+                  <button
+                    type="button"
+                    className={styles.row}
+                    aria-expanded={open}
+                    onClick={() => setOpenKey(open ? null : key)}
+                  >
+                    <span className={styles.time}>{row.time}</span>
+                    <span className={styles.client}>{row.client}</span>
+                    <span className={styles.domain} title={row.name}>
+                      {row.name}
+                    </span>
+                    <span className={styles.meta}>
+                      <span className={styles.type}>{row.type}</span>
+                      <span className={styles.source} data-source={row.source}>
+                        {row.sourceText}
+                      </span>
+                      {row.rcodeTone !== "none" && (
+                        <span className={styles.rcode} data-tone={row.rcodeTone}>
+                          {row.rcode}
+                        </span>
+                      )}
+                      <span className={styles.duration}>{row.durationMs}&thinsp;ms</span>
+                      <span className={styles.chevron} data-open={open || undefined} aria-hidden="true">
+                        ›
+                      </span>
+                    </span>
+                  </button>
+                  {open && <LogDetail row={row} />}
+                </li>
+              );
+            })}
           </ol>
         </>
       )}

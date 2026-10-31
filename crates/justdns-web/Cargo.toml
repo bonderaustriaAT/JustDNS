@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 axum = "0.8.4"
 justdns-config = { path = "../justdns-config" }
+justdns-filter = { path = "../justdns-filter" }
 justdns-store = { path = "../justdns-store" }
 rust-embed = { version = "8.7.2", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }

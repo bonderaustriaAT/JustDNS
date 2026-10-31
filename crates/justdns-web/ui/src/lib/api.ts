@@ -46,6 +46,14 @@ export interface QueryRow {
   answers: number;
 }
 
+/** Which list a name is on and the rule that matched, or null if on no list. */
+export type BlockList = "ads" | "malware";
+
+export interface ClassifyResult {
+  list: BlockList;
+  rule: string;
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
   if (!response.ok) {
@@ -78,4 +86,8 @@ export const api = {
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/api/settings", signal),
   saveSettings: (settings: ServerSettings, signal?: AbortSignal) =>
     putJson<ServerSettings>("/api/settings", settings, signal),
+  classify: (name: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ name });
+    return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);
+  },
 };
