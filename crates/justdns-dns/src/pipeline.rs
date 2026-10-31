@@ -9,6 +9,7 @@
 
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
@@ -23,11 +24,29 @@ const DEFAULT_NEGATIVE_TTL: u64 = 60;
 /// Upper bound on any negative-cache TTL (seconds).
 const MAX_NEGATIVE_TTL: u64 = 3600;
 
-#[derive(Clone, Copy, Debug, Default)]
+/// Options the pipeline reads while handling a query. `ipv6_enabled` is a
+/// shared flag rather than a plain bool so the config store can flip it at
+/// runtime and the next query sees the change without a restart.
+#[derive(Clone, Debug)]
 pub struct PipelineOptions {
-    /// Whether to answer AAAA queries. Off by default (`false`), so IPv6 names
-    /// resolve to nothing and clients fall back to IPv4.
-    pub ipv6_enabled: bool,
+    /// Whether to answer AAAA queries. Off by default, so IPv6 names resolve to
+    /// nothing and clients fall back to IPv4.
+    pub ipv6_enabled: Arc<AtomicBool>,
+}
+
+impl PipelineOptions {
+    /// Build options with a fresh IPv6 flag set to `enabled`.
+    pub fn with_ipv6(enabled: bool) -> Self {
+        Self {
+            ipv6_enabled: Arc::new(AtomicBool::new(enabled)),
+        }
+    }
+}
+
+impl Default for PipelineOptions {
+    fn default() -> Self {
+        Self::with_ipv6(false)
+    }
 }
 
 pub struct Pipeline<R> {
@@ -92,7 +111,9 @@ impl<R: Resolve + Sync> Pipeline<R> {
     /// Fill `response` with the answer to `query` and report where it came from.
     async fn answer(&self, query: &Query, response: &mut Message) -> AnswerSource {
         // IPv6 off: answer AAAA with NODATA without touching cache or upstream.
-        if query.query_type() == RecordType::AAAA && !self.options.ipv6_enabled {
+        if query.query_type() == RecordType::AAAA
+            && !self.options.ipv6_enabled.load(Ordering::Relaxed)
+        {
             response.set_response_code(ResponseCode::NoError);
             return AnswerSource::Local;
         }
@@ -320,9 +341,7 @@ mod tests {
     async fn aaaa_is_nodata_when_ipv6_disabled() {
         let (pipe, calls) = pipeline(
             Reply::Aaaa(Ipv6Addr::LOCALHOST),
-            PipelineOptions {
-                ipv6_enabled: false,
-            },
+            PipelineOptions::with_ipv6(false),
         );
         let response = pipe
             .handle(&request("example.com.", RecordType::AAAA), CLIENT)
@@ -341,7 +360,7 @@ mod tests {
     async fn aaaa_is_forwarded_when_ipv6_enabled() {
         let (pipe, calls) = pipeline(
             Reply::Aaaa(Ipv6Addr::new(0x2606, 0x2800, 0, 0, 0, 0, 0, 1)),
-            PipelineOptions { ipv6_enabled: true },
+            PipelineOptions::with_ipv6(true),
         );
         let response = pipe
             .handle(&request("example.com.", RecordType::AAAA), CLIENT)

@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use justdns_config::{ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
@@ -46,9 +47,25 @@ async fn main() -> ExitCode {
         web = %config.web_listen,
         ipv6 = config.ipv6_enabled,
         db = %config.db_path.display(),
+        config = %config.config_path.display(),
         upstreams = config.upstreams.upstreams.len(),
         "starting JustDNS"
     );
+
+    // The environment seeds the editable settings on first run; afterwards the
+    // config file is the source of truth. IPv6 is published as a live flag the
+    // pipeline reads per query.
+    let seed = Settings {
+        ipv6: config.ipv6_enabled,
+        ..Settings::default()
+    };
+    let config_store = match ConfigStore::load(&config.config_path, seed) {
+        Ok(store) => store,
+        Err(error) => {
+            error!(%error, "cannot load the configuration");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let (store, writer) = match Store::open(&config.db_path, RECENT_CAPACITY) {
         Ok(pair) => pair,
@@ -65,7 +82,7 @@ async fn main() -> ExitCode {
         cache,
         router,
         PipelineOptions {
-            ipv6_enabled: config.ipv6_enabled,
+            ipv6_enabled: config_store.ipv6_flag(),
         },
     )
     .with_observer(observer);
@@ -78,7 +95,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

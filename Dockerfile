@@ -36,7 +36,8 @@ COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
 ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_WEB_LISTEN=0.0.0.0:8080 \
     JUSTDNS_IPV6=false \
-    JUSTDNS_DB_PATH=/data/queries.duckdb
+    JUSTDNS_DB_PATH=/data/queries.duckdb \
+    JUSTDNS_CONFIG_PATH=/data/config.json
 
 # The query log persists here; mount a volume to keep it across restarts.
 VOLUME /data

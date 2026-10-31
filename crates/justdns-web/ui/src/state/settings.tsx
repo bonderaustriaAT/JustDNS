@@ -4,28 +4,25 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 
-export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
+import { api, type ServerSettings, type UpstreamMode } from "../lib/api";
 
-export interface Settings {
+export type { UpstreamMode };
+
+/// The full settings the UI works with: the server-persisted fields plus
+/// `expertMode`, a per-browser preference about what the UI reveals that the
+/// server has no reason to know about.
+export interface Settings extends ServerSettings {
   expertMode: boolean;
-  blockAdsTrackers: boolean;
-  safeSearch: boolean;
-  blockMalware: boolean;
-  // Expert-only, mirrors the DNS core's options.
-  upstreamMode: UpstreamMode;
-  encryptUpstream: boolean;
-  ipv6: boolean;
-  queryLog: boolean;
-  logRetentionDays: number;
-  cacheServeStale: boolean;
 }
 
-const DEFAULTS: Settings = {
-  expertMode: false,
+/// Server defaults, mirroring the Rust `Settings::default`. Shown until the
+/// first load returns, and as the fallback if the API is unreachable.
+const SERVER_DEFAULTS: ServerSettings = {
   blockAdsTrackers: true,
   safeSearch: false,
   blockMalware: true,
@@ -37,7 +34,35 @@ const DEFAULTS: Settings = {
   cacheServeStale: false,
 };
 
-const STORAGE_KEY = "justdns.settings";
+const EXPERT_KEY = "justdns.expertMode";
+const SAVE_DEBOUNCE_MS = 400;
+
+const SERVER_KEYS: (keyof ServerSettings)[] = [
+  "blockAdsTrackers",
+  "safeSearch",
+  "blockMalware",
+  "upstreamMode",
+  "encryptUpstream",
+  "ipv6",
+  "queryLog",
+  "logRetentionDays",
+  "cacheServeStale",
+];
+
+function toServer(settings: Settings): ServerSettings {
+  return SERVER_KEYS.reduce((acc, key) => {
+    (acc[key] as ServerSettings[typeof key]) = settings[key];
+    return acc;
+  }, {} as ServerSettings);
+}
+
+function loadExpertMode(): boolean {
+  try {
+    return localStorage.getItem(EXPERT_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 interface SettingsContextValue {
   settings: Settings;
@@ -46,30 +71,56 @@ interface SettingsContextValue {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
-function load(): Settings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULTS;
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) };
-  } catch {
-    return DEFAULTS;
-  }
-}
-
 export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<Settings>(load);
+  const [settings, setSettings] = useState<Settings>(() => ({
+    ...SERVER_DEFAULTS,
+    expertMode: loadExpertMode(),
+  }));
 
+  // Load the server-persisted settings once; keep the local expertMode.
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    } catch {
-      // A browser that refuses storage still gets a working session.
-    }
-  }, [settings]);
-
-  const update = useCallback<SettingsContextValue["update"]>((key, value) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
+    const controller = new AbortController();
+    api
+      .settings(controller.signal)
+      .then((server) => setSettings((prev) => ({ ...prev, ...server })))
+      .catch(() => {
+        // Unreachable API: keep the defaults so the page still works.
+      });
+    return () => controller.abort();
   }, []);
+
+  const saveTimer = useRef<number | undefined>(undefined);
+
+  const scheduleSave = useCallback((next: Settings) => {
+    if (saveTimer.current !== undefined) {
+      window.clearTimeout(saveTimer.current);
+    }
+    saveTimer.current = window.setTimeout(() => {
+      api.saveSettings(toServer(next)).catch(() => {
+        // A failed save leaves the optimistic UI in place; the next change
+        // retries. Slice 1 keeps this quiet rather than surfacing an error.
+      });
+    }, SAVE_DEBOUNCE_MS);
+  }, []);
+
+  const update = useCallback<SettingsContextValue["update"]>(
+    (key, value) => {
+      setSettings((prev) => {
+        const next = { ...prev, [key]: value };
+        if (key === "expertMode") {
+          try {
+            localStorage.setItem(EXPERT_KEY, value ? "true" : "false");
+          } catch {
+            // A browser that refuses storage still gets a working session.
+          }
+        } else {
+          scheduleSave(next);
+        }
+        return next;
+      });
+    },
+    [scheduleSave],
+  );
 
   const value = useMemo(() => ({ settings, update }), [settings, update]);
 
