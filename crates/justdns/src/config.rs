@@ -18,6 +18,7 @@ const DEFAULT_LISTEN: &str = "0.0.0.0:53";
 const DEFAULT_WEB_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 const DEFAULT_DB_PATH: &str = "queries.duckdb";
+const DEFAULT_CONFIG_PATH: &str = "config.json";
 
 #[derive(Debug)]
 pub struct Config {
@@ -26,6 +27,9 @@ pub struct Config {
     pub ipv6_enabled: bool,
     pub cache_capacity: u64,
     pub db_path: PathBuf,
+    /// Where the editable runtime configuration is stored. Env values seed it
+    /// on first run; afterwards this file is the source of truth.
+    pub config_path: PathBuf,
     pub upstreams: UpstreamConfig,
 }
 
@@ -81,6 +85,10 @@ impl Config {
             read_var("JUSTDNS_DB_PATH")?.unwrap_or_else(|| DEFAULT_DB_PATH.to_owned()),
         );
 
+        let config_path = PathBuf::from(
+            read_var("JUSTDNS_CONFIG_PATH")?.unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_owned()),
+        );
+
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
             None => UpstreamConfig::eu_defaults(),
@@ -92,6 +100,7 @@ impl Config {
             ipv6_enabled,
             cache_capacity,
             db_path,
+            config_path,
             upstreams,
         })
     }

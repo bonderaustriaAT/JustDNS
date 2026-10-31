@@ -13,10 +13,11 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use axum::Router;
-use axum::extract::{Query, State};
+use axum::extract::{FromRef, Query, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
+use justdns_config::{ConfigStore, Settings};
 use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -34,20 +35,59 @@ const ACTIVE_CLIENT_WINDOW: usize = 1000;
 #[folder = "ui/dist/"]
 struct Assets;
 
-/// Bind `addr` and serve the API and embedded UI until the listener fails.
-pub async fn serve(addr: SocketAddr, store: Store) -> std::io::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    info!(%addr, "serving web UI and API");
-    axum::serve(listener, router(store)).await
+/// What the API handlers share: the query log and the editable configuration.
+/// Each handler extracts just the piece it needs via [`FromRef`].
+#[derive(Clone)]
+struct AppState {
+    store: Store,
+    config: ConfigStore,
 }
 
-fn router(store: Store) -> Router {
+impl FromRef<AppState> for Store {
+    fn from_ref(state: &AppState) -> Self {
+        state.store.clone()
+    }
+}
+
+impl FromRef<AppState> for ConfigStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.config.clone()
+    }
+}
+
+/// Bind `addr` and serve the API and embedded UI until the listener fails.
+pub async fn serve(addr: SocketAddr, store: Store, config: ConfigStore) -> std::io::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    info!(%addr, "serving web UI and API");
+    axum::serve(listener, router(AppState { store, config })).await
+}
+
+fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/stats", get(stats))
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
+        .route("/api/settings", get(get_settings).put(put_settings))
         .fallback(static_handler)
-        .with_state(store)
+        .with_state(state)
+}
+
+/// Return the current settings so the dashboard can show them.
+async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
+    Json(config.get())
+}
+
+/// Replace the settings. The new values take effect at once (IPv6 live); a
+/// failure to write them to disk is reported so the UI knows the change was
+/// not saved durably.
+async fn put_settings(
+    State(config): State<ConfigStore>,
+    Json(settings): Json<Settings>,
+) -> Result<Json<Settings>, (StatusCode, String)> {
+    match config.set(settings) {
+        Ok(()) => Ok(Json(config.get())),
+        Err(error) => Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
+    }
 }
 
 /// Totals for the dashboard. `blocked` is always zero until a filter exists;
@@ -147,11 +187,30 @@ fn last_segment_has_extension(path: &str) -> bool {
 mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use justdns_store::QuerySource;
     use tower::ServiceExt;
+
+    /// A throwaway config store backed by a unique temp file.
+    fn test_config() -> ConfigStore {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "justdns-web-config-{}-{}.json",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        ConfigStore::load(path, Settings::default()).unwrap()
+    }
+
+    fn app(store: Store) -> Router {
+        router(AppState {
+            store,
+            config: test_config(),
+        })
+    }
 
     fn sample(client: Ipv4Addr, name: &str, source: QuerySource) -> QueryEvent {
         QueryEvent {
@@ -172,7 +231,7 @@ mod tests {
     }
 
     async fn get(store: Store, path: &str) -> Response {
-        router(store)
+        app(store)
             .oneshot(Request::get(path).body(Body::empty()).unwrap())
             .await
             .unwrap()
@@ -245,6 +304,53 @@ mod tests {
         // A blank filter behaves like no filter.
         let body = body_of(get(store, "/api/queries?q=").await).await;
         assert_eq!(body.matches("\"name\"").count(), 2, "{body}");
+    }
+
+    #[tokio::test]
+    async fn settings_round_trip() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        // Clone the router (not rebuild it) so PUT and the later GET share one
+        // config handle.
+        let app = router(AppState {
+            store,
+            config: test_config(),
+        });
+
+        let body = body_of(
+            app.clone()
+                .oneshot(Request::get("/api/settings").body(Body::empty()).unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"ipv6\":false"), "defaults: {body}");
+
+        let put = Request::put("/api/settings")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"blockAdsTrackers":true,"safeSearch":false,"blockMalware":true,"upstreamMode":"fallback","encryptUpstream":true,"ipv6":true,"queryLog":true,"logRetentionDays":14,"cacheServeStale":false}"#,
+            ))
+            .unwrap();
+        let res = app.clone().oneshot(put).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"ipv6\":true"), "echo: {body}");
+        assert!(
+            body.contains("\"upstreamMode\":\"fallback\""),
+            "echo: {body}"
+        );
+
+        let body = body_of(
+            app.oneshot(Request::get("/api/settings").body(Body::empty()).unwrap())
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"ipv6\":true"), "persisted: {body}");
+        assert!(
+            body.contains("\"logRetentionDays\":14"),
+            "persisted: {body}"
+        );
     }
 
     #[test]
