@@ -7,4 +7,5 @@ pub mod cache;
 pub mod client;
 pub mod pipeline;
 pub mod router;
+pub mod server;
 pub mod upstream;
