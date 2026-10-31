@@ -34,6 +34,7 @@ async fn main() -> ExitCode {
 
     info!(
         listen = %config.listen,
+        web = %config.web_listen,
         ipv6 = config.ipv6_enabled,
         upstreams = config.upstreams.upstreams.len(),
         "starting JustDNS"
@@ -53,7 +54,13 @@ async fn main() -> ExitCode {
     tokio::select! {
         result = server.run(config.listen) => {
             if let Err(error) = result {
-                error!(%error, "server stopped");
+                error!(%error, "DNS server stopped");
+                return ExitCode::FAILURE;
+            }
+        }
+        result = justdns_web::serve(config.web_listen) => {
+            if let Err(error) = result {
+                error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
             }
         }

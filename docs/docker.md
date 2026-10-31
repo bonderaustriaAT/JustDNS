@@ -20,15 +20,17 @@ docker build -t justdns:dev .
 ## Run
 
 ```sh
-docker run --rm -p 53:53/udp -p 53:53/tcp justdns:dev
+docker run --rm -p 53:53/udp -p 53:53/tcp -p 8080:8080 justdns:dev
 ```
+
+The web UI is then at <http://localhost:8080>.
 
 On a Proxmox LXC the container host often already runs a resolver on port 53
 (`systemd-resolved`). Either stop it, or map JustDNS to a spare port for
 testing:
 
 ```sh
-docker run --rm -p 5353:53/udp -p 5353:53/tcp justdns:dev
+docker run --rm -p 5353:53/udp -p 5353:53/tcp -p 8080:8080 justdns:dev
 ```
 
 ## Configuration
@@ -38,7 +40,8 @@ forwarder.
 
 | Variable                | Default         | Meaning                                                            |
 | ----------------------- | --------------- | ------------------------------------------------------------------ |
-| `JUSTDNS_LISTEN`        | `0.0.0.0:53`    | Address and port to listen on.                                     |
+| `JUSTDNS_LISTEN`        | `0.0.0.0:53`    | DNS address and port to listen on.                                 |
+| `JUSTDNS_WEB_LISTEN`    | `0.0.0.0:8080`  | Address and port for the web UI.                                   |
 | `JUSTDNS_IPV6`          | `false`         | Answer AAAA queries. Off by default, so clients use IPv4.          |
 | `JUSTDNS_CACHE_CAPACITY`| `10000`         | Maximum cached entries.                                            |
 | `JUSTDNS_UPSTREAMS`     | *(EU defaults)* | Comma-separated plain resolvers (`ip` or `ip:port`) to use instead of the DoT defaults. |
