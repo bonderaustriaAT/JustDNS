@@ -1,0 +1,33 @@
+name: Image
+
+# Build the container image once and publish it to the registry, so deployments
+# pull a ready-made image instead of compiling the bundled DuckDB sources. The
+# heavy build runs here, on a release tag, not on every push and never on a
+# user's machine.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: 192.168.20.143:3000
+  IMAGE: 192.168.20.143:3000/bonderosa/justdns
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Build
+        run: docker build -t "$IMAGE:latest" .
+
+      - name: Tag the release
+        if: github.ref_type == 'tag'
+        run: docker tag "$IMAGE:latest" "$IMAGE:${{ github.ref_name }}"
+
+      - name: Push
+        run: docker push --all-tags "$IMAGE"
