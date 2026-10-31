@@ -9,10 +9,12 @@
 //! upstreams (racing, fallback, rule-based) is handled a layer up; this client
 //! only speaks to the one it was built for.
 
-use hickory_proto::ProtoError;
-use hickory_proto::op::Query;
-use hickory_proto::rr::{Name, RecordType};
+use std::sync::Arc;
+
+use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
+use hickory_proto::rr::{Name, Record, RecordType};
 use hickory_proto::xfer::{DnsHandle, DnsRequestOptions, DnsResponse, FirstAnswer};
+use hickory_proto::{ProtoError, ProtoErrorKind};
 use hickory_resolver::config::{NameServerConfigGroup, ResolverOpts};
 use hickory_resolver::name_server::{NameServerPool, TokioConnectionProvider};
 
@@ -60,11 +62,59 @@ impl UpstreamClient {
         let mut options = DnsRequestOptions::default();
         options.recursion_desired = true;
 
-        self.pool
-            .lookup(Query::query(name, record_type), options)
+        let result = self
+            .pool
+            .lookup(Query::query(name.clone(), record_type), options)
             .first_answer()
-            .await
+            .await;
+
+        let error = match result {
+            Ok(response) => return Ok(response),
+            Err(error) => error,
+        };
+
+        // hickory reports an empty answer — NXDOMAIN or NODATA — as a
+        // `NoRecordsFound` error rather than a response. Rebuild it into a real
+        // negative response so the pipeline relays the true response code and
+        // can cache it, instead of turning every "no such name / no such record"
+        // into SERVFAIL. Genuine failures (SERVFAIL, REFUSED, transport errors)
+        // reach here too but keep their error, so racing still prefers a working
+        // upstream over a failing one.
+        if let ProtoErrorKind::NoRecordsFound {
+            response_code,
+            authorities,
+            ..
+        } = error.kind()
+        {
+            if matches!(
+                response_code,
+                ResponseCode::NXDomain | ResponseCode::NoError
+            ) {
+                return negative_response(name, record_type, *response_code, authorities);
+            }
+        }
+
+        Err(error)
     }
+}
+
+/// Build a negative response (no answers) carrying `response_code` and the
+/// authority section, so the caller relays NXDOMAIN / NODATA correctly and the
+/// negative cache can read the SOA minimum TTL from the authority records.
+fn negative_response(
+    name: Name,
+    record_type: RecordType,
+    response_code: ResponseCode,
+    authorities: &Option<Arc<[Record]>>,
+) -> Result<DnsResponse, ProtoError> {
+    let mut message = Message::new();
+    message.set_message_type(MessageType::Response);
+    message.set_response_code(response_code);
+    message.add_query(Query::query(name, record_type));
+    if let Some(authorities) = authorities {
+        message.add_name_servers(authorities.iter().cloned());
+    }
+    DnsResponse::from_message(message)
 }
 
 #[cfg(test)]
@@ -74,7 +124,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use hickory_proto::op::{Message, MessageType, ResponseCode};
-    use hickory_proto::rr::rdata::A;
+    use hickory_proto::rr::rdata::{A, SOA};
     use hickory_proto::rr::{RData, Record};
     use tokio::net::UdpSocket;
 
@@ -117,13 +167,60 @@ mod tests {
         addr
     }
 
-    #[tokio::test]
-    async fn forwards_query_and_returns_answer() {
-        let addr = spawn_mock_upstream().await;
+    /// A one-shot UDP responder that answers with `code`, no answer records, and
+    /// optionally an SOA in the authority section — i.e. a negative answer.
+    async fn spawn_mock_negative(code: ResponseCode, with_soa: bool) -> SocketAddr {
+        let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let addr = socket.local_addr().unwrap();
 
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 512];
+            let (len, src) = socket.recv_from(&mut buf).await.unwrap();
+            let request = Message::from_vec(&buf[..len]).unwrap();
+
+            let mut response = Message::new();
+            response.set_id(request.id());
+            response.set_message_type(MessageType::Response);
+            response.set_response_code(code);
+            response.set_recursion_desired(true);
+            response.set_recursion_available(true);
+            if let Some(query) = request.queries().first() {
+                response.add_query(query.clone());
+                if with_soa {
+                    response.add_name_server(Record::from_rdata(
+                        query.name().clone(),
+                        30,
+                        RData::SOA(SOA::new(
+                            Name::from_ascii("ns.example.").unwrap(),
+                            Name::from_ascii("hostmaster.example.").unwrap(),
+                            1,
+                            3600,
+                            600,
+                            86400,
+                            30,
+                        )),
+                    ));
+                }
+            }
+
+            socket
+                .send_to(&response.to_vec().unwrap(), src)
+                .await
+                .unwrap();
+        });
+
+        addr
+    }
+
+    async fn client_for(addr: SocketAddr) -> UpstreamClient {
         let mut upstream = Upstream::plain(IpAddr::V4(Ipv4Addr::LOCALHOST));
         upstream.port = addr.port();
-        let client = UpstreamClient::new(&upstream);
+        UpstreamClient::new(&upstream)
+    }
+
+    #[tokio::test]
+    async fn forwards_query_and_returns_answer() {
+        let client = client_for(spawn_mock_upstream().await).await;
 
         let response = client
             .query(Name::from_ascii("example.com.").unwrap(), RecordType::A)
@@ -132,5 +229,39 @@ mod tests {
 
         assert_eq!(response.response_code(), ResponseCode::NoError);
         assert_eq!(response.answers()[0].data().as_a(), Some(&A(ANSWER)));
+    }
+
+    #[tokio::test]
+    async fn nxdomain_is_a_response_not_an_error() {
+        let client = client_for(spawn_mock_negative(ResponseCode::NXDomain, true).await).await;
+
+        let response = client
+            .query(Name::from_ascii("nope.example.").unwrap(), RecordType::A)
+            .await
+            .expect("NXDOMAIN must come back as a response, not an error");
+
+        assert_eq!(response.response_code(), ResponseCode::NXDomain);
+        assert!(response.answers().is_empty());
+        assert!(
+            response
+                .name_servers()
+                .iter()
+                .any(|record| record.data().as_soa().is_some()),
+            "the SOA authority should be preserved for negative caching"
+        );
+    }
+
+    #[tokio::test]
+    async fn nodata_is_a_response_not_an_error() {
+        let client = client_for(spawn_mock_negative(ResponseCode::NoError, true).await).await;
+
+        // A name that exists but has no HTTPS record: NOERROR with no answers.
+        let response = client
+            .query(Name::from_ascii("example.com.").unwrap(), RecordType::HTTPS)
+            .await
+            .expect("NODATA must come back as a response, not an error");
+
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+        assert!(response.answers().is_empty());
     }
 }

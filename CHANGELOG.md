@@ -68,3 +68,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   domain, record type, source and timing — with a search box that filters by
   domain or client address and a live toggle that streams new entries in as
   they are handled.
+
+### Fixed
+
+- Negative answers no longer become SERVFAIL (`justdns-dns`): the upstream
+  client rebuilds the NXDOMAIN and NODATA responses that hickory reports as a
+  `NoRecordsFound` error back into real negative responses, so a non-existent
+  name returns NXDOMAIN and a missing record type (for example a browser's
+  HTTPS/SVCB probe) returns NOERROR with no answers — not SERVFAIL. The
+  authority SOA is preserved so negative caching keeps working. Genuine upstream
+  failures (SERVFAIL, REFUSED, transport errors) stay errors.
