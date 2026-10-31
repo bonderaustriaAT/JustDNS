@@ -1,0 +1,179 @@
+// SPDX-FileCopyrightText: 2026 JustDNS contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Runtime configuration, read from the environment.
+//!
+//! The container is configured with environment variables, so startup reads
+//! them here and nowhere else. Everything has a working default, so an empty
+//! environment yields a usable forwarder on the EU resolvers.
+
+use std::env::{self, VarError};
+use std::net::{IpAddr, SocketAddr};
+use std::num::ParseIntError;
+
+use justdns_dns::upstream::{Upstream, UpstreamConfig, UpstreamMode};
+
+const DEFAULT_LISTEN: &str = "0.0.0.0:53";
+const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
+
+#[derive(Debug)]
+pub struct Config {
+    pub listen: SocketAddr,
+    pub ipv6_enabled: bool,
+    pub cache_capacity: u64,
+    pub upstreams: UpstreamConfig,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("{var} is not valid UTF-8")]
+    NotUnicode { var: &'static str },
+    #[error("{var}: {source}")]
+    BadAddress {
+        var: &'static str,
+        source: std::net::AddrParseError,
+    },
+    #[error("{var}: {source}")]
+    BadNumber {
+        var: &'static str,
+        source: ParseIntError,
+    },
+    #[error("JUSTDNS_UPSTREAMS: no usable upstream address in {0:?}")]
+    NoUpstreams(String),
+}
+
+impl Config {
+    pub fn from_env() -> Result<Self, ConfigError> {
+        let listen = parse_var("JUSTDNS_LISTEN", DEFAULT_LISTEN.parse().unwrap(), |value| {
+            value
+                .parse()
+                .map_err(|source| ConfigError::BadAddress {
+                    var: "JUSTDNS_LISTEN",
+                    source,
+                })
+        })?;
+
+        let ipv6_enabled = parse_var("JUSTDNS_IPV6", false, |value| Ok(is_truthy(value)))?;
+
+        let cache_capacity = parse_var("JUSTDNS_CACHE_CAPACITY", DEFAULT_CACHE_CAPACITY, |value| {
+            value.parse().map_err(|source| ConfigError::BadNumber {
+                var: "JUSTDNS_CACHE_CAPACITY",
+                source,
+            })
+        })?;
+
+        let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
+            Some(raw) => parse_upstreams(&raw)?,
+            None => UpstreamConfig::eu_defaults(),
+        };
+
+        Ok(Self {
+            listen,
+            ipv6_enabled,
+            cache_capacity,
+            upstreams,
+        })
+    }
+}
+
+/// Parse a comma-separated list of plain-DNS upstream addresses, each
+/// `ip` or `ip:port` (port defaults to 53). Used to point the forwarder at a
+/// local or test resolver instead of the encrypted EU defaults.
+fn parse_upstreams(raw: &str) -> Result<UpstreamConfig, ConfigError> {
+    let mut upstreams = Vec::new();
+    for entry in raw.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+        let address = parse_plain_address(entry).ok_or_else(|| ConfigError::BadAddress {
+            var: "JUSTDNS_UPSTREAMS",
+            source: entry.parse::<IpAddr>().unwrap_err(),
+        })?;
+        upstreams.push(address);
+    }
+
+    if upstreams.is_empty() {
+        return Err(ConfigError::NoUpstreams(raw.to_owned()));
+    }
+
+    Ok(UpstreamConfig {
+        mode: UpstreamMode::Racing,
+        upstreams,
+        rules: Vec::new(),
+    })
+}
+
+fn parse_plain_address(entry: &str) -> Option<Upstream> {
+    if let Ok(socket) = entry.parse::<SocketAddr>() {
+        return Some(Upstream {
+            address: socket.ip(),
+            port: socket.port(),
+            transport: justdns_dns::upstream::Transport::Plain,
+        });
+    }
+    entry.parse::<IpAddr>().ok().map(Upstream::plain)
+}
+
+fn is_truthy(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn read_var(var: &'static str) -> Result<Option<String>, ConfigError> {
+    match env::var(var) {
+        Ok(value) => Ok(Some(value)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(VarError::NotUnicode(_)) => Err(ConfigError::NotUnicode { var }),
+    }
+}
+
+fn parse_var<T>(
+    var: &'static str,
+    default: T,
+    parse: impl FnOnce(&str) -> Result<T, ConfigError>,
+) -> Result<T, ConfigError> {
+    match read_var(var)? {
+        Some(value) => parse(&value),
+        None => Ok(default),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_address_defaults_port_to_53() {
+        let upstream = parse_plain_address("9.9.9.9").unwrap();
+        assert_eq!(upstream.port, 53);
+        assert_eq!(upstream.address, IpAddr::from([9, 9, 9, 9]));
+    }
+
+    #[test]
+    fn plain_address_keeps_explicit_port() {
+        let upstream = parse_plain_address("127.0.0.1:5300").unwrap();
+        assert_eq!(upstream.port, 5300);
+    }
+
+    #[test]
+    fn upstream_list_is_parsed_and_trimmed() {
+        let config = parse_upstreams(" 9.9.9.9 , 1.1.1.1:53 ").unwrap();
+        assert_eq!(config.upstreams.len(), 2);
+    }
+
+    #[test]
+    fn empty_upstream_list_is_an_error() {
+        assert!(matches!(
+            parse_upstreams("  ,  "),
+            Err(ConfigError::NoUpstreams(_))
+        ));
+    }
+
+    #[test]
+    fn truthy_values() {
+        assert!(is_truthy("1"));
+        assert!(is_truthy("TRUE"));
+        assert!(is_truthy("on"));
+        assert!(!is_truthy("0"));
+        assert!(!is_truthy(""));
+    }
+}
