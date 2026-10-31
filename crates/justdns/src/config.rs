@@ -14,11 +14,13 @@ use std::num::ParseIntError;
 use justdns_dns::upstream::{Upstream, UpstreamConfig, UpstreamMode};
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:53";
+const DEFAULT_WEB_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 
 #[derive(Debug)]
 pub struct Config {
     pub listen: SocketAddr,
+    pub web_listen: SocketAddr,
     pub ipv6_enabled: bool,
     pub cache_capacity: u64,
     pub upstreams: UpstreamConfig,
@@ -51,6 +53,17 @@ impl Config {
             })
         })?;
 
+        let web_listen = parse_var(
+            "JUSTDNS_WEB_LISTEN",
+            DEFAULT_WEB_LISTEN.parse().unwrap(),
+            |value| {
+                value.parse().map_err(|source| ConfigError::BadAddress {
+                    var: "JUSTDNS_WEB_LISTEN",
+                    source,
+                })
+            },
+        )?;
+
         let ipv6_enabled = parse_var("JUSTDNS_IPV6", false, |value| Ok(is_truthy(value)))?;
 
         let cache_capacity =
@@ -68,6 +81,7 @@ impl Config {
 
         Ok(Self {
             listen,
+            web_listen,
             ipv6_enabled,
             cache_capacity,
             upstreams,

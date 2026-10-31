@@ -39,3 +39,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   technical options.
 - Settings: a Network category with an IPv6 toggle, off by default, matching the
   DNS core's handling of AAAA queries.
+- Embedded web UI (`justdns-web`): the built front-end is embedded with
+  `rust-embed` and served over HTTP (SPA fallback to `index.html`), listening on
+  `0.0.0.0:8080` by default (`JUSTDNS_WEB_LISTEN`). The binary runs it alongside
+  the DNS server, and the Docker build bundles the UI via a Node build stage.

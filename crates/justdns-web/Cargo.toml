@@ -6,3 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+axum = "0.8.4"
+rust-embed = { version = "8.7.2", features = ["mime-guess"] }
+tokio = { version = "1.54.1", features = ["net", "rt"] }
+tracing = "0.1"
