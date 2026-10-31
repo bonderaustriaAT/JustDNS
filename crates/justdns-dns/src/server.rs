@@ -9,7 +9,7 @@
 //! over TCP, as DNS requires.
 
 use std::io::{self, ErrorKind};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use hickory_proto::op::Message;
@@ -60,7 +60,7 @@ where
         let socket = socket.clone();
         let pipeline = pipeline.clone();
         tokio::spawn(async move {
-            if let Some(reply) = handle_datagram(&pipeline, &request).await {
+            if let Some(reply) = handle_datagram(&pipeline, &request, peer.ip()).await {
                 if let Err(error) = socket.send_to(&reply, peer).await {
                     warn!(%peer, %error, "failed to send UDP reply");
                 }
@@ -77,7 +77,7 @@ where
         let (stream, peer) = listener.accept().await?;
         let pipeline = pipeline.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_stream(stream, &pipeline).await {
+            if let Err(error) = handle_stream(stream, &pipeline, peer.ip()).await {
                 warn!(%peer, %error, "TCP connection ended on error");
             }
         });
@@ -87,7 +87,11 @@ where
 /// Decode one datagram, answer it, and encode a reply sized for the client's
 /// buffer. A reply that does not fit comes back truncated. Returns `None` when
 /// the request cannot be decoded, since there is no id to answer with.
-async fn handle_datagram<R>(pipeline: &Pipeline<R>, request: &[u8]) -> Option<Vec<u8>>
+async fn handle_datagram<R>(
+    pipeline: &Pipeline<R>,
+    request: &[u8],
+    client: IpAddr,
+) -> Option<Vec<u8>>
 where
     R: Resolve + Sync,
 {
@@ -100,7 +104,7 @@ where
     };
 
     let max_payload = usize::from(request.max_payload());
-    let response = pipeline.handle(&request).await;
+    let response = pipeline.handle(&request, client).await;
 
     let encoded = response.to_vec().ok()?;
     if encoded.len() <= max_payload {
@@ -111,7 +115,11 @@ where
 }
 
 /// A DNS-over-TCP connection: each message is framed by a two-byte length.
-async fn handle_stream<R>(mut stream: TcpStream, pipeline: &Pipeline<R>) -> io::Result<()>
+async fn handle_stream<R>(
+    mut stream: TcpStream,
+    pipeline: &Pipeline<R>,
+    client: IpAddr,
+) -> io::Result<()>
 where
     R: Resolve + Sync,
 {
@@ -135,7 +143,7 @@ where
             }
         };
 
-        let response = pipeline.handle(&request).await;
+        let response = pipeline.handle(&request, client).await;
         let Ok(encoded) = response.to_vec() else {
             return Ok(());
         };
@@ -161,6 +169,8 @@ mod tests {
     use super::*;
 
     use std::net::Ipv4Addr;
+
+    const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
     use hickory_proto::ProtoError;
     use hickory_proto::op::{MessageType, Query, ResponseCode};
@@ -215,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn datagram_round_trip_preserves_id() {
         let pipe = pipeline(1);
-        let reply = handle_datagram(&pipe, &request_bytes(RecordType::A))
+        let reply = handle_datagram(&pipe, &request_bytes(RecordType::A), CLIENT)
             .await
             .expect("a reply");
         let decoded = Message::from_vec(&reply).unwrap();
@@ -228,7 +238,7 @@ mod tests {
     async fn oversized_datagram_is_truncated() {
         // Many answers overflow the 512-byte default UDP buffer.
         let pipe = pipeline(60);
-        let reply = handle_datagram(&pipe, &request_bytes(RecordType::A))
+        let reply = handle_datagram(&pipe, &request_bytes(RecordType::A), CLIENT)
             .await
             .expect("a reply");
         assert!(reply.len() <= 512);
@@ -241,6 +251,10 @@ mod tests {
     #[tokio::test]
     async fn undecodable_datagram_is_dropped() {
         let pipe = pipeline(1);
-        assert!(handle_datagram(&pipe, &[0xff, 0x00, 0x13]).await.is_none());
+        assert!(
+            handle_datagram(&pipe, &[0xff, 0x00, 0x13], CLIENT)
+                .await
+                .is_none()
+        );
     }
 }

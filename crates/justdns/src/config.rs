@@ -10,12 +10,14 @@
 use std::env::{self, VarError};
 use std::net::{IpAddr, SocketAddr};
 use std::num::ParseIntError;
+use std::path::PathBuf;
 
 use justdns_dns::upstream::{Upstream, UpstreamConfig, UpstreamMode};
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:53";
 const DEFAULT_WEB_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
+const DEFAULT_DB_PATH: &str = "queries.duckdb";
 
 #[derive(Debug)]
 pub struct Config {
@@ -23,6 +25,7 @@ pub struct Config {
     pub web_listen: SocketAddr,
     pub ipv6_enabled: bool,
     pub cache_capacity: u64,
+    pub db_path: PathBuf,
     pub upstreams: UpstreamConfig,
 }
 
@@ -74,6 +77,10 @@ impl Config {
                 })
             })?;
 
+        let db_path = PathBuf::from(
+            read_var("JUSTDNS_DB_PATH")?.unwrap_or_else(|| DEFAULT_DB_PATH.to_owned()),
+        );
+
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
             None => UpstreamConfig::eu_defaults(),
@@ -84,6 +91,7 @@ impl Config {
             web_listen,
             ipv6_enabled,
             cache_capacity,
+            db_path,
             upstreams,
         })
     }

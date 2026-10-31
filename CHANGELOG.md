@@ -46,3 +46,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Query log (`justdns-store`): records each handled query — client, name, type,
   response code, source and timing — into a bounded in-memory view for the
   dashboard and a batched, persistent DuckDB log that survives restarts.
+- The resolver now feeds the query log: the pipeline reports every handled query
+  through an observer hook, and the binary records it to the store at
+  `JUSTDNS_DB_PATH` (default `queries.duckdb`; the container keeps it on a
+  `/data` volume).
