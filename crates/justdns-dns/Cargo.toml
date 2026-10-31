@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 hickory-proto = "0.25.2"
 hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }
 moka = { version = "0.12.16", features = ["future"] }

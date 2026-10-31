@@ -18,3 +18,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Upstream network client (`justdns-dns`): forwards a query to a single
   upstream over plain DNS, DoT or DoH, with UDP-to-TCP retry for plain
   upstreams, returning the raw response for the cache and response path.
+- Upstream router (`justdns-dns`): racing, fallback, load-balanced and
+  rule-based selection across the upstream pool, with domain rules routed by
+  longest matching suffix.

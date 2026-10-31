@@ -5,4 +5,5 @@
 
 pub mod cache;
 pub mod client;
+pub mod router;
 pub mod upstream;

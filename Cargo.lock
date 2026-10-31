@@ -506,6 +506,7 @@ dependencies = [
 name = "justdns-dns"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "hickory-proto",
  "hickory-resolver",
  "moka",
