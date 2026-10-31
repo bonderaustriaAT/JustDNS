@@ -4,4 +4,5 @@
 //! Forwarding resolver: upstream selection, caching and DNS message handling.
 
 pub mod cache;
+pub mod client;
 pub mod upstream;

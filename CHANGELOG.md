@@ -15,3 +15,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Upstream configuration (`justdns-dns`): plain/DoT/DoH transports, selection
   modes (racing, fallback, load-balanced, rule-based), suffix-based domain
   routing, and the EU defaults (DNS4EU Protective and Quad9 over DoT).
+- Upstream network client (`justdns-dns`): forwards a query to a single
+  upstream over plain DNS, DoT or DoH, with UDP-to-TCP retry for plain
+  upstreams, returning the raw response for the cache and response path.

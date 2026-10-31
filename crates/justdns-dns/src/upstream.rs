@@ -20,8 +20,9 @@ pub enum Transport {
     /// DNS-over-TLS. `server_name` is the certificate name presented over the
     /// TLS connection, which differs from the IP address a client dials.
     Dot { server_name: String },
-    /// DNS-over-HTTPS. `url` is the full query endpoint.
-    Doh { url: String },
+    /// DNS-over-HTTPS. `server_name` is the TLS host; the query path defaults
+    /// to `/dns-query`.
+    Doh { server_name: String },
 }
 
 /// A single resolver to forward to.
@@ -51,11 +52,13 @@ impl Upstream {
         }
     }
 
-    pub fn doh(address: IpAddr, url: impl Into<String>) -> Self {
+    pub fn doh(address: IpAddr, server_name: impl Into<String>) -> Self {
         Self {
             address,
             port: 443,
-            transport: Transport::Doh { url: url.into() },
+            transport: Transport::Doh {
+                server_name: server_name.into(),
+            },
         }
     }
 }
@@ -160,7 +163,7 @@ mod tests {
             853
         );
         assert_eq!(
-            Upstream::doh(IpAddr::from([1, 1, 1, 1]), "https://one.one/dns-query").port,
+            Upstream::doh(IpAddr::from([1, 1, 1, 1]), "one.one").port,
             443
         );
     }
