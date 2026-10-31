@@ -7,12 +7,15 @@
 //! straight away; a miss goes to the [`Router`], and the upstream's answer is
 //! cached before it is returned. IPv6 answers are suppressed unless enabled.
 
-use std::time::Duration;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use hickory_proto::op::{Message, MessageType, ResponseCode};
+use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::RecordType;
 
 use crate::cache::{CacheKey, CachedEntry, CachedResponse, DnsCache};
+use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
 use crate::router::{Resolve, Router};
 
 /// Negative answers without an SOA are cached this long (seconds).
@@ -31,6 +34,7 @@ pub struct Pipeline<R> {
     cache: DnsCache,
     router: Router<R>,
     options: PipelineOptions,
+    observer: Option<Arc<dyn QueryObserver>>,
 }
 
 impl<R: Resolve + Sync> Pipeline<R> {
@@ -39,11 +43,21 @@ impl<R: Resolve + Sync> Pipeline<R> {
             cache,
             router,
             options,
+            observer: None,
         }
     }
 
-    /// Turn a request message into a response message.
-    pub async fn handle(&self, request: &Message) -> Message {
+    /// Report every handled query to `observer`, which feeds the query log.
+    #[must_use]
+    pub fn with_observer(mut self, observer: Arc<dyn QueryObserver>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    /// Turn a request message into a response, recording how it was answered.
+    pub async fn handle(&self, request: &Message, client: IpAddr) -> Message {
+        let start = Instant::now();
+
         let mut response = Message::new();
         response.set_id(request.id());
         response.set_message_type(MessageType::Response);
@@ -52,22 +66,42 @@ impl<R: Resolve + Sync> Pipeline<R> {
         response.set_recursion_available(true);
 
         let Some(query) = request.queries().first().cloned() else {
+            // No question to answer, so nothing meaningful to record either.
             response.set_response_code(ResponseCode::FormErr);
             return response;
         };
         response.add_query(query.clone());
 
+        let source = self.answer(&query, &mut response).await;
+
+        if let Some(observer) = &self.observer {
+            observer.observe(QueryRecord {
+                client,
+                name: query.name().to_string(),
+                record_type: u16::from(query.query_type()),
+                response_code: u16::from(response.response_code()),
+                source,
+                duration: start.elapsed(),
+                answers: u16::try_from(response.answers().len()).unwrap_or(u16::MAX),
+            });
+        }
+
+        response
+    }
+
+    /// Fill `response` with the answer to `query` and report where it came from.
+    async fn answer(&self, query: &Query, response: &mut Message) -> AnswerSource {
         // IPv6 off: answer AAAA with NODATA without touching cache or upstream.
         if query.query_type() == RecordType::AAAA && !self.options.ipv6_enabled {
             response.set_response_code(ResponseCode::NoError);
-            return response;
+            return AnswerSource::Local;
         }
 
         let key = CacheKey::new(query.name(), query.query_type());
 
         if let Some(hit) = self.cache.get(&key).await {
-            apply_cached(&mut response, hit);
-            return response;
+            apply_cached(response, hit);
+            return AnswerSource::Cache;
         }
 
         match self
@@ -106,7 +140,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
             }
         }
 
-        response
+        AnswerSource::Upstream
     }
 }
 
@@ -139,9 +173,24 @@ fn negative_ttl(message: &Message) -> u64 {
 mod tests {
     use super::*;
 
-    use std::net::{Ipv4Addr, Ipv6Addr};
-    use std::sync::Arc;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
+
+    const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
+
+    #[derive(Default)]
+    struct Recording {
+        seen: Mutex<Vec<QueryRecord>>,
+    }
+
+    impl QueryObserver for Recording {
+        fn observe(&self, record: QueryRecord) {
+            self.seen.lock().unwrap().push(record);
+        }
+    }
 
     use hickory_proto::ProtoError;
     use hickory_proto::op::Query;
@@ -222,7 +271,7 @@ mod tests {
         );
         let req = request("example.com.", RecordType::A);
 
-        let first = pipe.handle(&req).await;
+        let first = pipe.handle(&req, CLIENT).await;
         assert_eq!(first.id(), 4242);
         assert_eq!(first.response_code(), ResponseCode::NoError);
         assert_eq!(
@@ -230,7 +279,7 @@ mod tests {
             Some(&A(Ipv4Addr::new(93, 184, 216, 34)))
         );
 
-        let second = pipe.handle(&req).await;
+        let second = pipe.handle(&req, CLIENT).await;
         assert_eq!(second.answers().len(), 1);
         assert_eq!(
             calls.load(Ordering::Relaxed),
@@ -242,7 +291,9 @@ mod tests {
     #[tokio::test]
     async fn upstream_failure_is_servfail() {
         let (pipe, _calls) = pipeline(Reply::Fail, PipelineOptions::default());
-        let response = pipe.handle(&request("example.com.", RecordType::A)).await;
+        let response = pipe
+            .handle(&request("example.com.", RecordType::A), CLIENT)
+            .await;
         assert_eq!(response.response_code(), ResponseCode::ServFail);
     }
 
@@ -254,10 +305,10 @@ mod tests {
         );
         let req = request("nope.example.", RecordType::A);
 
-        let first = pipe.handle(&req).await;
+        let first = pipe.handle(&req, CLIENT).await;
         assert_eq!(first.response_code(), ResponseCode::NXDomain);
 
-        pipe.handle(&req).await;
+        pipe.handle(&req, CLIENT).await;
         assert_eq!(
             calls.load(Ordering::Relaxed),
             1,
@@ -274,7 +325,7 @@ mod tests {
             },
         );
         let response = pipe
-            .handle(&request("example.com.", RecordType::AAAA))
+            .handle(&request("example.com.", RecordType::AAAA), CLIENT)
             .await;
 
         assert_eq!(response.response_code(), ResponseCode::NoError);
@@ -293,7 +344,7 @@ mod tests {
             PipelineOptions { ipv6_enabled: true },
         );
         let response = pipe
-            .handle(&request("example.com.", RecordType::AAAA))
+            .handle(&request("example.com.", RecordType::AAAA), CLIENT)
             .await;
 
         assert_eq!(response.answers().len(), 1);
@@ -305,8 +356,29 @@ mod tests {
         let (pipe, _calls) = pipeline(Reply::Fail, PipelineOptions::default());
         let mut req = Message::new();
         req.set_id(7);
-        let response = pipe.handle(&req).await;
+        let response = pipe.handle(&req, CLIENT).await;
         assert_eq!(response.response_code(), ResponseCode::FormErr);
+    }
+
+    #[tokio::test]
+    async fn observer_sees_the_handled_query() {
+        let observer = Arc::new(Recording::default());
+        let router = Router::new(
+            UpstreamMode::Racing,
+            vec![Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)))],
+        );
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_observer(observer.clone());
+
+        pipe.handle(&request("example.com.", RecordType::A), CLIENT)
+            .await;
+
+        let seen = observer.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].client, CLIENT);
+        assert_eq!(seen[0].name, "example.com.");
+        assert_eq!(seen[0].source, AnswerSource::Upstream);
+        assert_eq!(seen[0].answers, 1);
     }
 
     #[test]

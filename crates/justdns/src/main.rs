@@ -4,17 +4,26 @@
 //! The JustDNS binary: read the environment, build the resolver and serve.
 
 mod config;
+mod observer;
 
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::Duration;
 
 use justdns_dns::cache::DnsCache;
+use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::Router;
 use justdns_dns::server::Server;
+use justdns_store::Store;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::observer::StoreObserver;
+
+/// How many recent queries the dashboard's hot view keeps in memory.
+const RECENT_CAPACITY: usize = 1000;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -36,9 +45,19 @@ async fn main() -> ExitCode {
         listen = %config.listen,
         web = %config.web_listen,
         ipv6 = config.ipv6_enabled,
+        db = %config.db_path.display(),
         upstreams = config.upstreams.upstreams.len(),
         "starting JustDNS"
     );
+
+    let (store, writer) = match Store::open(&config.db_path, RECENT_CAPACITY) {
+        Ok(pair) => pair,
+        Err(error) => {
+            error!(%error, "cannot open the query log");
+            return ExitCode::FAILURE;
+        }
+    };
+    let observer: Arc<dyn QueryObserver> = Arc::new(StoreObserver::new(store.clone()));
 
     let router = Router::from_config(&config.upstreams);
     let cache = DnsCache::new(config.cache_capacity);
@@ -48,7 +67,8 @@ async fn main() -> ExitCode {
         PipelineOptions {
             ipv6_enabled: config.ipv6_enabled,
         },
-    );
+    )
+    .with_observer(observer);
     let server = Server::new(pipeline);
 
     tokio::select! {
@@ -68,6 +88,10 @@ async fn main() -> ExitCode {
             info!("shutting down");
         }
     }
+
+    // Release our handle and let the query-log writer flush its final batch.
+    drop(store);
+    let _ = tokio::time::timeout(Duration::from_secs(5), writer).await;
 
     ExitCode::SUCCESS
 }

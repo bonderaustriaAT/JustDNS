@@ -5,6 +5,7 @@
 
 pub mod cache;
 pub mod client;
+pub mod observer;
 pub mod pipeline;
 pub mod router;
 pub mod server;
