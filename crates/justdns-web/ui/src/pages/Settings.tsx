@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
@@ -22,7 +22,7 @@ function Category({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className={styles.category} aria-labelledby={`${id}-title`}>
+    <section className={styles.category} aria-labelledby={`${id}-title`}>
       <div className={styles.categoryHead}>
         <h2 id={`${id}-title`} className={styles.categoryTitle}>
           {title}
@@ -73,36 +73,9 @@ const RESOLVERS = [
   { ip: "9.9.9.9", host: "dns.quad9.net", name: "Quad9" },
 ];
 
-// Highlights the category the reader has scrolled to, so the rail doubles as a
-// "you are here" marker.
-function useActiveCategory(ids: string[]): string {
-  const [active, setActive] = useState(ids[0] ?? "");
-
-  useEffect(() => {
-    const sections = ids
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => el !== null);
-    if (sections.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActive(visible[0].target.id);
-      },
-      { rootMargin: "-20% 0px -70% 0px" },
-    );
-
-    sections.forEach((section) => observer.observe(section));
-    return () => observer.disconnect();
-  }, [ids]);
-
-  return active;
-}
-
 export function Settings() {
   const { settings, update } = useSettings();
+  const [selected, setSelected] = useState("schutz");
 
   const categories = useMemo<CategoryMeta[]>(() => {
     const base: CategoryMeta[] = [{ id: "schutz", title: "Schutz" }];
@@ -117,7 +90,9 @@ export function Settings() {
     return base;
   }, [settings.expertMode]);
 
-  const active = useActiveCategory(categories.map((c) => c.id));
+  // Fall back to the first category when the selected one is hidden (e.g. the
+  // expert mode that revealed it was switched off).
+  const active = categories.some((c) => c.id === selected) ? selected : categories[0].id;
 
   return (
     <div className={styles.page}>
@@ -141,183 +116,192 @@ export function Settings() {
       <div className={styles.layout}>
         <nav className={styles.rail} aria-label="Kategorien">
           {categories.map((category) => (
-            <a
+            <button
               key={category.id}
-              href={`#${category.id}`}
+              type="button"
               className={active === category.id ? styles.railActive : styles.railLink}
+              aria-current={active === category.id || undefined}
+              onClick={() => setSelected(category.id)}
             >
               {category.title}
-            </a>
+            </button>
           ))}
+          {!settings.expertMode && (
+            <p className={styles.railHint}>
+              Für die technischen Kategorien den Expertenmodus einschalten.
+            </p>
+          )}
         </nav>
 
         <div className={styles.sections}>
-          <Category
-            id="schutz"
-            title="Schutz"
-            description="Was für alle Geräte im Netzwerk gefiltert wird."
-          >
-            <Row
-              label="Werbung & Tracker blockieren"
-              description="Filtert bekannte Werbe- und Trackingdienste."
-              details="Gleicht jede DNS-Anfrage gegen Listen bekannter Werbe- und Tracking-Domains ab. Treffer werden nicht aufgelöst, sondern geblockt — für alle Geräte im Netzwerk, ohne dort etwas zu installieren."
-              control={
-                <Toggle
-                  label="Werbung & Tracker blockieren"
-                  checked={settings.blockAdsTrackers}
-                  onChange={(v) => update("blockAdsTrackers", v)}
-                />
-              }
-            />
-            <Row
-              label="Schadsoftware blockieren"
-              description="Sperrt Domains, die für Phishing und Schadsoftware bekannt sind."
-              details="Vergleicht Anfragen mit Listen von Phishing-, Malware- und Betrugs-Domains. Verbindungen zu diesen Zielen werden gar nicht erst aufgebaut, weil der Name nicht aufgelöst wird."
-              control={
-                <Toggle
-                  label="Schadsoftware blockieren"
-                  checked={settings.blockMalware}
-                  onChange={(v) => update("blockMalware", v)}
-                />
-              }
-            />
-            <Row
-              label="Sichere Suche erzwingen"
-              description="Erzwingt den Jugendschutzmodus bei großen Suchmaschinen."
-              details="Leitet Google, Bing und YouTube per DNS auf ihre jugendsicheren Adressen um, sodass explizite Ergebnisse ausgefiltert werden — unabhängig von den Einstellungen am einzelnen Gerät."
-              control={
-                <Toggle
-                  label="Sichere Suche erzwingen"
-                  checked={settings.safeSearch}
-                  onChange={(v) => update("safeSearch", v)}
-                />
-              }
-            />
-          </Category>
+          {active === "schutz" && (
+            <Category
+              id="schutz"
+              title="Schutz"
+              description="Was für alle Geräte im Netzwerk gefiltert wird."
+            >
+              <Row
+                label="Werbung & Tracker blockieren"
+                description="Filtert bekannte Werbe- und Trackingdienste."
+                details="Gleicht jede DNS-Anfrage gegen Listen bekannter Werbe- und Tracking-Domains ab. Treffer werden nicht aufgelöst, sondern geblockt — für alle Geräte im Netzwerk, ohne dort etwas zu installieren."
+                control={
+                  <Toggle
+                    label="Werbung & Tracker blockieren"
+                    checked={settings.blockAdsTrackers}
+                    onChange={(v) => update("blockAdsTrackers", v)}
+                  />
+                }
+              />
+              <Row
+                label="Schadsoftware blockieren"
+                description="Sperrt Domains, die für Phishing und Schadsoftware bekannt sind."
+                details="Vergleicht Anfragen mit Listen von Phishing-, Malware- und Betrugs-Domains. Verbindungen zu diesen Zielen werden gar nicht erst aufgebaut, weil der Name nicht aufgelöst wird."
+                control={
+                  <Toggle
+                    label="Schadsoftware blockieren"
+                    checked={settings.blockMalware}
+                    onChange={(v) => update("blockMalware", v)}
+                  />
+                }
+              />
+              <Row
+                label="Sichere Suche erzwingen"
+                description="Erzwingt den Jugendschutzmodus bei großen Suchmaschinen."
+                details="Leitet Google, Bing und YouTube per DNS auf ihre jugendsicheren Adressen um, sodass explizite Ergebnisse ausgefiltert werden — unabhängig von den Einstellungen am einzelnen Gerät."
+                control={
+                  <Toggle
+                    label="Sichere Suche erzwingen"
+                    checked={settings.safeSearch}
+                    onChange={(v) => update("safeSearch", v)}
+                  />
+                }
+              />
+            </Category>
+          )}
 
-          {settings.expertMode ? (
-            <>
-              <Category
-                id="upstream"
-                title="Upstream-Resolver"
-                description="An welche Resolver Anfragen weitergereicht werden und wie gewählt wird."
-              >
-                <Row
-                  label="Auswahlmodus"
-                  description="Wie zwischen den konfigurierten Resolvern gewählt wird."
-                  details="Racing fragt alle Resolver gleichzeitig und nimmt die erste Antwort. Fallback geht sie der Reihe nach durch. Lastverteilt wechselt reihum. Regelbasiert wählt den Resolver anhand von Domain-Regeln."
-                  control={
-                    <select
-                      className={styles.select}
-                      aria-label="Auswahlmodus"
-                      value={settings.upstreamMode}
-                      onChange={(e) => update("upstreamMode", e.target.value as UpstreamMode)}
+          {active === "upstream" && (
+            <Category
+              id="upstream"
+              title="Upstream-Resolver"
+              description="An welche Resolver Anfragen weitergereicht werden und wie gewählt wird."
+            >
+              <Row
+                label="Auswahlmodus"
+                description="Wie zwischen den konfigurierten Resolvern gewählt wird."
+                details="Racing fragt alle Resolver gleichzeitig und nimmt die erste Antwort. Fallback geht sie der Reihe nach durch. Lastverteilt wechselt reihum. Regelbasiert wählt den Resolver anhand von Domain-Regeln."
+                control={
+                  <select
+                    className={styles.select}
+                    aria-label="Auswahlmodus"
+                    value={settings.upstreamMode}
+                    onChange={(e) => update("upstreamMode", e.target.value as UpstreamMode)}
+                  >
+                    {(Object.keys(MODE_LABELS) as UpstreamMode[]).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {MODE_LABELS[mode]}
+                      </option>
+                    ))}
+                  </select>
+                }
+              />
+              <ul className={styles.resolvers}>
+                {RESOLVERS.map((resolver) => (
+                  <li key={resolver.ip} className={styles.resolver}>
+                    <span className={styles.resolverIp}>{resolver.ip}</span>
+                    <span className={styles.resolverHost}>{resolver.host}</span>
+                    <span
+                      className={styles.resolverTag}
+                      data-warn={!settings.encryptUpstream || undefined}
                     >
-                      {(Object.keys(MODE_LABELS) as UpstreamMode[]).map((mode) => (
-                        <option key={mode} value={mode}>
-                          {MODE_LABELS[mode]}
-                        </option>
-                      ))}
-                    </select>
-                  }
-                />
-                <ul className={styles.resolvers}>
-                  {RESOLVERS.map((resolver) => (
-                    <li key={resolver.ip} className={styles.resolver}>
-                      <span className={styles.resolverIp}>{resolver.ip}</span>
-                      <span className={styles.resolverHost}>{resolver.host}</span>
-                      <span
-                        className={styles.resolverTag}
-                        data-warn={!settings.encryptUpstream || undefined}
-                      >
-                        {settings.encryptUpstream ? "DoT" : "Klartext"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </Category>
+                      {settings.encryptUpstream ? "DoT" : "Klartext"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Category>
+          )}
 
-              <Category
-                id="verschluesselung"
-                title="Verschlüsselung"
-                description="Wie Anfragen an die Resolver übertragen werden."
-              >
-                <Row
-                  label="Upstream verschlüsseln"
-                  description="Anfragen über DNS-over-TLS statt im Klartext senden."
-                  details="Sendet Anfragen an die Resolver über DNS-over-TLS (Port 853), sodass niemand im Netzweg mitlesen kann, welche Domains abgefragt werden. Ausgeschaltet gehen die Anfragen im Klartext über Port 53."
-                  control={
-                    <Toggle
-                      label="Upstream verschlüsseln"
-                      checked={settings.encryptUpstream}
-                      onChange={(v) => update("encryptUpstream", v)}
-                    />
-                  }
-                />
-              </Category>
+          {active === "verschluesselung" && (
+            <Category
+              id="verschluesselung"
+              title="Verschlüsselung"
+              description="Wie Anfragen an die Resolver übertragen werden."
+            >
+              <Row
+                label="Upstream verschlüsseln"
+                description="Anfragen über DNS-over-TLS statt im Klartext senden."
+                details="Sendet Anfragen an die Resolver über DNS-over-TLS (Port 853), sodass niemand im Netzweg mitlesen kann, welche Domains abgefragt werden. Ausgeschaltet gehen die Anfragen im Klartext über Port 53."
+                control={
+                  <Toggle
+                    label="Upstream verschlüsseln"
+                    checked={settings.encryptUpstream}
+                    onChange={(v) => update("encryptUpstream", v)}
+                  />
+                }
+              />
+            </Category>
+          )}
 
-              <Category
-                id="cache"
-                title="Cache"
-                description="Wie zwischengespeicherte Antworten behandelt werden."
-              >
-                <Row
-                  label="Abgelaufene Einträge weiterreichen"
-                  description="Serve-Stale: bei nicht erreichbarem Upstream vorübergehend abgelaufene Antworten ausliefern."
-                  details="Ist kein Resolver erreichbar, liefert der Cache vorübergehend bereits abgelaufene Antworten weiter, damit die Namensauflösung bei kurzen Ausfällen nicht komplett stoppt."
-                  control={
-                    <Toggle
-                      label="Abgelaufene Einträge weiterreichen"
-                      checked={settings.cacheServeStale}
-                      onChange={(v) => update("cacheServeStale", v)}
-                    />
-                  }
-                />
-              </Category>
+          {active === "cache" && (
+            <Category
+              id="cache"
+              title="Cache"
+              description="Wie zwischengespeicherte Antworten behandelt werden."
+            >
+              <Row
+                label="Abgelaufene Einträge weiterreichen"
+                description="Serve-Stale: bei nicht erreichbarem Upstream vorübergehend abgelaufene Antworten ausliefern."
+                details="Ist kein Resolver erreichbar, liefert der Cache vorübergehend bereits abgelaufene Antworten weiter, damit die Namensauflösung bei kurzen Ausfällen nicht komplett stoppt."
+                control={
+                  <Toggle
+                    label="Abgelaufene Einträge weiterreichen"
+                    checked={settings.cacheServeStale}
+                    onChange={(v) => update("cacheServeStale", v)}
+                  />
+                }
+              />
+            </Category>
+          )}
 
-              <Category
-                id="protokoll"
-                title="Protokollierung"
-                description="Was über aufgelöste Anfragen gespeichert wird."
-              >
-                <Row
-                  label="Anfrageprotokoll"
-                  description="Speichert aufgelöste Anfragen für den Abfrage-Explorer."
-                  details="Hält zu jeder Anfrage Zeitpunkt, Gerät, Domain und das Ergebnis (aufgelöst oder geblockt) fest, damit der Abfrage-Explorer sie später anzeigen kann."
-                  control={
-                    <Toggle
-                      label="Anfrageprotokoll"
-                      checked={settings.queryLog}
-                      onChange={(v) => update("queryLog", v)}
+          {active === "protokoll" && (
+            <Category
+              id="protokoll"
+              title="Protokollierung"
+              description="Was über aufgelöste Anfragen gespeichert wird."
+            >
+              <Row
+                label="Anfrageprotokoll"
+                description="Speichert aufgelöste Anfragen für den Abfrage-Explorer."
+                details="Hält zu jeder Anfrage Zeitpunkt, Gerät, Domain und das Ergebnis (aufgelöst oder geblockt) fest, damit der Abfrage-Explorer sie später anzeigen kann."
+                control={
+                  <Toggle
+                    label="Anfrageprotokoll"
+                    checked={settings.queryLog}
+                    onChange={(v) => update("queryLog", v)}
+                  />
+                }
+              />
+              <Row
+                label="Aufbewahrung"
+                description="Wie lange Protokolleinträge gespeichert bleiben."
+                details="Legt fest, nach wie vielen Tagen Protokolleinträge automatisch gelöscht werden. Nur einstellbar, wenn das Anfrageprotokoll aktiv ist."
+                disabled={!settings.queryLog}
+                control={
+                  <label className={styles.number}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={settings.logRetentionDays}
+                      disabled={!settings.queryLog}
+                      onChange={(e) => update("logRetentionDays", Number(e.target.value))}
+                      aria-label="Aufbewahrung in Tagen"
                     />
-                  }
-                />
-                <Row
-                  label="Aufbewahrung"
-                  description="Wie lange Protokolleinträge gespeichert bleiben."
-                  details="Legt fest, nach wie vielen Tagen Protokolleinträge automatisch gelöscht werden. Nur einstellbar, wenn das Anfrageprotokoll aktiv ist."
-                  disabled={!settings.queryLog}
-                  control={
-                    <label className={styles.number}>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        value={settings.logRetentionDays}
-                        disabled={!settings.queryLog}
-                        onChange={(e) => update("logRetentionDays", Number(e.target.value))}
-                        aria-label="Aufbewahrung in Tagen"
-                      />
-                      <span>Tage</span>
-                    </label>
-                  }
-                />
-              </Category>
-            </>
-          ) : (
-            <p className={styles.hint}>
-              Für die technischen Kategorien den Expertenmodus einschalten.
-            </p>
+                    <span>Tage</span>
+                  </label>
+                }
+              />
+            </Category>
           )}
         </div>
       </div>
