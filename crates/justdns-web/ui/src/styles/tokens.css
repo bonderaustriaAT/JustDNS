@@ -1,0 +1,80 @@
+:root {
+  /* Core palette: a calm status-panel world, not a marketing page. */
+  --ink: #0f2b2a;
+  --paper: #f4f6f5;
+  --signal: #1c8c66;
+  --signal-strong: #156b4e;
+  --amber: #e6a532;
+  --slate: #5b6b6a;
+
+  /* Surfaces and text, derived so light and dark stay coherent. */
+  --bg: var(--paper);
+  --surface: #ffffff;
+  --surface-sunken: #ebeeed;
+  --text: var(--ink);
+  --text-muted: var(--slate);
+  --line: color-mix(in srgb, var(--ink) 11%, transparent);
+  --line-strong: color-mix(in srgb, var(--ink) 20%, transparent);
+  --field: #ffffff;
+  --focus: color-mix(in srgb, var(--signal) 55%, transparent);
+
+  --danger: #c2473f;
+  --warn: #9a6a12;
+
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Type scale (1.25 minor third), expressed in rem. */
+  --step--1: 0.8rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.6rem;
+  --step-3: 2.1rem;
+  --step-hero: clamp(3rem, 2rem + 4vw, 4.6rem);
+
+  --space-1: 0.35rem;
+  --space-2: 0.65rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2.25rem;
+  --space-6: 3.5rem;
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --measure: 66ch;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1f1e;
+    --surface: #10302e;
+    --surface-sunken: #0d2726;
+    --text: #e7ece9;
+    --text-muted: #9fb2ad;
+    --line: color-mix(in srgb, #e7ece9 13%, transparent);
+    --line-strong: color-mix(in srgb, #e7ece9 24%, transparent);
+    --field: #0c2423;
+    --signal: #37a97e;
+    --signal-strong: #4cc193;
+    --focus: color-mix(in srgb, #37a97e 60%, transparent);
+    --danger: #e0695f;
+    --warn: #e6a532;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1f1e;
+  --surface: #10302e;
+  --surface-sunken: #0d2726;
+  --text: #e7ece9;
+  --text-muted: #9fb2ad;
+  --line: color-mix(in srgb, #e7ece9 13%, transparent);
+  --line-strong: color-mix(in srgb, #e7ece9 24%, transparent);
+  --field: #0c2423;
+  --signal: #37a97e;
+  --signal-strong: #4cc193;
+  --focus: color-mix(in srgb, #37a97e 60%, transparent);
+  --danger: #e0695f;
+  --warn: #e6a532;
+}

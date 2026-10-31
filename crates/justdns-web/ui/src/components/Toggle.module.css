@@ -1,0 +1,40 @@
+.toggle {
+  --w: 44px;
+  --h: 26px;
+  position: relative;
+  inline-size: var(--w);
+  block-size: var(--h);
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  transition: background 140ms ease, border-color 140ms ease;
+  flex: none;
+}
+
+.toggle[data-on="true"] {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.knob {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 3px;
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: 50%;
+  background: #fff;
+  translate: 0 -50%;
+  transition: inset-inline-start 160ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.toggle[data-on="true"] .knob {
+  inset-inline-start: calc(var(--w) - 18px - 3px);
+}

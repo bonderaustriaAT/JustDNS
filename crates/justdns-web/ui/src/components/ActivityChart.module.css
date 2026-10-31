@@ -1,0 +1,80 @@
+.wrap {
+  position: relative;
+  margin: 0;
+  touch-action: none;
+}
+
+.svg {
+  display: block;
+}
+
+.area {
+  fill: var(--signal);
+  opacity: 0.1;
+}
+
+.line {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.axis {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.tick {
+  fill: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.last {
+  fill: var(--signal);
+}
+
+.guide {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.marker {
+  fill: var(--signal);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.tipValue {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--step-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.tipMeta {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.caption {
+  margin-block-start: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}

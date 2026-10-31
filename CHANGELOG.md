@@ -34,3 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from the environment, then serves. Stops cleanly on SIGTERM or Ctrl-C.
 - Container image: multi-stage `Dockerfile`, `.dockerignore` and `docs/docker.md`
   with build, run and `dig` instructions.
+- Web UI scaffold (React/Vite/TypeScript): overview with protection status and
+  blocked-query activity, and settings with an expert toggle that reveals the
+  technical options.
+- Settings: a Network category with an IPv6 toggle, off by default, matching the
+  DNS core's handling of AAAA queries.

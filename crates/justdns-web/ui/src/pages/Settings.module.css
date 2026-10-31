@@ -1,0 +1,278 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+/* The expert switch sits apart from the categories: a sunken band so it reads
+   as a mode change, not just another toggle. */
+.expertBand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.rail {
+  position: sticky;
+  inset-block-start: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.railLink,
+.railActive {
+  display: block;
+  inline-size: 100%;
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+}
+
+.railLink:hover {
+  color: var(--text);
+}
+
+.railActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  border-inline-start-color: var(--signal);
+}
+
+.railHint {
+  margin-block-start: var(--space-3);
+  padding-inline: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-inline-size: 0;
+}
+
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  scroll-margin-block-start: 96px;
+}
+
+.categoryHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--line);
+}
+
+.categoryTitle {
+  font-size: var(--step-1);
+}
+
+.categoryDescription {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.row:first-child {
+  border-block-start: none;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.labelLine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.label {
+  font-weight: 500;
+}
+
+/* A dependent setting is dimmed and inert while its parent feature is off, so
+   it reads as "available once that is on". */
+.row[data-disabled] .text,
+.row[data-disabled] .control {
+  opacity: 0.45;
+}
+
+.description {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: 48ch;
+}
+
+.control {
+  flex: none;
+}
+
+.select {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.resolvers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resolver {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-start: 1px dashed var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+
+.resolverIp {
+  color: var(--text);
+  min-inline-size: 9ch;
+}
+
+.resolverHost {
+  color: var(--text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resolverTag {
+  flex: none;
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+}
+
+.resolverTag[data-warn] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+.number {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.number input {
+  font: inherit;
+  inline-size: 4.5rem;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.number input:disabled {
+  cursor: not-allowed;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .rail {
+    position: sticky;
+    inset-block-start: 60px;
+    flex-direction: row;
+    gap: var(--space-1);
+    overflow-x: auto;
+    padding-block: var(--space-2);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(8px);
+    z-index: 5;
+  }
+
+  .railLink,
+  .railActive {
+    white-space: nowrap;
+    border-inline-start: none;
+    border-block-end: 2px solid transparent;
+  }
+
+  .railActive {
+    border-inline-start: none;
+    border-block-end-color: var(--signal);
+    background: transparent;
+  }
+
+  .railHint {
+    display: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .row,
+  .expertBand {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+}
