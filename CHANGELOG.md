@@ -57,3 +57,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The overview now shows live data from the API instead of placeholders:
   resolved-query total, cache share, active devices, the 24-hour activity trace
   and the most recent queries, refreshed every few seconds.
+- Image publishing: a CI workflow builds the container image on a release tag
+  and pushes it to the registry, and a `docker-compose.yml` runs that published
+  image — so a deployment pulls a ready-made image instead of compiling the
+  bundled DuckDB sources locally.

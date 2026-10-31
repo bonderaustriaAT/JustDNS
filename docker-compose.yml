@@ -1,0 +1,22 @@
+# Run JustDNS from the published image — no build, no compile. Pull and start:
+#   docker compose up -d
+# The DNS server listens on port 53 (UDP and TCP) and the web UI on 8080.
+# The query log is kept in the named volume so it survives restarts.
+services:
+  justdns:
+    image: 192.168.20.143:3000/bonderosa/justdns:latest
+    container_name: justdns
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "8080:8080/tcp"
+    volumes:
+      - justdns-data:/data
+    environment:
+      # Answer AAAA queries upstream as well; off by default so clients fall
+      # back to IPv4. Set to "true" to enable IPv6 answers.
+      JUSTDNS_IPV6: "false"
+
+volumes:
+  justdns-data:
