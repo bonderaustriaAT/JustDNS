@@ -19,6 +19,7 @@ const DEFAULT_WEB_LISTEN: &str = "0.0.0.0:8080";
 const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 const DEFAULT_DB_PATH: &str = "queries.duckdb";
 const DEFAULT_CONFIG_PATH: &str = "config.json";
+const DEFAULT_AUTH_PATH: &str = "auth.json";
 
 #[derive(Debug)]
 pub struct Config {
@@ -30,6 +31,8 @@ pub struct Config {
     /// Where the editable runtime configuration is stored. Env values seed it
     /// on first run; afterwards this file is the source of truth.
     pub config_path: PathBuf,
+    /// Where the account list (admin password hash) is stored.
+    pub auth_path: PathBuf,
     pub upstreams: UpstreamConfig,
 }
 
@@ -89,6 +92,10 @@ impl Config {
             read_var("JUSTDNS_CONFIG_PATH")?.unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_owned()),
         );
 
+        let auth_path = PathBuf::from(
+            read_var("JUSTDNS_AUTH_PATH")?.unwrap_or_else(|| DEFAULT_AUTH_PATH.to_owned()),
+        );
+
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
             None => UpstreamConfig::eu_defaults(),
@@ -101,6 +108,7 @@ impl Config {
             cache_capacity,
             db_path,
             config_path,
+            auth_path,
             upstreams,
         })
     }

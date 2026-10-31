@@ -47,6 +47,42 @@
   gap: var(--space-4);
 }
 
+.account {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+.user {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.logout {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.logout:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+@media (max-width: 540px) {
+  .user {
+    display: none;
+  }
+}
+
 .link,
 .active {
   color: var(--text-muted);
