@@ -205,7 +205,10 @@ mod tests {
         let mut message = Message::new();
         message.set_id(1234);
         message.set_recursion_desired(true);
-        message.add_query(Query::query(Name::from_ascii("example.com.").unwrap(), record_type));
+        message.add_query(Query::query(
+            Name::from_ascii("example.com.").unwrap(),
+            record_type,
+        ));
         message.to_vec().unwrap()
     }
 

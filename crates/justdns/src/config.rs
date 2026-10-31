@@ -45,22 +45,21 @@ pub enum ConfigError {
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
         let listen = parse_var("JUSTDNS_LISTEN", DEFAULT_LISTEN.parse().unwrap(), |value| {
-            value
-                .parse()
-                .map_err(|source| ConfigError::BadAddress {
-                    var: "JUSTDNS_LISTEN",
-                    source,
-                })
+            value.parse().map_err(|source| ConfigError::BadAddress {
+                var: "JUSTDNS_LISTEN",
+                source,
+            })
         })?;
 
         let ipv6_enabled = parse_var("JUSTDNS_IPV6", false, |value| Ok(is_truthy(value)))?;
 
-        let cache_capacity = parse_var("JUSTDNS_CACHE_CAPACITY", DEFAULT_CACHE_CAPACITY, |value| {
-            value.parse().map_err(|source| ConfigError::BadNumber {
-                var: "JUSTDNS_CACHE_CAPACITY",
-                source,
-            })
-        })?;
+        let cache_capacity =
+            parse_var("JUSTDNS_CACHE_CAPACITY", DEFAULT_CACHE_CAPACITY, |value| {
+                value.parse().map_err(|source| ConfigError::BadNumber {
+                    var: "JUSTDNS_CACHE_CAPACITY",
+                    source,
+                })
+            })?;
 
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
@@ -81,7 +80,11 @@ impl Config {
 /// local or test resolver instead of the encrypted EU defaults.
 fn parse_upstreams(raw: &str) -> Result<UpstreamConfig, ConfigError> {
     let mut upstreams = Vec::new();
-    for entry in raw.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+    for entry in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
         let address = parse_plain_address(entry).ok_or_else(|| ConfigError::BadAddress {
             var: "JUSTDNS_UPSTREAMS",
             source: entry.parse::<IpAddr>().unwrap_err(),
