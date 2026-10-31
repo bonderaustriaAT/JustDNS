@@ -46,8 +46,8 @@ export function Overview() {
           <dd>{data.cacheRate}&thinsp;%</dd>
         </div>
         <div className={styles.stat}>
-          <dt>Anfragen gesamt</dt>
-          <dd>{de.format(data.total)}</dd>
+          <dt>Geblockt</dt>
+          <dd>{de.format(data.blocked)}</dd>
         </div>
         <div className={styles.stat}>
           <dt>Aktive Geräte</dt>

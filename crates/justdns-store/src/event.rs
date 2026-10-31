@@ -20,6 +20,8 @@ pub enum QuerySource {
     Upstream,
     /// Answered locally without a lookup (for example a suppressed AAAA).
     Local,
+    /// Refused by the blocking engine without a lookup.
+    Blocked,
 }
 
 impl QuerySource {
@@ -29,6 +31,7 @@ impl QuerySource {
             QuerySource::Cache => "cache",
             QuerySource::Upstream => "upstream",
             QuerySource::Local => "local",
+            QuerySource::Blocked => "blocked",
         }
     }
 
@@ -38,6 +41,7 @@ impl QuerySource {
             "cache" => Some(QuerySource::Cache),
             "upstream" => Some(QuerySource::Upstream),
             "local" => Some(QuerySource::Local),
+            "blocked" => Some(QuerySource::Blocked),
             _ => None,
         }
     }

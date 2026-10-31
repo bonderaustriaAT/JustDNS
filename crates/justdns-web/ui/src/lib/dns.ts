@@ -34,6 +34,7 @@ const SOURCE_LABELS: Record<QuerySource, string> = {
   cache: "Cache",
   upstream: "Upstream",
   local: "Lokal",
+  blocked: "Geblockt",
 };
 
 export function recordTypeLabel(code: number): string {

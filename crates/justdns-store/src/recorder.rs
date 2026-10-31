@@ -37,6 +37,8 @@ pub struct Stats {
     pub upstream: u64,
     /// Queries answered locally without a lookup.
     pub local: u64,
+    /// Queries refused by the blocking engine.
+    pub blocked: u64,
     /// Queries answered with NXDOMAIN.
     pub nxdomain: u64,
     /// Queries answered with SERVFAIL.
@@ -77,6 +79,30 @@ impl Recorder {
         }
     }
 
+    /// Seed the view from the durable log on startup so a restart continues the
+    /// figures instead of counting from zero: lifetime `stats` from the whole
+    /// log, `activity` for the last day, and `recent` from the newest events.
+    ///
+    /// `recent_newest_first` is what the log returns (newest first); the ring is
+    /// stored oldest-at-front, the way [`Self::record`] builds it. The totals
+    /// are taken as given rather than recomputed from the recent window, so they
+    /// reflect the entire history even though only the window is kept in memory.
+    pub fn rehydrate(
+        &self,
+        recent_newest_first: Vec<QueryEvent>,
+        stats: Stats,
+        activity: Vec<ActivityBucket>,
+    ) {
+        let mut state = self.state.lock().expect("recorder lock poisoned");
+        state.stats = stats;
+        state.activity = activity.into_iter().collect();
+        let mut ring: VecDeque<QueryEvent> = recent_newest_first.into_iter().rev().collect();
+        while ring.len() > self.capacity {
+            ring.pop_front();
+        }
+        state.recent = ring;
+    }
+
     /// Record a handled query, evicting the oldest event once full.
     pub fn record(&self, event: QueryEvent) {
         let mut state = self.state.lock().expect("recorder lock poisoned");
@@ -86,6 +112,7 @@ impl Recorder {
             QuerySource::Cache => state.stats.cache_hits += 1,
             QuerySource::Upstream => state.stats.upstream += 1,
             QuerySource::Local => state.stats.local += 1,
+            QuerySource::Blocked => state.stats.blocked += 1,
         }
         match event.response_code {
             RCODE_NXDOMAIN => state.stats.nxdomain += 1,

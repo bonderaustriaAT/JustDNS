@@ -1140,6 +1140,7 @@ dependencies = [
  "futures-util",
  "hickory-proto",
  "hickory-resolver",
+ "justdns-filter",
  "moka",
  "tokio",
  "tracing",

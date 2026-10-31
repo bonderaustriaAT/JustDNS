@@ -51,10 +51,12 @@ impl Store {
 
     fn spawn(duck: DuckStore, capacity: usize) -> Result<(Self, JoinHandle<()>), StoreError> {
         let recorder = Arc::new(Recorder::new(capacity));
-        // Rehydrate the hot view from the log so a restart does not start blank.
-        for event in duck.recent(capacity)?.into_iter().rev() {
-            recorder.record(event);
-        }
+        // Rehydrate the hot view from the log so a restart continues the figures
+        // rather than starting blank: the lifetime totals and the day's activity
+        // come from the whole log, the recent ring from the newest events. This
+        // is why an update keeps the dashboard's running totals intact even
+        // though only the recent window is held in memory.
+        recorder.rehydrate(duck.recent(capacity)?, duck.stats()?, duck.activity()?);
 
         let (writer, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let handle = tokio::spawn(writer_loop(duck, rx));
@@ -186,6 +188,33 @@ mod tests {
             2,
             "counters rehydrated from the log"
         );
+        assert_eq!(reopened.recent(10).len(), 2);
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("duckdb.wal"));
+    }
+
+    #[tokio::test]
+    async fn lifetime_totals_survive_beyond_the_recent_window() {
+        let path = temp_path();
+        {
+            // A hot view that only keeps 2 events, but 5 go to the durable log.
+            let (store, writer) = Store::open(&path, 2).unwrap();
+            for at in 1..=5 {
+                store.record(event(at));
+            }
+            drop(store);
+            writer.await.unwrap();
+        }
+
+        let (reopened, _writer) = Store::open(&path, 2).unwrap();
+        // The total reflects the whole log, not just the rehydrated window.
+        assert_eq!(
+            reopened.stats().total,
+            5,
+            "running totals survive a restart (and an update) in full"
+        );
+        // The recent ring is still bounded by the capacity.
         assert_eq!(reopened.recent(10).len(), 2);
 
         let _ = std::fs::remove_file(&path);

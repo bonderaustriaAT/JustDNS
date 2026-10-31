@@ -18,6 +18,7 @@ export interface RecentQuery {
 
 export interface OverviewData {
   total: number;
+  blocked: number;
   cacheRate: number;
   activeClients: number;
   /** Queries per hour over the last 24 hours, oldest first. */
@@ -77,6 +78,7 @@ export function useOverview(): OverviewState {
         setState({
           data: {
             total: stats.total,
+            blocked: stats.blocked,
             cacheRate: stats.total === 0 ? 0 : Math.round((stats.cache_hits / stats.total) * 100),
             activeClients: stats.active_clients,
             activity: denseActivity(activity),
