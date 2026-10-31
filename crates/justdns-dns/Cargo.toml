@@ -6,3 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+hickory-proto = "0.25.2"
+hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }
+moka = { version = "0.12.16", features = ["future"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "io-util"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "rt-multi-thread"] }
