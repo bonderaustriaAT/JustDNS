@@ -4,8 +4,12 @@
 //! Persistence for the query log: the durable DuckDB store and the in-memory
 //! hot view that feeds the dashboard.
 
+mod duck;
 mod event;
 mod recorder;
+mod store;
 
+pub use duck::{DuckStore, StoreError};
 pub use event::{QueryEvent, QuerySource};
 pub use recorder::{ActivityBucket, Recorder, Stats};
+pub use store::Store;

@@ -22,6 +22,27 @@ pub enum QuerySource {
     Local,
 }
 
+impl QuerySource {
+    /// The lowercase label stored in the query log.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            QuerySource::Cache => "cache",
+            QuerySource::Upstream => "upstream",
+            QuerySource::Local => "local",
+        }
+    }
+
+    /// Parse a stored label back into a source, if it is one we wrote.
+    pub(crate) fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "cache" => Some(QuerySource::Cache),
+            "upstream" => Some(QuerySource::Upstream),
+            "local" => Some(QuerySource::Local),
+            _ => None,
+        }
+    }
+}
+
 /// One handled query and how it was answered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueryEvent {
