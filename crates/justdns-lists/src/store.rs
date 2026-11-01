@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use justdns_filter::{Blocker, DomainSet, parse_rule};
+use justdns_filter::{BlockSource, Blocker, DomainSet, parse_rule};
 use serde::{Deserialize, Serialize};
 
 use crate::ListKind;
@@ -454,30 +454,56 @@ impl ListStore {
             .collect()
     }
 
-    /// Rebuild the merged allow and block sets and swap them into the blocker.
-    /// Reads each enabled subscription's cached feed from disk.
+    /// Rebuild the allow set and the block sources and swap them into the
+    /// blocker. The allow side stays merged, but the block side is kept as one
+    /// named source per list — the user's manual list first, then each enabled
+    /// block subscription under its own name — so a block can report the exact
+    /// list that caught the query. Reads each enabled feed's cache from disk.
     fn rebuild(&self, lists: &UserLists) {
         let mut allow = DomainSet::new();
         for domain in &lists.allow {
             allow.add_rules(domain);
         }
-        let mut block = DomainSet::new();
+
+        let mut sources: Vec<BlockSource> = Vec::new();
+        // The user's own manual block list comes first, so an entry they added
+        // on purpose is attributed to them rather than to a feed that overlaps.
+        let mut own = DomainSet::new();
         for domain in &lists.block {
-            block.add_rules(domain);
+            own.add_rules(domain);
         }
+        if !own.is_empty() {
+            sources.push(BlockSource {
+                label: "Eigene Blockliste".to_owned(),
+                set: own,
+            });
+        }
+
         for sub in &lists.subscriptions {
             if !sub.enabled {
                 continue;
             }
-            if let Some(text) = self.read_cache(&sub.id) {
-                match sub.kind {
-                    ListKind::Allow => allow.add_rules(&text),
-                    ListKind::Block => block.add_rules(&text),
+            let Some(text) = self.read_cache(&sub.id) else {
+                continue;
+            };
+            match sub.kind {
+                // Allow feeds still merge into the one allow set.
+                ListKind::Allow => allow.add_rules(&text),
+                // Each block feed is its own named source, so the dashboard can
+                // name it as the reason for a block.
+                ListKind::Block => {
+                    let mut set = DomainSet::new();
+                    set.add_rules(&text);
+                    sources.push(BlockSource {
+                        label: sub.name.clone(),
+                        set,
+                    });
                 }
             }
         }
+
         self.inner.blocker.set_allow(allow);
-        self.inner.blocker.set_custom(block);
+        self.inner.blocker.set_block_sources(sources);
     }
 
     fn persist(&self, lists: &UserLists) -> Result<(), ListError> {

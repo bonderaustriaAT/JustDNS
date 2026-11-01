@@ -275,13 +275,17 @@ async fn auth_logout(
     )
 }
 
-/// Explain why a name is on a block list: the category (`"ads"`/`"malware"`)
-/// and the rule that matched. Returns `null` when the name is on no list. Used
+/// Explain why a name is on a block list: the broad category
+/// (`"ads"`/`"malware"`/`"custom"`), the rule that matched, and — for a custom
+/// block — the display name of the exact list that caught it (the user's own
+/// list or a subscribed feed). Returns `null` when the name is on no list. Used
 /// by the log's detail view to show why an entry was blocked.
 #[derive(Serialize)]
 struct ClassifyResponse {
     list: &'static str,
     rule: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -296,6 +300,7 @@ async fn classify(
     Json(blocker.explain(&params.name).map(|hit| ClassifyResponse {
         list: hit.category.as_str(),
         rule: hit.rule,
+        name: hit.list,
     }))
 }
 

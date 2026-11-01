@@ -52,6 +52,8 @@ export type BlockList = "ads" | "malware" | "custom";
 export interface ClassifyResult {
   list: BlockList;
   rule: string;
+  /** For a custom block, the exact list that matched (own list or a feed). */
+  name?: string;
 }
 
 /** Whether a list adds names to the allow set or the block set. */
