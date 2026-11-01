@@ -11,6 +11,7 @@ justdns-config = { path = "../justdns-config" }
 justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }
 justdns-lists = { path = "../justdns-lists" }
+justdns-rewrite = { path = "../justdns-rewrite" }
 justdns-store = { path = "../justdns-store" }
 justdns-web = { path = "../justdns-web" }
 thiserror = "2"

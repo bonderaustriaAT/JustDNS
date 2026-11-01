@@ -1247,6 +1247,7 @@ dependencies = [
  "justdns-dns",
  "justdns-filter",
  "justdns-lists",
+ "justdns-rewrite",
  "justdns-store",
  "justdns-web",
  "thiserror",
@@ -1285,6 +1286,7 @@ dependencies = [
  "hickory-proto",
  "hickory-resolver",
  "justdns-filter",
+ "justdns-rewrite",
  "moka",
  "tokio",
  "tracing",
@@ -1311,6 +1313,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "justdns-rewrite"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "justdns-store"
 version = "0.1.0"
 dependencies = [
@@ -1331,6 +1344,7 @@ dependencies = [
  "justdns-config",
  "justdns-filter",
  "justdns-lists",
+ "justdns-rewrite",
  "justdns-store",
  "rust-embed",
  "serde",

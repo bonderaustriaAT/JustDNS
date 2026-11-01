@@ -6,6 +6,7 @@ import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Overview } from "./pages/Overview";
+import { Rewrites } from "./pages/Rewrites";
 import { Settings } from "./pages/Settings";
 import { useAuth } from "./state/auth";
 import { SettingsProvider } from "./state/settings";
@@ -33,6 +34,7 @@ export function App() {
           <Route path="/listen/eigene" element={<Navigate to="/listen/url" replace />} />
           <Route path="/listen/url" element={<Lists section="mine" />} />
           <Route path="/listen/fertige" element={<Lists section="presets" />} />
+          <Route path="/rewrites" element={<Rewrites />} />
           <Route path="/einstellungen" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

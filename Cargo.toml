@@ -6,6 +6,7 @@ members = [
     "crates/justdns-dns",
     "crates/justdns-filter",
     "crates/justdns-lists",
+    "crates/justdns-rewrite",
     "crates/justdns-store",
     "crates/justdns-web",
     "crates/justdns",
