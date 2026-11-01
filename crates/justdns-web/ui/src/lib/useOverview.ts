@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type QueryRow } from "./api";
 import { displayName, recordTypeLabel, sourceLabel } from "./dns";
+import { useI18n, type Lang } from "./i18n";
 
 const HOUR_MS = 3_600_000;
 const ACTIVITY_HOURS = 24;
@@ -45,18 +46,19 @@ function denseActivity(buckets: { hour_ms: number; count: number }[]): number[] 
   return series;
 }
 
-function toRecent(rows: QueryRow[]): RecentQuery[] {
+function toRecent(rows: QueryRow[], lang: Lang): RecentQuery[] {
   const now = Date.now();
   return rows.slice(0, RECENT_LIMIT).map((row) => ({
     name: displayName(row.name),
     client: row.client,
     type: recordTypeLabel(row.record_type),
-    source: sourceLabel(row.source),
+    source: sourceLabel(row.source, lang),
     secondsAgo: Math.max(0, Math.round((now - row.at_ms) / 1000)),
   }));
 }
 
 export function useOverview(): OverviewState {
+  const { lang, t } = useI18n();
   const [state, setState] = useState<OverviewState>({
     data: null,
     error: null,
@@ -82,7 +84,7 @@ export function useOverview(): OverviewState {
             cacheRate: stats.total === 0 ? 0 : Math.round((stats.cache_hits / stats.total) * 100),
             activeClients: stats.active_clients,
             activity: denseActivity(activity),
-            recent: toRecent(queries),
+            recent: toRecent(queries, lang),
           },
           error: null,
           loading: false,
@@ -91,7 +93,7 @@ export function useOverview(): OverviewState {
         if (!active || controller.signal.aborted) return;
         setState((prev) => ({
           data: prev.data,
-          error: error instanceof Error ? error.message : "Unbekannter Fehler",
+          error: error instanceof Error ? error.message : t("common.unknownError"),
           loading: false,
         }));
       }
@@ -104,7 +106,9 @@ export function useOverview(): OverviewState {
       controller.abort();
       clearInterval(timer);
     };
-  }, []);
+    // `lang` is in the deps so the precomputed source/type labels on the recent
+    // rows are rebuilt in the new language when the user switches.
+  }, [lang, t]);
 
   return state;
 }

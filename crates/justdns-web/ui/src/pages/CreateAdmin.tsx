@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { ApiError } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { useAuth } from "../state/auth";
 import styles from "./Auth.module.css";
 
@@ -10,6 +11,7 @@ const MIN_PASSWORD = 8;
 
 export function CreateAdmin() {
   const { setup } = useAuth();
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -21,11 +23,11 @@ export function CreateAdmin() {
     setError(null);
 
     if (password.length < MIN_PASSWORD) {
-      setError(`Das Passwort muss mindestens ${MIN_PASSWORD} Zeichen haben.`);
+      setError(t("auth.passwordTooShort", { min: MIN_PASSWORD }));
       return;
     }
     if (password !== confirm) {
-      setError("Die beiden Passwörter stimmen nicht überein.");
+      setError(t("auth.passwordsDiffer"));
       return;
     }
 
@@ -35,9 +37,9 @@ export function CreateAdmin() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         // Someone else finished setup first — reload lands on the login screen.
-        setError("Es wurde bereits ein Administrator eingerichtet. Bitte Seite neu laden.");
+        setError(t("auth.alreadyConfigured"));
       } else {
-        setError("Einrichtung fehlgeschlagen. Bitte erneut versuchen.");
+        setError(t("auth.setupFailed"));
       }
       setBusy(false);
     }
@@ -51,11 +53,8 @@ export function CreateAdmin() {
           <span className={styles.wordmark}>JustDNS</span>
         </div>
         <div className={styles.head}>
-          <h1 className={styles.title}>Administrator einrichten</h1>
-          <p className={styles.lede}>
-            Dies ist die erste Anmeldung. Lege das Administratorkonto an, mit dem du das Dashboard
-            künftig öffnest.
-          </p>
+          <h1 className={styles.title}>{t("auth.setupTitle")}</h1>
+          <p className={styles.lede}>{t("auth.setupLede")}</p>
         </div>
         <form className={styles.form} onSubmit={onSubmit}>
           {error && (
@@ -64,7 +63,7 @@ export function CreateAdmin() {
             </p>
           )}
           <label className={styles.field}>
-            <span className={styles.label}>Benutzername</span>
+            <span className={styles.label}>{t("auth.username")}</span>
             <input
               className={styles.input}
               type="text"
@@ -76,7 +75,7 @@ export function CreateAdmin() {
             />
           </label>
           <label className={styles.field}>
-            <span className={styles.label}>Passwort</span>
+            <span className={styles.label}>{t("auth.password")}</span>
             <input
               className={styles.input}
               type="password"
@@ -85,10 +84,10 @@ export function CreateAdmin() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            <span className={styles.hint}>Mindestens {MIN_PASSWORD} Zeichen.</span>
+            <span className={styles.hint}>{t("auth.minChars", { min: MIN_PASSWORD })}</span>
           </label>
           <label className={styles.field}>
-            <span className={styles.label}>Passwort wiederholen</span>
+            <span className={styles.label}>{t("auth.repeatPassword")}</span>
             <input
               className={styles.input}
               type="password"
@@ -99,7 +98,7 @@ export function CreateAdmin() {
             />
           </label>
           <button className={styles.submit} type="submit" disabled={busy}>
-            {busy ? "Einrichten …" : "Administrator anlegen"}
+            {busy ? t("auth.creating") : t("auth.createAdmin")}
           </button>
         </form>
       </div>

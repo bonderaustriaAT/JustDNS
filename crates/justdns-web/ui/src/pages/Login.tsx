@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from "react";
 
 import { ApiError } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { useAuth } from "../state/auth";
 import styles from "./Auth.module.css";
 
 export function Login() {
   const { login } = useAuth();
+  const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,9 +21,9 @@ export function Login() {
       await login(username, password);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
-        setError("Benutzername oder Passwort ist falsch.");
+        setError(t("auth.wrongCredentials"));
       } else {
-        setError("Anmeldung fehlgeschlagen. Bitte erneut versuchen.");
+        setError(t("auth.loginFailed"));
       }
       setBusy(false);
     }
@@ -35,8 +37,8 @@ export function Login() {
           <span className={styles.wordmark}>JustDNS</span>
         </div>
         <div className={styles.head}>
-          <h1 className={styles.title}>Anmelden</h1>
-          <p className={styles.lede}>Melde dich an, um das Dashboard zu öffnen.</p>
+          <h1 className={styles.title}>{t("auth.loginTitle")}</h1>
+          <p className={styles.lede}>{t("auth.loginLede")}</p>
         </div>
         <form className={styles.form} onSubmit={onSubmit}>
           {error && (
@@ -45,7 +47,7 @@ export function Login() {
             </p>
           )}
           <label className={styles.field}>
-            <span className={styles.label}>Benutzername</span>
+            <span className={styles.label}>{t("auth.username")}</span>
             <input
               className={styles.input}
               type="text"
@@ -57,7 +59,7 @@ export function Login() {
             />
           </label>
           <label className={styles.field}>
-            <span className={styles.label}>Passwort</span>
+            <span className={styles.label}>{t("auth.password")}</span>
             <input
               className={styles.input}
               type="password"
@@ -68,7 +70,7 @@ export function Login() {
             />
           </label>
           <button className={styles.submit} type="submit" disabled={busy}>
-            {busy ? "Anmelden …" : "Anmelden"}
+            {busy ? t("auth.signingIn") : t("auth.signIn")}
           </button>
         </form>
       </div>

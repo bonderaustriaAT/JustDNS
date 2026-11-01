@@ -10,53 +10,48 @@ import {
   type Preset,
   type Subscription,
 } from "../lib/api";
+import { useI18n, type Lang } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import styles from "./Lists.module.css";
 
-/** Turn a mutation's failure into a short German message for the banner. */
-function errorMessage(error: unknown): string {
+type T = ReturnType<typeof useI18n>["t"];
+
+/** Pick the message key for a mutation's failure, shown in the banner. */
+function errorKey(error: unknown): MessageKey {
   if (error instanceof ApiError) {
-    if (error.status === 400) return "Das ist keine gültige Domain oder URL.";
-    if (error.status === 404) return "Der Eintrag wurde nicht gefunden.";
+    if (error.status === 400) return "lists.badDomain";
+    if (error.status === 404) return "common.notFound";
   }
-  return "Die Änderung ließ sich nicht speichern.";
+  return "common.saveFailed";
 }
 
 /** Relative time for a feed's last update, e.g. "vor 2 Std.". */
-function relativeTime(ms: number): string {
+function relativeTime(ms: number, t: T): string {
   const diff = Date.now() - ms;
-  if (diff < 60_000) return "gerade aktualisiert";
+  if (diff < 60_000) return t("time.justUpdated");
   const minutes = Math.round(diff / 60_000);
-  if (minutes < 60) return `vor ${minutes} Min.`;
+  if (minutes < 60) return t("time.minutesAgo", { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `vor ${hours} Std.`;
+  if (hours < 24) return t("time.hoursAgo", { n: hours });
   const days = Math.round(hours / 24);
-  return `vor ${days} ${days === 1 ? "Tag" : "Tagen"}`;
+  return days === 1 ? t("time.oneDayAgo") : t("time.daysAgo", { n: days });
 }
 
-const RISK_WORDS = ["sehr gering", "gering", "mittel", "erhöht", "hoch"];
-
-/** German labels for the catalogue categories, in the order the filter shows
- *  them. Keyed by the machine `category` the server sends. */
-const CATEGORY_LABELS: Record<Preset["category"], string> = {
-  ads: "Werbung",
-  security: "Sicherheit",
-  privacy: "Telemetrie",
-  bypass: "Umgehung",
-  allow: "Freigabe",
-};
+/** The catalogue categories in the order the filter shows them. */
 const CATEGORY_ORDER: Preset["category"][] = ["ads", "security", "privacy", "bypass", "allow"];
 
 /** A five-pip meter for a list's false-positive risk: how much legitimate
  *  traffic it might catch by mistake. The subject here is risk, so it reads as
  *  a scale, not a badge. */
 function RiskMeter({ level }: { level: number }) {
+  const { t } = useI18n();
   const clamped = Math.max(1, Math.min(5, level));
   return (
     <span
       className={styles.meter}
       data-level={clamped}
       role="img"
-      aria-label={`False-Positive-Risiko: ${RISK_WORDS[clamped - 1]}`}
+      aria-label={t("risk.aria", { level: t(`risk.${clamped}` as MessageKey) })}
     >
       {[1, 2, 3, 4, 5].map((pip) => (
         <span key={pip} className={styles.pip} data-on={pip <= clamped || undefined} />
@@ -75,7 +70,6 @@ function EntryEditor({
   placeholder,
   entries,
   count,
-  countNoun,
   onAdd,
   onRemove,
 }: {
@@ -85,10 +79,10 @@ function EntryEditor({
   placeholder: string;
   entries: string[];
   count: number;
-  countNoun: string;
   onAdd: (domain: string) => void;
   onRemove: (domain: string) => void;
 }) {
+  const { t, locale } = useI18n();
   const [draft, setDraft] = useState("");
 
   function submit(event: FormEvent) {
@@ -107,7 +101,10 @@ function EntryEditor({
           <InfoHint label={title} text={hint} />
         </h3>
         <span className={styles.editorCount}>
-          {count.toLocaleString("de-DE")} {countNoun} aktiv
+          {t("lists.countActive", {
+            count: count.toLocaleString(locale),
+            noun: t("lists.countNoun"),
+          })}
         </span>
       </div>
 
@@ -117,17 +114,17 @@ function EntryEditor({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={placeholder}
-          aria-label={`${title}: Domain hinzufügen`}
+          aria-label={t("lists.addDomainAria", { title })}
           autoComplete="off"
           spellCheck={false}
         />
         <button type="submit" className={styles.addButton}>
-          Hinzufügen
+          {t("common.add")}
         </button>
       </form>
 
       {entries.length === 0 ? (
-        <p className={styles.empty}>Noch keine eigenen Einträge.</p>
+        <p className={styles.empty}>{t("lists.noOwnEntries")}</p>
       ) : (
         <ul className={styles.entries}>
           {entries.map((domain) => (
@@ -136,8 +133,8 @@ function EntryEditor({
               <button
                 type="button"
                 className={styles.remove}
-                aria-label={`${domain} entfernen`}
-                title="Entfernen"
+                aria-label={t("lists.removeAria", { name: domain })}
+                title={t("common.remove")}
                 onClick={() => onRemove(domain)}
               >
                 ✕
@@ -163,6 +160,7 @@ function PresetCard({
   pending: boolean;
   onToggle: (on: boolean) => void;
 }) {
+  const { t, lang } = useI18n();
   return (
     <article className={styles.card} data-active={preset.active || undefined}>
       <header className={styles.cardHead}>
@@ -170,13 +168,15 @@ function PresetCard({
           <h3 className={styles.cardTitle}>{preset.name}</h3>
           <div className={styles.cardTags}>
             <span className={styles.kind} data-kind={preset.kind}>
-              {preset.kind === "allow" ? "Freigabe" : "Sperrliste"}
+              {preset.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
             </span>
-            <span className={styles.categoryTag}>{CATEGORY_LABELS[preset.category]}</span>
+            <span className={styles.categoryTag}>
+              {t(`category.${preset.category}` as MessageKey)}
+            </span>
           </div>
         </div>
         <Toggle
-          label={`${preset.name} aktivieren`}
+          label={t("lists.activateAria", { name: preset.name })}
           checked={preset.active}
           disabled={pending}
           onChange={onToggle}
@@ -190,7 +190,9 @@ function PresetCard({
         <p className={styles.riskText}>{preset.falsePositive}</p>
       </div>
 
-      {preset.active && sub ? <p className={styles.status}>{feedStatusText(sub)}</p> : null}
+      {preset.active && sub ? (
+        <p className={styles.status}>{feedStatusText(sub, t, lang)}</p>
+      ) : null}
     </article>
   );
 }
@@ -201,6 +203,7 @@ function PresetCard({
 export type ListsSection = "mine" | "presets";
 
 export function Lists({ section }: { section: ListsSection }) {
+  const { t, lang, locale } = useI18n();
   const [view, setView] = useState<ListsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -219,10 +222,10 @@ export function Lists({ section }: { section: ListsSection }) {
       .then(setView)
       .catch(() => {
         if (controller.signal.aborted) return;
-        setError("Die Listen konnten nicht geladen werden.");
+        setError(t("lists.loadFailed"));
       });
     return () => controller.abort();
-  }, []);
+  }, [t]);
 
   function mark(key: string, on: boolean) {
     setPending((prev) => {
@@ -240,7 +243,7 @@ export function Lists({ section }: { section: ListsSection }) {
     try {
       setView(await action());
     } catch (err) {
-      setError(errorMessage(err));
+      setError(t(errorKey(err)));
     } finally {
       mark(key, false);
     }
@@ -254,10 +257,10 @@ export function Lists({ section }: { section: ListsSection }) {
       setView(response.lists);
       const failed = response.outcomes.filter((outcome) => outcome.error).length;
       if (failed > 0) {
-        setError(`${failed} Liste(n) konnten nicht aktualisiert werden.`);
+        setError(t("lists.someRefreshFailed", { n: failed }));
       }
     } catch {
-      setError("Die Aktualisierung ist fehlgeschlagen.");
+      setError(t("lists.refreshFailed"));
     } finally {
       setRefreshing(false);
     }
@@ -276,10 +279,8 @@ export function Lists({ section }: { section: ListsSection }) {
   if (!view) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Block/Allow</h1>
-        <p className={styles.lead}>
-          {error ?? "Lädt …"}
-        </p>
+        <h1 className={styles.title}>{t("nav.blockAllow")}</h1>
+        <p className={styles.lead}>{error ?? t("common.loading")}</p>
       </div>
     );
   }
@@ -293,10 +294,10 @@ export function Lists({ section }: { section: ListsSection }) {
     return acc;
   }, {});
   const filterChips = [
-    { key: "all", label: "Alle", count: view.presets.length },
+    { key: "all", label: t("lists.filterAll"), count: view.presets.length },
     ...CATEGORY_ORDER.filter((category) => categoryCounts[category]).map((category) => ({
       key: category,
-      label: CATEGORY_LABELS[category],
+      label: t(`category.${category}` as MessageKey),
       count: categoryCounts[category],
     })),
   ];
@@ -309,14 +310,8 @@ export function Lists({ section }: { section: ListsSection }) {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Block/Allow</h1>
-          {section === "mine" ? (
-            <p className={styles.lead}>
-              Lege fest, was JustDNS für das ganze Netzwerk sperrt oder immer durchlässt. Eine
-              Freigabe gewinnt dabei immer — ein freigegebener Name wird nie geblockt, egal was eine
-              Sperrliste sagt.
-            </p>
-          ) : null}
+          <h1 className={styles.title}>{t("nav.blockAllow")}</h1>
+          {section === "mine" ? <p className={styles.lead}>{t("lists.lead")}</p> : null}
         </div>
         <button
           type="button"
@@ -324,7 +319,7 @@ export function Lists({ section }: { section: ListsSection }) {
           onClick={refreshAll}
           disabled={refreshing}
         >
-          {refreshing ? "Aktualisiert …" : "Alle Listen aktualisieren"}
+          {refreshing ? t("lists.refreshing") : t("lists.refreshAll")}
         </button>
       </div>
 
@@ -337,24 +332,22 @@ export function Lists({ section }: { section: ListsSection }) {
       {section === "mine" ? (
       <div className={styles.editors}>
         <EntryEditor
-          title="Immer erlauben"
-          hint="Domains auf dieser Liste werden nie geblockt — auch dann nicht, wenn sie auf einer aktiven Sperrliste stehen. Gut, um einen Fehlalarm (false positive) gezielt zu beheben. Ein Eintrag gilt automatisch auch für alle Subdomains (example.com = *.example.com); für nur einen Host trage genau diesen ein (z. B. login.example.com). Die Schreibweise *.example.com ist erlaubt (wird wie example.com behandelt), Teil-Wildcards wie ads.*.com nicht."
+          title={t("lists.allowTitle")}
+          hint={t("lists.allowHint")}
           accent="allow"
-          placeholder="z. B. meine-bank.de"
+          placeholder={t("lists.allowPlaceholder")}
           entries={view.allow}
           count={view.allowActive}
-          countNoun="Domains"
           onAdd={(domain) => run(`allow:${domain}`, () => api.addAllow(domain))}
           onRemove={(domain) => run(`allow:${domain}`, () => api.removeAllow(domain))}
         />
         <EntryEditor
-          title="Immer blockieren"
-          hint="Deine eigene Sperrliste. Domains hier werden immer geblockt, zusätzlich zu den aktivierten fertigen Listen. Eine Freigabe sticht eine Sperre. Ein Eintrag gilt automatisch auch für alle Subdomains (example.com blockt auch ad.example.com); die Schreibweise *.example.com ist erlaubt (wie example.com), Teil-Wildcards wie ads.*.com nicht."
+          title={t("lists.blockTitle")}
+          hint={t("lists.blockHint")}
           accent="block"
-          placeholder="z. B. werbung.example.com"
+          placeholder={t("lists.blockPlaceholder")}
           entries={view.block}
           count={view.blockActive}
-          countNoun="Domains"
           onAdd={(domain) => run(`block:${domain}`, () => api.addBlock(domain))}
           onRemove={(domain) => run(`block:${domain}`, () => api.removeBlock(domain))}
         />
@@ -365,16 +358,12 @@ export function Lists({ section }: { section: ListsSection }) {
       <section className={styles.section} aria-labelledby="presets-title">
         <div className={styles.sectionHead}>
           <h2 id="presets-title" className={styles.sectionTitle}>
-            Fertige Listen
+            {t("lists.presetsTitle")}
           </h2>
-          <p className={styles.sectionLead}>
-            Kuratierte Hagezi-Listen — dieselben, die für AdGuard Home und Pi-hole genutzt werden.
-            Mit einem Klick aktiviert. Jede Liste nennt, was sie sperrt und wie hoch das Risiko für
-            Fehlalarme ist.
-          </p>
+          <p className={styles.sectionLead}>{t("lists.presetsLead")}</p>
         </div>
 
-        <div className={styles.filters} role="tablist" aria-label="Listen filtern">
+        <div className={styles.filters} role="tablist" aria-label={t("lists.filterAria")}>
           {filterChips.map((chip) => (
             <button
               key={chip.key}
@@ -411,12 +400,9 @@ export function Lists({ section }: { section: ListsSection }) {
       <section className={styles.section} aria-labelledby="feeds-title">
         <div className={styles.sectionHead}>
           <h2 id="feeds-title" className={styles.sectionTitle}>
-            Eigene Listen per URL
+            {t("lists.feedsTitle")}
           </h2>
-          <p className={styles.sectionLead}>
-            Abonniere jede Blockliste oder Freigabeliste im Hosts- oder AdGuard-Format über ihre
-            URL. JustDNS lädt sie regelmäßig neu.
-          </p>
+          <p className={styles.sectionLead}>{t("lists.feedsLead")}</p>
         </div>
 
         <form className={styles.feedForm} onSubmit={addFeed}>
@@ -424,16 +410,16 @@ export function Lists({ section }: { section: ListsSection }) {
             className={styles.input}
             value={feedName}
             onChange={(event) => setFeedName(event.target.value)}
-            placeholder="Name (optional)"
-            aria-label="Name der Liste"
+            placeholder={t("lists.feedNamePlaceholder")}
+            aria-label={t("lists.feedNameAria")}
             autoComplete="off"
           />
           <input
             className={styles.input}
             value={feedUrl}
             onChange={(event) => setFeedUrl(event.target.value)}
-            placeholder="https://…/liste.txt"
-            aria-label="URL der Liste"
+            placeholder={t("lists.feedUrlPlaceholder")}
+            aria-label={t("lists.feedUrlAria")}
             autoComplete="off"
             spellCheck={false}
           />
@@ -441,18 +427,18 @@ export function Lists({ section }: { section: ListsSection }) {
             className={styles.select}
             value={feedKind}
             onChange={(event) => setFeedKind(event.target.value as ListKind)}
-            aria-label="Art der Liste"
+            aria-label={t("lists.feedKindAria")}
           >
-            <option value="block">Sperrliste</option>
-            <option value="allow">Freigabeliste</option>
+            <option value="block">{t("lists.kindBlock")}</option>
+            <option value="allow">{t("lists.kindAllow")}</option>
           </select>
           <button type="submit" className={styles.addButton} disabled={pending.has("add-feed")}>
-            Abonnieren
+            {t("lists.subscribe")}
           </button>
         </form>
 
         {feeds.length === 0 ? (
-          <p className={styles.empty}>Noch keine eigenen URL-Listen abonniert.</p>
+          <p className={styles.empty}>{t("lists.noFeeds")}</p>
         ) : (
           <ul className={styles.feeds}>
             {feeds.map((feed) => (
@@ -462,14 +448,14 @@ export function Lists({ section }: { section: ListsSection }) {
                   <span className={styles.feedUrl}>{feed.url}</span>
                   <span className={styles.feedStatus}>
                     <span className={styles.kind} data-kind={feed.kind}>
-                      {feed.kind === "allow" ? "Freigabe" : "Sperrliste"}
+                      {feed.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
                     </span>
-                    {feedStatusText(feed)}
+                    {feedStatusText(feed, t, lang, locale)}
                   </span>
                 </div>
                 <div className={styles.feedActions}>
                   <Toggle
-                    label={`${feed.name} aktiv`}
+                    label={t("lists.feedActiveAria", { name: feed.name })}
                     checked={feed.enabled}
                     disabled={pending.has(`feed:${feed.id}`)}
                     onChange={(on) =>
@@ -479,8 +465,8 @@ export function Lists({ section }: { section: ListsSection }) {
                   <button
                     type="button"
                     className={styles.remove}
-                    aria-label={`${feed.name} entfernen`}
-                    title="Entfernen"
+                    aria-label={t("lists.removeAria", { name: feed.name })}
+                    title={t("common.remove")}
                     disabled={pending.has(`feed:${feed.id}`)}
                     onClick={() => run(`feed:${feed.id}`, () => api.removeSubscription(feed.id))}
                   >
@@ -497,21 +483,26 @@ export function Lists({ section }: { section: ListsSection }) {
   );
 }
 
-/** Human-readable status for a feed row from its last-fetch fields. */
-function feedStatusText(feed: {
-  lastError?: string;
-  lastCount?: number;
-  lastFetchedMs?: number;
-}): ReactNode {
+/** Human-readable status for a feed row from its last-fetch fields. Number
+ *  formatting follows the given locale; the relative time follows `lang`. */
+function feedStatusText(
+  feed: { lastError?: string; lastCount?: number; lastFetchedMs?: number },
+  t: T,
+  lang: Lang,
+  locale: string = lang === "de" ? "de-DE" : "en-US",
+): ReactNode {
   if (feed.lastError) {
-    return <span className={styles.statusError}>Aktualisierung fehlgeschlagen</span>;
+    return <span className={styles.statusError}>{t("lists.feedFailed")}</span>;
   }
   if (feed.lastCount !== undefined && feed.lastFetchedMs !== undefined) {
     return (
       <span className={styles.statusOk}>
-        {feed.lastCount.toLocaleString("de-DE")} Domains · {relativeTime(feed.lastFetchedMs)}
+        {t("lists.feedCount", {
+          count: feed.lastCount.toLocaleString(locale),
+          time: relativeTime(feed.lastFetchedMs, t),
+        })}
       </span>
     );
   }
-  return <span className={styles.statusPending}>wird geladen …</span>;
+  return <span className={styles.statusPending}>{t("lists.feedLoading")}</span>;
 }

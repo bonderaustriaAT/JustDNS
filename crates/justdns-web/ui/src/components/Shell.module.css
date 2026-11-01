@@ -59,6 +59,48 @@
   color: var(--text-muted);
 }
 
+/* Language switcher: two snug buttons sharing one outline, the active one
+   filled so the choice reads at a glance. */
+.langSwitch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.langButton {
+  font: inherit;
+  font-size: var(--step--2);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.langButton + .langButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.langButton:hover {
+  color: var(--text);
+}
+
+.langButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .langButton {
+    transition: none;
+  }
+}
+
 .logout {
   font: inherit;
   font-size: var(--step--1);

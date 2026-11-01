@@ -2,19 +2,21 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "../state/auth";
+import { LANGS, useI18n } from "../lib/i18n";
 import styles from "./Shell.module.css";
 
 /** The sub-pages the "Block/Allow" area is split across, shown as a dropdown in
  *  the header so no single page runs long. The user's own entries (manual
  *  allow/block plus URL subscriptions) live together on the first page. */
 const LIST_ITEMS = [
-  { to: "/listen/url", label: "Eigene Listen per URL" },
-  { to: "/listen/fertige", label: "Fertige Listen" },
+  { to: "/listen/url", labelKey: "nav.listsUrl" as const },
+  { to: "/listen/fertige", labelKey: "nav.listsPresets" as const },
 ];
 
 /** The "Block/Allow" header entry: a button that opens a menu of its sub-pages.
  *  Closes on outside click, Escape, or navigating — the usual menu behaviour. */
 function ListsMenu() {
+  const { t } = useI18n();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -49,7 +51,7 @@ function ListsMenu() {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        Block/Allow
+        {t("nav.blockAllow")}
         <span className={styles.caret} data-open={open || undefined} aria-hidden="true">
           ›
         </span>
@@ -63,7 +65,7 @@ function ListsMenu() {
               role="menuitem"
               className={({ isActive }) => (isActive ? styles.menuItemActive : styles.menuItem)}
             >
-              {item.label}
+              {t(item.labelKey)}
             </NavLink>
           ))}
         </div>
@@ -72,8 +74,32 @@ function ListsMenu() {
   );
 }
 
+/** A compact segmented control to switch the interface language, in the header
+ *  so it is reachable from every page. The current language reads as pressed. */
+function LangSwitch() {
+  const { lang, setLang, t } = useI18n();
+
+  return (
+    <div className={styles.langSwitch} role="group" aria-label={t("lang.label")}>
+      {LANGS.map((code) => (
+        <button
+          key={code}
+          type="button"
+          className={styles.langButton}
+          data-active={code === lang || undefined}
+          aria-pressed={code === lang}
+          onClick={() => setLang(code)}
+        >
+          {t(`lang.${code}`)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const { username, logout } = useAuth();
+  const { t } = useI18n();
 
   return (
     <div className={styles.shell}>
@@ -89,32 +115,33 @@ export function Shell({ children }: { children: ReactNode }) {
               end
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >
-              Übersicht
+              {t("nav.overview")}
             </NavLink>
             <NavLink
               to="/protokoll"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >
-              Protokoll
+              {t("nav.log")}
             </NavLink>
             <ListsMenu />
             <NavLink
               to="/rewrites"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >
-              DNS-Rewrites
+              {t("nav.rewrites")}
             </NavLink>
             <NavLink
               to="/einstellungen"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >
-              Einstellungen
+              {t("nav.settings")}
             </NavLink>
           </nav>
           <div className={styles.account}>
+            <LangSwitch />
             {username && <span className={styles.user}>{username}</span>}
             <button type="button" className={styles.logout} onClick={() => logout()}>
-              Abmelden
+              {t("account.logout")}
             </button>
           </div>
         </div>

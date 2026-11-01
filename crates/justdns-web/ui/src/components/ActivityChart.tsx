@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { useI18n } from "../lib/i18n";
 import styles from "./ActivityChart.module.css";
 
 interface ActivityChartProps {
@@ -13,13 +14,13 @@ const PAD_TOP = 12;
 const PAD_BOTTOM = 28;
 const HOUR_MS = 3_600_000;
 
-const de = new Intl.NumberFormat("de-DE");
-
 function hourLabel(ms: number): string {
   return `${new Date(ms).getHours().toString().padStart(2, "0")}:00`;
 }
 
 export function ActivityChart({ values }: ActivityChartProps) {
+  const { t, locale } = useI18n();
+  const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
@@ -70,7 +71,7 @@ export function ActivityChart({ values }: ActivityChartProps) {
     setHover(Math.min(n - 1, Math.max(0, i)));
   }
 
-  const summary = `Anfragen pro Stunde, letzte ${n} Stunden. Höchstwert ${de.format(max)}.`;
+  const summary = t("chart.summary", { n, max: nf.format(max) });
 
   return (
     <figure
@@ -115,12 +116,12 @@ export function ActivityChart({ values }: ActivityChartProps) {
             top: Math.max(y(values[hover]) - 14, 4),
           }}
         >
-          <span className={styles.tipValue}>{de.format(values[hover])}</span>
-          <span className={styles.tipMeta}>Anfragen · {hourLabel(timeAt(hover))}</span>
+          <span className={styles.tipValue}>{nf.format(values[hover])}</span>
+          <span className={styles.tipMeta}>{t("chart.tipMeta", { time: hourLabel(timeAt(hover)) })}</span>
         </div>
       )}
 
-      <figcaption className={styles.caption}>Anfragen pro Stunde, letzte {n} Stunden</figcaption>
+      <figcaption className={styles.caption}>{t("chart.caption", { n })}</figcaption>
     </figure>
   );
 }

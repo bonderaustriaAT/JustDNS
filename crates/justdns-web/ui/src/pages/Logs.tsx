@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { Toggle } from "../components/Toggle";
+import { useI18n } from "../lib/i18n";
 import { LOG_LIMIT, useLogs } from "../lib/useLogs";
 import { LogDetail } from "./LogDetail";
 import styles from "./Logs.module.css";
@@ -10,6 +11,7 @@ import styles from "./Logs.module.css";
 const SEARCH_DEBOUNCE_MS = 250;
 
 export function Logs() {
+  const { t } = useI18n();
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
@@ -28,19 +30,19 @@ export function Logs() {
     <div className={styles.page}>
       <header className={styles.head}>
         <div className={styles.headline}>
-          <h1 className={styles.title}>DNS-Protokoll</h1>
+          <h1 className={styles.title}>{t("logs.title")}</h1>
           <label className={styles.live}>
             <span className={styles.liveLabel} data-on={live}>
               <span className={styles.liveDot} aria-hidden="true" />
-              {live ? "Live" : "Pausiert"}
+              {live ? t("logs.live") : t("logs.paused")}
             </span>
-            <Toggle checked={live} onChange={setLive} label="Live-Aktualisierung" />
+            <Toggle checked={live} onChange={setLive} label={t("logs.liveToggle")} />
           </label>
         </div>
         <input
           type="search"
           className={styles.input}
-          placeholder="Nach Domain oder IP filtern …"
+          placeholder={t("logs.searchPlaceholder")}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           autoComplete="off"
@@ -50,26 +52,32 @@ export function Logs() {
 
       {rows === null ? (
         <p className={styles.note}>
-          {error ? `Protokoll nicht erreichbar: ${error}` : loading ? "Lade Protokoll …" : "Keine Daten."}
+          {error
+            ? t("logs.unreachable", { error })
+            : loading
+              ? t("logs.loading")
+              : t("common.noData")}
         </p>
       ) : rows.length === 0 ? (
         <p className={styles.note}>
-          {searching ? `Keine Treffer für »${term}«.` : "Noch keine Anfragen aufgezeichnet."}
+          {searching ? t("logs.noMatches", { term }) : t("logs.noneRecorded")}
         </p>
       ) : (
         <>
           <p className={styles.count}>
             {searching
-              ? `${rows.length}${rows.length === LOG_LIMIT ? "+" : ""} Treffer`
-              : `Neueste ${rows.length} Anfragen`}
-            {error ? " · Aktualisierung unterbrochen" : ""}
+              ? rows.length === LOG_LIMIT
+                ? t("logs.matchesPlus", { n: rows.length })
+                : t("logs.matches", { n: rows.length })
+              : t("logs.recent", { n: rows.length })}
+            {error ? t("logs.updatesInterrupted") : ""}
           </p>
           <ol className={styles.list}>
             <li className={styles.columns} aria-hidden="true">
-              <span>Zeit</span>
-              <span>Client</span>
-              <span>Domain</span>
-              <span className={styles.detailsHead}>Details</span>
+              <span>{t("logs.colTime")}</span>
+              <span>{t("logs.colClient")}</span>
+              <span>{t("logs.colDomain")}</span>
+              <span className={styles.detailsHead}>{t("logs.colDetails")}</span>
             </li>
             {rows.map((row, index) => {
               const key = `${row.at_ms}-${index}`;

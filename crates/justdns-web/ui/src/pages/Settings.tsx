@@ -3,12 +3,15 @@ import { useMemo, useState, type ReactNode } from "react";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { api } from "../lib/api";
+import { useI18n } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import { useSettings, type UpstreamMode } from "../state/settings";
 import styles from "./Settings.module.css";
 
 /** The "clear DNS cache" action: a one-shot button that drops every cached
  *  answer, with a short confirmation once it is done. */
 function ClearCacheButton() {
+  const { t } = useI18n();
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
 
   async function clear() {
@@ -30,11 +33,13 @@ function ClearCacheButton() {
         onClick={clear}
         disabled={state === "busy"}
       >
-        {state === "busy" ? "Wird geleert …" : "DNS-Cache leeren"}
+        {state === "busy" ? t("settings.clearCacheBusy") : t("settings.clearCacheButton")}
       </button>
-      {state === "done" ? <span className={styles.actionDone}>Cache geleert.</span> : null}
+      {state === "done" ? (
+        <span className={styles.actionDone}>{t("settings.clearCacheDone")}</span>
+      ) : null}
       {state === "error" ? (
-        <span className={styles.actionError}>Ließ sich nicht leeren.</span>
+        <span className={styles.actionError}>{t("settings.clearCacheError")}</span>
       ) : null}
     </div>
   );
@@ -42,7 +47,7 @@ function ClearCacheButton() {
 
 interface CategoryMeta {
   id: string;
-  title: string;
+  titleKey: MessageKey;
 }
 
 function Category({
@@ -96,12 +101,9 @@ function Row({
   );
 }
 
-const MODE_LABELS: Record<UpstreamMode, string> = {
-  racing: "Schnellste Antwort (Racing)",
-  fallback: "Der Reihe nach (Fallback)",
-  balanced: "Lastverteilt",
-  rules: "Regelbasiert",
-};
+/** The upstream selection modes, in the order the dropdown lists them. Each maps
+ *  to a `settings.mode.<mode>` label key. */
+const UPSTREAM_MODES: UpstreamMode[] = ["racing", "fallback", "balanced", "rules"];
 
 const RESOLVERS = [
   { ip: "86.54.11.1", host: "protective.joindns4.eu", name: "DNS4EU" },
@@ -109,18 +111,19 @@ const RESOLVERS = [
 ];
 
 export function Settings() {
+  const { t } = useI18n();
   const { settings, update } = useSettings();
   const [selected, setSelected] = useState("schutz");
 
   const categories = useMemo<CategoryMeta[]>(() => {
-    const base: CategoryMeta[] = [{ id: "schutz", title: "Schutz" }];
+    const base: CategoryMeta[] = [{ id: "schutz", titleKey: "settings.cat.schutz" }];
     if (settings.expertMode) {
       base.push(
-        { id: "upstream", title: "Upstream-Resolver" },
-        { id: "verschluesselung", title: "Verschlüsselung" },
-        { id: "netzwerk", title: "Netzwerk" },
-        { id: "cache", title: "Cache" },
-        { id: "protokoll", title: "Protokollierung" },
+        { id: "upstream", titleKey: "settings.cat.upstream" },
+        { id: "verschluesselung", titleKey: "settings.cat.verschluesselung" },
+        { id: "netzwerk", titleKey: "settings.cat.netzwerk" },
+        { id: "cache", titleKey: "settings.cat.cache" },
+        { id: "protokoll", titleKey: "settings.cat.protokoll" },
       );
     }
     return base;
@@ -132,25 +135,22 @@ export function Settings() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.title}>Einstellungen</h1>
+      <h1 className={styles.title}>{t("settings.title")}</h1>
 
       <section className={styles.expertBand}>
         <div className={styles.text}>
-          <span className={styles.label}>Expertenmodus</span>
-          <span className={styles.description}>
-            Blendet die technischen Kategorien ein — Upstream-Resolver, Verschlüsselung, Cache und
-            Protokollierung. Für den reinen Werbeblocker nicht nötig.
-          </span>
+          <span className={styles.label}>{t("settings.expertMode")}</span>
+          <span className={styles.description}>{t("settings.expertModeDesc")}</span>
         </div>
         <Toggle
-          label="Expertenmodus"
+          label={t("settings.expertMode")}
           checked={settings.expertMode}
           onChange={(v) => update("expertMode", v)}
         />
       </section>
 
       <div className={styles.layout}>
-        <nav className={styles.rail} aria-label="Kategorien">
+        <nav className={styles.rail} aria-label={t("settings.categoriesAria")}>
           {categories.map((category) => (
             <button
               key={category.id}
@@ -159,54 +159,50 @@ export function Settings() {
               aria-current={active === category.id || undefined}
               onClick={() => setSelected(category.id)}
             >
-              {category.title}
+              {t(category.titleKey)}
             </button>
           ))}
-          {!settings.expertMode && (
-            <p className={styles.railHint}>
-              Für die technischen Kategorien den Expertenmodus einschalten.
-            </p>
-          )}
+          {!settings.expertMode && <p className={styles.railHint}>{t("settings.railHint")}</p>}
         </nav>
 
         <div className={styles.sections}>
           {active === "schutz" && (
             <Category
               id="schutz"
-              title="Schutz"
-              description="Was für alle Geräte im Netzwerk gefiltert wird."
+              title={t("settings.cat.schutz")}
+              description={t("settings.schutzDesc")}
             >
               <Row
-                label="Werbung & Tracker blockieren"
-                description="Filtert bekannte Werbe- und Trackingdienste."
-                details="Gleicht jede DNS-Anfrage gegen Listen bekannter Werbe- und Tracking-Domains ab. Treffer werden nicht aufgelöst, sondern geblockt — für alle Geräte im Netzwerk, ohne dort etwas zu installieren."
+                label={t("settings.adsLabel")}
+                description={t("settings.adsDesc")}
+                details={t("settings.adsDetails")}
                 control={
                   <Toggle
-                    label="Werbung & Tracker blockieren"
+                    label={t("settings.adsLabel")}
                     checked={settings.blockAdsTrackers}
                     onChange={(v) => update("blockAdsTrackers", v)}
                   />
                 }
               />
               <Row
-                label="Schadsoftware blockieren"
-                description="Sperrt Domains, die für Phishing und Schadsoftware bekannt sind."
-                details="Vergleicht Anfragen mit Listen von Phishing-, Malware- und Betrugs-Domains. Verbindungen zu diesen Zielen werden gar nicht erst aufgebaut, weil der Name nicht aufgelöst wird."
+                label={t("settings.malwareLabel")}
+                description={t("settings.malwareDesc")}
+                details={t("settings.malwareDetails")}
                 control={
                   <Toggle
-                    label="Schadsoftware blockieren"
+                    label={t("settings.malwareLabel")}
                     checked={settings.blockMalware}
                     onChange={(v) => update("blockMalware", v)}
                   />
                 }
               />
               <Row
-                label="Sichere Suche erzwingen"
-                description="Erzwingt den Jugendschutzmodus bei großen Suchmaschinen."
-                details="Leitet Google, Bing und YouTube per DNS auf ihre jugendsicheren Adressen um, sodass explizite Ergebnisse ausgefiltert werden — unabhängig von den Einstellungen am einzelnen Gerät."
+                label={t("settings.safeSearchLabel")}
+                description={t("settings.safeSearchDesc")}
+                details={t("settings.safeSearchDetails")}
                 control={
                   <Toggle
-                    label="Sichere Suche erzwingen"
+                    label={t("settings.safeSearchLabel")}
                     checked={settings.safeSearch}
                     onChange={(v) => update("safeSearch", v)}
                   />
@@ -218,23 +214,23 @@ export function Settings() {
           {active === "upstream" && (
             <Category
               id="upstream"
-              title="Upstream-Resolver"
-              description="An welche Resolver Anfragen weitergereicht werden und wie gewählt wird."
+              title={t("settings.cat.upstream")}
+              description={t("settings.upstreamDesc")}
             >
               <Row
-                label="Auswahlmodus"
-                description="Wie zwischen den konfigurierten Resolvern gewählt wird."
-                details="Racing fragt alle Resolver gleichzeitig und nimmt die erste Antwort. Fallback geht sie der Reihe nach durch. Lastverteilt wechselt reihum. Regelbasiert wählt den Resolver anhand von Domain-Regeln."
+                label={t("settings.modeLabel")}
+                description={t("settings.modeDesc")}
+                details={t("settings.modeDetails")}
                 control={
                   <select
                     className={styles.select}
-                    aria-label="Auswahlmodus"
+                    aria-label={t("settings.modeLabel")}
                     value={settings.upstreamMode}
                     onChange={(e) => update("upstreamMode", e.target.value as UpstreamMode)}
                   >
-                    {(Object.keys(MODE_LABELS) as UpstreamMode[]).map((mode) => (
+                    {UPSTREAM_MODES.map((mode) => (
                       <option key={mode} value={mode}>
-                        {MODE_LABELS[mode]}
+                        {t(`settings.mode.${mode}` as MessageKey)}
                       </option>
                     ))}
                   </select>
@@ -249,7 +245,7 @@ export function Settings() {
                       className={styles.resolverTag}
                       data-warn={!settings.encryptUpstream || undefined}
                     >
-                      {settings.encryptUpstream ? "DoT" : "Klartext"}
+                      {settings.encryptUpstream ? t("settings.dot") : t("settings.plaintext")}
                     </span>
                   </li>
                 ))}
@@ -260,16 +256,16 @@ export function Settings() {
           {active === "verschluesselung" && (
             <Category
               id="verschluesselung"
-              title="Verschlüsselung"
-              description="Wie Anfragen an die Resolver übertragen werden."
+              title={t("settings.cat.verschluesselung")}
+              description={t("settings.encryptionDesc")}
             >
               <Row
-                label="Upstream verschlüsseln"
-                description="Anfragen über DNS-over-TLS statt im Klartext senden."
-                details="Sendet Anfragen an die Resolver über DNS-over-TLS (Port 853), sodass niemand im Netzweg mitlesen kann, welche Domains abgefragt werden. Ausgeschaltet gehen die Anfragen im Klartext über Port 53."
+                label={t("settings.encryptLabel")}
+                description={t("settings.encryptDesc")}
+                details={t("settings.encryptDetails")}
                 control={
                   <Toggle
-                    label="Upstream verschlüsseln"
+                    label={t("settings.encryptLabel")}
                     checked={settings.encryptUpstream}
                     onChange={(v) => update("encryptUpstream", v)}
                   />
@@ -281,16 +277,16 @@ export function Settings() {
           {active === "netzwerk" && (
             <Category
               id="netzwerk"
-              title="Netzwerk"
-              description="Wie der Resolver mit IP-Protokollen umgeht."
+              title={t("settings.cat.netzwerk")}
+              description={t("settings.networkDesc")}
             >
               <Row
-                label="IPv6 (AAAA-Antworten)"
-                description="AAAA-Anfragen beantworten. Standardmäßig aus, Geräte nutzen dann IPv4."
-                details="Ausgeschaltet beantwortet JustDNS AAAA-Anfragen mit einer leeren Antwort, sodass Geräte auf IPv4 ausweichen. Einschalten, wenn im Netzwerk echtes IPv6 genutzt werden soll — dann werden AAAA-Anfragen an die Resolver weitergereicht."
+                label={t("settings.ipv6Label")}
+                description={t("settings.ipv6Desc")}
+                details={t("settings.ipv6Details")}
                 control={
                   <Toggle
-                    label="IPv6 (AAAA-Antworten)"
+                    label={t("settings.ipv6Label")}
                     checked={settings.ipv6}
                     onChange={(v) => update("ipv6", v)}
                   />
@@ -302,25 +298,25 @@ export function Settings() {
           {active === "cache" && (
             <Category
               id="cache"
-              title="Cache"
-              description="Wie zwischengespeicherte Antworten behandelt werden."
+              title={t("settings.cat.cache")}
+              description={t("settings.cacheDesc")}
             >
               <Row
-                label="Abgelaufene Einträge weiterreichen"
-                description="Serve-Stale: bei nicht erreichbarem Upstream vorübergehend abgelaufene Antworten ausliefern."
-                details="Ist kein Resolver erreichbar, liefert der Cache vorübergehend bereits abgelaufene Antworten weiter, damit die Namensauflösung bei kurzen Ausfällen nicht komplett stoppt."
+                label={t("settings.serveStaleLabel")}
+                description={t("settings.serveStaleDesc")}
+                details={t("settings.serveStaleDetails")}
                 control={
                   <Toggle
-                    label="Abgelaufene Einträge weiterreichen"
+                    label={t("settings.serveStaleLabel")}
                     checked={settings.cacheServeStale}
                     onChange={(v) => update("cacheServeStale", v)}
                   />
                 }
               />
               <Row
-                label="DNS-Cache leeren"
-                description="Verwirft alle zwischengespeicherten Antworten sofort."
-                details="Löscht den gesamten Antwort-Cache. Die nächste Anfrage je Name wird wieder frisch beim Upstream geholt oder von einem Rewrite beantwortet. Nützlich, wenn sich eine IP geändert hat oder ein Rewrite sofort greifen soll."
+                label={t("settings.clearCacheLabel")}
+                description={t("settings.clearCacheDesc")}
+                details={t("settings.clearCacheDetails")}
                 control={<ClearCacheButton />}
               />
             </Category>
@@ -329,25 +325,25 @@ export function Settings() {
           {active === "protokoll" && (
             <Category
               id="protokoll"
-              title="Protokollierung"
-              description="Was über aufgelöste Anfragen gespeichert wird."
+              title={t("settings.cat.protokoll")}
+              description={t("settings.logDesc")}
             >
               <Row
-                label="Anfrageprotokoll"
-                description="Speichert aufgelöste Anfragen für den Abfrage-Explorer."
-                details="Hält zu jeder Anfrage Zeitpunkt, Gerät, Domain und das Ergebnis (aufgelöst oder geblockt) fest, damit der Abfrage-Explorer sie später anzeigen kann."
+                label={t("settings.queryLogLabel")}
+                description={t("settings.queryLogDesc")}
+                details={t("settings.queryLogDetails")}
                 control={
                   <Toggle
-                    label="Anfrageprotokoll"
+                    label={t("settings.queryLogLabel")}
                     checked={settings.queryLog}
                     onChange={(v) => update("queryLog", v)}
                   />
                 }
               />
               <Row
-                label="Aufbewahrung"
-                description="Wie lange Protokolleinträge gespeichert bleiben."
-                details="Legt fest, nach wie vielen Tagen Protokolleinträge automatisch gelöscht werden. Nur einstellbar, wenn das Anfrageprotokoll aktiv ist."
+                label={t("settings.retentionLabel")}
+                description={t("settings.retentionDesc")}
+                details={t("settings.retentionDetails")}
                 disabled={!settings.queryLog}
                 control={
                   <label className={styles.number}>
@@ -358,9 +354,9 @@ export function Settings() {
                       value={settings.logRetentionDays}
                       disabled={!settings.queryLog}
                       onChange={(e) => update("logRetentionDays", Number(e.target.value))}
-                      aria-label="Aufbewahrung in Tagen"
+                      aria-label={t("settings.retentionAria")}
                     />
-                    <span>Tage</span>
+                    <span>{t("settings.retentionUnit")}</span>
                   </label>
                 }
               />
