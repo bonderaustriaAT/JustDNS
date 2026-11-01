@@ -13,6 +13,7 @@ use std::time::Duration;
 use justdns_auth::{DEFAULT_SESSION_TTL, SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
+use justdns_dns::client::UpstreamClient;
 use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::Router;
@@ -35,6 +36,10 @@ const FEED_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
 /// How long after startup the first background refresh runs, so boot is not held
 /// up by the network and the cached feeds serve in the meantime.
 const FEED_REFRESH_DELAY: Duration = Duration::from_secs(30);
+
+/// How often to ping each upstream to keep its connection warm between queries,
+/// short enough to stay under typical DoT/DoH idle timeouts.
+const UPSTREAM_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -147,7 +152,10 @@ async fn main() -> ExitCode {
     };
     info!(rewrites = rewriter.len(), "loaded DNS rewrites");
 
-    let router = Router::from_config(&config.upstreams);
+    // The upstream pool, shared (Arc) so a background task can keep its
+    // connections warm while the pipeline forwards real queries through it.
+    let router = Arc::new(Router::from_config(&config.upstreams));
+    spawn_upstream_keepalive(router.clone());
     // One cache, shared by the resolver pipeline and the web layer's "clear
     // cache" action (the handle is cheap to clone — the store is behind an Arc).
     let cache = DnsCache::new(config.cache_capacity);
@@ -213,6 +221,21 @@ fn spawn_feed_refresh(lists: ListStore) {
                 Ok(_) => {}
                 Err(error) => warn!(%error, "feed refresh task panicked"),
             }
+        }
+    });
+}
+
+/// Keep the upstream connections warm: prime them right away, then re-ping on an
+/// interval short enough to stay under typical DoT/DoH idle timeouts, so a cache
+/// miss rides an already-open session instead of paying a cold handshake.
+fn spawn_upstream_keepalive(router: Arc<Router<UpstreamClient>>) {
+    tokio::spawn(async move {
+        router.warm().await;
+        let mut ticker = tokio::time::interval(UPSTREAM_KEEPALIVE_INTERVAL);
+        ticker.tick().await; // the immediate first tick; we just warmed above
+        loop {
+            ticker.tick().await;
+            router.warm().await;
         }
     });
 }
