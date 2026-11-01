@@ -14,15 +14,16 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{FromRef, Query, Request, State};
+use axum::extract::{FromRef, Path, Query, Request, State};
 use axum::http::{StatusCode, Uri, header};
 use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use justdns_auth::{SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
 use justdns_filter::Blocker;
+use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome};
 use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ struct AppState {
     store: Store,
     config: ConfigStore,
     blocker: Arc<Blocker>,
+    lists: ListStore,
     users: UserStore,
     sessions: SessionStore,
 }
@@ -76,6 +78,12 @@ impl FromRef<AppState> for Arc<Blocker> {
     }
 }
 
+impl FromRef<AppState> for ListStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.lists.clone()
+    }
+}
+
 impl FromRef<AppState> for UserStore {
     fn from_ref(state: &AppState) -> Self {
         state.users.clone()
@@ -94,6 +102,7 @@ pub async fn serve(
     store: Store,
     config: ConfigStore,
     blocker: Arc<Blocker>,
+    lists: ListStore,
     users: UserStore,
     sessions: SessionStore,
 ) -> std::io::Result<()> {
@@ -105,6 +114,7 @@ pub async fn serve(
             store,
             config,
             blocker,
+            lists,
             users,
             sessions,
         }),
@@ -121,6 +131,16 @@ fn router(state: AppState) -> Router {
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
         .route("/api/classify", get(classify))
+        .route("/api/lists", get(get_lists))
+        .route("/api/lists/allow", post(add_allow).delete(remove_allow))
+        .route("/api/lists/block", post(add_block).delete(remove_block))
+        .route("/api/lists/subscriptions", post(add_subscription))
+        .route(
+            "/api/lists/subscriptions/{id}",
+            put(set_subscription_enabled).delete(remove_subscription),
+        )
+        .route("/api/lists/presets/{key}", put(set_preset))
+        .route("/api/lists/refresh", post(refresh_lists))
         .layer(from_fn_with_state(state.clone(), require_auth));
 
     let public = Router::new()
@@ -279,6 +299,141 @@ async fn classify(
     }))
 }
 
+/// Translate a list-store error into an HTTP status and message.
+fn list_error(error: ListError) -> (StatusCode, String) {
+    let status = match &error {
+        ListError::InvalidDomain(_) | ListError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
+        ListError::UnknownSubscription(_) | ListError::UnknownPreset(_) => StatusCode::NOT_FOUND,
+        ListError::Io { .. } | ListError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, error.to_string())
+}
+
+/// Everything the dashboard's "Listen" view needs: the user's own allow and
+/// block entries, their feed subscriptions, and the curated catalogue.
+async fn get_lists(State(lists): State<ListStore>) -> Json<ListsView> {
+    Json(lists.view())
+}
+
+/// A single domain, as the allow/block editors and the log buttons send it.
+#[derive(Deserialize)]
+struct DomainBody {
+    domain: String,
+}
+
+/// Mutations return the fresh view so the UI can replace its state in one step.
+async fn add_allow(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.add_allow(&body.domain).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+async fn remove_allow(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.remove_allow(&body.domain).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+async fn add_block(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.add_block(&body.domain).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+async fn remove_block(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.remove_block(&body.domain).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+/// Subscribe to an external feed by URL.
+#[derive(Deserialize)]
+struct SubscriptionBody {
+    name: String,
+    url: String,
+    kind: ListKind,
+}
+
+async fn add_subscription(
+    State(lists): State<ListStore>,
+    Json(body): Json<SubscriptionBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists
+        .add_subscription(&body.name, &body.url, body.kind)
+        .map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+/// Pause or resume a subscription (a preset or a hand-added feed).
+#[derive(Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+async fn set_subscription_enabled(
+    State(lists): State<ListStore>,
+    Path(id): Path<String>,
+    Json(body): Json<EnabledBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists
+        .set_subscription_enabled(&id, body.enabled)
+        .map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+async fn remove_subscription(
+    State(lists): State<ListStore>,
+    Path(id): Path<String>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.remove_subscription(&id).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+/// Switch a curated preset on or off.
+#[derive(Deserialize)]
+struct PresetBody {
+    on: bool,
+}
+
+async fn set_preset(
+    State(lists): State<ListStore>,
+    Path(key): Path<String>,
+    Json(body): Json<PresetBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists.set_preset(&key, body.on).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+/// What a manual refresh returns: the per-feed outcomes and the fresh view.
+#[derive(Serialize)]
+struct RefreshResponse {
+    outcomes: Vec<RefreshOutcome>,
+    lists: ListsView,
+}
+
+/// Re-download every enabled feed now. The fetch is blocking, so it runs on the
+/// blocking pool to keep the async runtime free.
+async fn refresh_lists(
+    State(lists): State<ListStore>,
+) -> Result<Json<RefreshResponse>, (StatusCode, String)> {
+    let worker = lists.clone();
+    let outcomes = tokio::task::spawn_blocking(move || worker.refresh_all())
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(RefreshResponse {
+        outcomes,
+        lists: lists.view(),
+    }))
+}
+
 /// Return the current settings so the dashboard can show them.
 async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
     Json(config.get())
@@ -433,11 +588,25 @@ mod tests {
         UserStore::load(path).unwrap()
     }
 
+    /// A throwaway list store backed by a unique temp directory, pushing its
+    /// (empty) merged sets into `blocker` so the two share one engine.
+    fn test_lists(blocker: Arc<Blocker>) -> ListStore {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "justdns-web-lists-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        ListStore::load(base.join("lists.json"), base.join("cache"), blocker).unwrap()
+    }
+
     fn test_state(store: Store) -> AppState {
+        let blocker = test_blocker();
         AppState {
             store,
             config: test_config(),
-            blocker: test_blocker(),
+            lists: test_lists(blocker.clone()),
+            blocker,
             users: test_users(),
             sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
         }
@@ -620,6 +789,94 @@ mod tests {
         // A name on no list classifies to null.
         let body = body_of(get(store, "/api/classify?name=example.com").await).await;
         assert_eq!(body, "null", "{body}");
+    }
+
+    #[tokio::test]
+    async fn lists_view_includes_the_preset_catalogue() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let body = body_of(get(store, "/api/lists").await).await;
+        assert!(body.contains("\"allow\":[]"), "{body}");
+        assert!(
+            body.contains("hagezi-light"),
+            "catalogue is present: {body}"
+        );
+        assert!(
+            body.contains("falsePositive"),
+            "FP impact described: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn adding_an_allow_entry_via_the_api_unblocks_live() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        // One app/state across the calls so the allow edit and the later
+        // classify share the one blocker.
+        let (app, cookie) = app_and_cookie(store);
+
+        // doubleclick.net is on the test ads list, so it classifies as blocked.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/classify?name=doubleclick.net")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"list\":\"ads\""), "blocked first: {body}");
+
+        // Whitelist it through the API (the log's "Whitelisten" button path).
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/lists/allow")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"domain":"doubleclick.net"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(
+            body.contains("doubleclick.net"),
+            "echoed in the view: {body}"
+        );
+
+        // Now it classifies as allowed (the allow set wins).
+        let body = body_of(
+            app.oneshot(
+                Request::get("/api/classify?name=doubleclick.net")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert_eq!(body, "null", "allow entry wins, live: {body}");
+    }
+
+    #[tokio::test]
+    async fn adding_a_block_entry_via_the_api_is_rejected_when_invalid() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+        let res = app
+            .oneshot(
+                Request::post("/api/lists/block")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"domain":"not a domain"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
     /// The `Set-Cookie` value a response sends for the session cookie, if any.

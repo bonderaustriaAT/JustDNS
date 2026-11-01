@@ -67,6 +67,7 @@ const RESPONSE_DESCRIPTIONS: Record<number, string> = {
 const BLOCK_LIST_LABELS: Record<BlockList, string> = {
   ads: "Werbung & Tracker",
   malware: "Schadsoftware",
+  custom: "Eigene Blockliste",
 };
 
 export function recordTypeLabel(code: number): string {

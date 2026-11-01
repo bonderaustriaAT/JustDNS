@@ -5,6 +5,66 @@ import { blockListLabel } from "../lib/dns";
 import type { LogRow } from "../lib/useLogs";
 import styles from "./Logs.module.css";
 
+type ActionState = "idle" | "pending" | "done" | "error";
+
+/** Put the exact queried domain on the allow list (for a blocked entry) or the
+ *  user's own block list (for one that got through). The whole point is the
+ *  one-click fix straight from the log, on the exact name that was asked. */
+function ListAction({ name, blocked }: { name: string; blocked: boolean }) {
+  const [state, setState] = useState<ActionState>("idle");
+
+  async function act() {
+    setState("pending");
+    try {
+      if (blocked) await api.addAllow(name);
+      else await api.addBlock(name);
+      setState("done");
+    } catch {
+      setState("error");
+    }
+  }
+
+  const doneText = blocked
+    ? "Freigegeben — diese Domain wird nicht mehr geblockt."
+    : "Zur eigenen Blockliste hinzugefügt.";
+
+  return (
+    <div className={styles.actions}>
+      <p className={styles.actionNote}>
+        {blocked
+          ? "Fälschlich geblockt? Nimm genau diese Domain dauerhaft von der Sperre aus."
+          : "Diese Domain stört? Sperre genau sie für das ganze Netzwerk."}
+      </p>
+      {state === "done" ? (
+        <span className={styles.actionDone} role="status">
+          {doneText}
+        </span>
+      ) : (
+        <div className={styles.actionRow}>
+          <button
+            type="button"
+            className={styles.actionButton}
+            data-variant={blocked ? "allow" : "block"}
+            disabled={state === "pending"}
+            onClick={act}
+          >
+            {state === "pending"
+              ? "Wird gespeichert …"
+              : blocked
+                ? "Auf Freigabeliste setzen"
+                : "Zur Blockliste hinzufügen"}
+          </button>
+          {state === "error" ? (
+            <span className={styles.actionError} role="alert">
+              Konnte nicht gespeichert werden.
+            </span>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One labelled field in the detail grid. */
 function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -77,6 +137,8 @@ export function LogDetail({ row }: { row: LogRow }) {
         <Field label="Dauer" value={`${row.durationMs} ms`} />
         <Field label="Zeit" value={row.fullTime} />
       </dl>
+
+      <ListAction name={row.name} blocked={row.isBlocked} />
     </div>
   );
 }

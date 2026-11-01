@@ -18,8 +18,9 @@ use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::Router;
 use justdns_dns::server::Server;
 use justdns_filter::Blocker;
+use justdns_lists::ListStore;
 use justdns_store::Store;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
@@ -27,6 +28,12 @@ use crate::observer::StoreObserver;
 
 /// How many recent queries the dashboard's hot view keeps in memory.
 const RECENT_CAPACITY: usize = 1000;
+
+/// How often the subscribed external feeds are re-downloaded in the background.
+const FEED_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
+/// How long after startup the first background refresh runs, so boot is not held
+/// up by the network and the cached feeds serve in the meantime.
+const FEED_REFRESH_DELAY: Duration = Duration::from_secs(30);
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -104,6 +111,28 @@ async fn main() -> ExitCode {
         "loaded block lists"
     );
 
+    // The user's own allow/block entries and feed subscriptions live on the data
+    // volume. Loading them pushes the merged sets into the blocker at once, from
+    // the on-disk feed caches, so no network is needed to start filtering.
+    let lists = match ListStore::load(&config.lists_path, &config.lists_cache_dir, blocker.clone())
+    {
+        Ok(lists) => lists,
+        Err(error) => {
+            error!(%error, "cannot load the user lists");
+            return ExitCode::FAILURE;
+        }
+    };
+    info!(
+        allow = blocker.allow_len(),
+        custom = blocker.custom_len(),
+        "loaded user lists"
+    );
+
+    // Refresh the subscribed feeds in the background: once shortly after boot,
+    // then on a long interval. Each pass is blocking (it downloads), so it runs
+    // on the blocking pool and never stalls the resolver or the web server.
+    spawn_feed_refresh(lists.clone());
+
     let router = Router::from_config(&config.upstreams);
     let cache = DnsCache::new(config.cache_capacity);
     let pipeline = Pipeline::new(
@@ -124,7 +153,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), users.clone(), sessions.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), users.clone(), sessions.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
@@ -140,6 +169,34 @@ async fn main() -> ExitCode {
     let _ = tokio::time::timeout(Duration::from_secs(5), writer).await;
 
     ExitCode::SUCCESS
+}
+
+/// Start the background task that re-downloads the subscribed feeds: once after
+/// a short delay, then on a long interval. The download is synchronous, so each
+/// pass is handed to the blocking pool.
+fn spawn_feed_refresh(lists: ListStore) {
+    tokio::spawn(async move {
+        tokio::time::sleep(FEED_REFRESH_DELAY).await;
+        let mut ticker = tokio::time::interval(FEED_REFRESH_INTERVAL);
+        loop {
+            // The first tick fires immediately, so the initial refresh runs once
+            // the startup delay above has elapsed; later ticks space out by the
+            // interval.
+            ticker.tick().await;
+            let worker = lists.clone();
+            match tokio::task::spawn_blocking(move || worker.refresh_all()).await {
+                Ok(outcomes) if !outcomes.is_empty() => {
+                    let failed = outcomes.iter().filter(|o| o.error.is_some()).count();
+                    info!(feeds = outcomes.len(), failed, "refreshed subscribed lists");
+                    for outcome in outcomes.iter().filter(|o| o.error.is_some()) {
+                        warn!(id = %outcome.id, error = ?outcome.error, "feed refresh failed");
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => warn!(%error, "feed refresh task panicked"),
+            }
+        }
+    });
 }
 
 /// Resolve when the process is asked to stop: SIGTERM from `docker stop`, or
