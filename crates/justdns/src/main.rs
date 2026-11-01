@@ -148,9 +148,11 @@ async fn main() -> ExitCode {
     info!(rewrites = rewriter.len(), "loaded DNS rewrites");
 
     let router = Router::from_config(&config.upstreams);
+    // One cache, shared by the resolver pipeline and the web layer's "clear
+    // cache" action (the handle is cheap to clone — the store is behind an Arc).
     let cache = DnsCache::new(config.cache_capacity);
     let pipeline = Pipeline::new(
-        cache,
+        cache.clone(),
         router,
         PipelineOptions {
             ipv6_enabled: config_store.ipv6_flag(),
@@ -169,7 +171,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), users.clone(), sessions.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), cache.clone(), users.clone(), sessions.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

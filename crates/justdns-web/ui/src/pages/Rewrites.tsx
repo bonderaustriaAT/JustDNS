@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { InfoHint } from "../components/InfoHint";
+import { Toggle } from "../components/Toggle";
 import { ApiError, api, type Rewrite, type RewritesView } from "../lib/api";
 import styles from "./Rewrites.module.css";
 
@@ -13,10 +14,11 @@ function errorMessage(error: unknown): string {
   return "Die Änderung ließ sich nicht speichern.";
 }
 
-/** Split a free-text IP field into separate addresses: entries are separated by
- *  commas or whitespace, so "192.168.20.5, 192.168.20.6" and one-per-space both
- *  work. Empty fragments are dropped. */
-function splitIps(raw: string): string[] {
+/** Split a free-text field into separate tokens: entries are separated by commas
+ *  or whitespace. Used for both the IP field ("192.168.20.5, …") and the name
+ *  field, where several names can share one address. Empty fragments are
+ *  dropped. */
+function splitTokens(raw: string): string[] {
   return raw
     .split(/[\s,]+/)
     .map((part) => part.trim())
@@ -30,6 +32,8 @@ export function Rewrites() {
 
   const [name, setName] = useState("");
   const [ips, setIps] = useState("");
+  // The original name of the entry being edited, or null when adding.
+  const [editing, setEditing] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -52,27 +56,51 @@ export function Rewrites() {
     });
   }
 
-  async function run(key: string, action: () => Promise<RewritesView>) {
+  async function run(key: string, action: () => Promise<RewritesView>): Promise<boolean> {
     mark(key, true);
     setError(null);
     try {
       setView(await action());
+      return true;
     } catch (err) {
       setError(errorMessage(err));
+      return false;
     } finally {
       mark(key, false);
     }
   }
 
+  function resetForm() {
+    setName("");
+    setIps("");
+    setEditing(null);
+  }
+
+  function startEdit(rewrite: Rewrite) {
+    setEditing(rewrite.name);
+    setName(rewrite.name);
+    setIps(rewrite.ips.join(", "));
+    setError(null);
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    const host = name.trim();
-    const addresses = splitIps(ips);
-    if (!host || addresses.length === 0) return;
-    run(`set:${host}`, () => api.setRewrite(host, addresses)).then(() => {
-      setName("");
-      setIps("");
-    });
+    const addresses = splitTokens(ips);
+    if (addresses.length === 0) return;
+
+    if (editing) {
+      const target = name.trim();
+      if (!target) return;
+      run(`edit:${editing}`, () => api.editRewrite(editing, target, addresses)).then((ok) => {
+        if (ok) resetForm();
+      });
+    } else {
+      const names = splitTokens(name);
+      if (names.length === 0) return;
+      run("add", () => api.setRewrites(names, addresses)).then((ok) => {
+        if (ok) resetForm();
+      });
+    }
   }
 
   if (!view) {
@@ -83,6 +111,8 @@ export function Rewrites() {
       </div>
     );
   }
+
+  const busy = pending.size > 0;
 
   return (
     <div className={styles.page}>
@@ -113,8 +143,8 @@ export function Rewrites() {
           className={styles.input}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Name, z. B. nas.home"
-          aria-label="Name"
+          placeholder={editing ? "Name" : "Name(n), z. B. nas.home drucker.home"}
+          aria-label={editing ? "Name" : "Name oder mehrere Namen"}
           autoComplete="off"
           spellCheck={false}
         />
@@ -127,10 +157,25 @@ export function Rewrites() {
           autoComplete="off"
           spellCheck={false}
         />
-        <button type="submit" className={styles.addButton} disabled={pending.size > 0}>
-          Speichern
+        <button type="submit" className={styles.addButton} disabled={busy}>
+          {editing ? "Aktualisieren" : "Speichern"}
         </button>
+        {editing ? (
+          <button
+            type="button"
+            className={styles.cancelButton}
+            onClick={resetForm}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+        ) : null}
       </form>
+      {!editing ? (
+        <p className={styles.hint}>
+          Mehrere Namen durch Leerzeichen oder Komma trennen, um sie auf dieselbe IP zu zeigen.
+        </p>
+      ) : null}
 
       {view.rewrites.length === 0 ? (
         <p className={styles.empty}>Noch keine Rewrites angelegt.</p>
@@ -140,8 +185,21 @@ export function Rewrites() {
             <RewriteRow
               key={rewrite.name}
               rewrite={rewrite}
-              busy={pending.has(`set:${rewrite.name}`)}
-              onRemove={() => run(`set:${rewrite.name}`, () => api.removeRewrite(rewrite.name))}
+              editing={editing === rewrite.name}
+              busy={
+                pending.has(`edit:${rewrite.name}`) ||
+                pending.has(`en:${rewrite.name}`) ||
+                pending.has(`rm:${rewrite.name}`)
+              }
+              onEdit={() => startEdit(rewrite)}
+              onToggle={(enabled) =>
+                run(`en:${rewrite.name}`, () => api.setRewriteEnabled(rewrite.name, enabled))
+              }
+              onRemove={() => {
+                run(`rm:${rewrite.name}`, () => api.removeRewrite(rewrite.name)).then((ok) => {
+                  if (ok && editing === rewrite.name) resetForm();
+                });
+              }}
             />
           ))}
         </ul>
@@ -150,18 +208,33 @@ export function Rewrites() {
   );
 }
 
-/** One rewrite: the name, its addresses as chips, and a remove control. */
+/** One rewrite: an on/off toggle, the name, its addresses as chips, and edit and
+ *  remove controls. A disabled rewrite is dimmed to show it is not answered. */
 function RewriteRow({
   rewrite,
+  editing,
   busy,
+  onEdit,
+  onToggle,
   onRemove,
 }: {
   rewrite: Rewrite;
+  editing: boolean;
   busy: boolean;
+  onEdit: () => void;
+  onToggle: (enabled: boolean) => void;
   onRemove: () => void;
 }) {
   return (
-    <li className={styles.entry}>
+    <li className={styles.entry} data-editing={editing || undefined} data-off={!rewrite.enabled || undefined}>
+      <div className={styles.entryToggle}>
+        <Toggle
+          label={`${rewrite.name} ${rewrite.enabled ? "deaktivieren" : "aktivieren"}`}
+          checked={rewrite.enabled}
+          disabled={busy}
+          onChange={onToggle}
+        />
+      </div>
       <div className={styles.entryMain}>
         <span className={styles.entryName}>{rewrite.name}</span>
         <span className={styles.arrow} aria-hidden="true">
@@ -175,16 +248,28 @@ function RewriteRow({
           ))}
         </span>
       </div>
-      <button
-        type="button"
-        className={styles.remove}
-        aria-label={`${rewrite.name} entfernen`}
-        title="Entfernen"
-        disabled={busy}
-        onClick={onRemove}
-      >
-        ✕
-      </button>
+      <div className={styles.entryActions}>
+        <button
+          type="button"
+          className={styles.action}
+          aria-label={`${rewrite.name} bearbeiten`}
+          title="Bearbeiten"
+          disabled={busy}
+          onClick={onEdit}
+        >
+          Bearbeiten
+        </button>
+        <button
+          type="button"
+          className={styles.remove}
+          aria-label={`${rewrite.name} entfernen`}
+          title="Entfernen"
+          disabled={busy}
+          onClick={onRemove}
+        >
+          ✕
+        </button>
+      </div>
     </li>
   );
 }

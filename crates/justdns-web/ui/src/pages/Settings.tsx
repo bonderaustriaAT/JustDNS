@@ -2,8 +2,43 @@ import { useMemo, useState, type ReactNode } from "react";
 
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
+import { api } from "../lib/api";
 import { useSettings, type UpstreamMode } from "../state/settings";
 import styles from "./Settings.module.css";
+
+/** The "clear DNS cache" action: a one-shot button that drops every cached
+ *  answer, with a short confirmation once it is done. */
+function ClearCacheButton() {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+
+  async function clear() {
+    setState("busy");
+    try {
+      await api.clearCache();
+      setState("done");
+      window.setTimeout(() => setState("idle"), 2500);
+    } catch {
+      setState("error");
+    }
+  }
+
+  return (
+    <div className={styles.action}>
+      <button
+        type="button"
+        className={styles.actionButton}
+        onClick={clear}
+        disabled={state === "busy"}
+      >
+        {state === "busy" ? "Wird geleert …" : "DNS-Cache leeren"}
+      </button>
+      {state === "done" ? <span className={styles.actionDone}>Cache geleert.</span> : null}
+      {state === "error" ? (
+        <span className={styles.actionError}>Ließ sich nicht leeren.</span>
+      ) : null}
+    </div>
+  );
+}
 
 interface CategoryMeta {
   id: string;
@@ -281,6 +316,12 @@ export function Settings() {
                     onChange={(v) => update("cacheServeStale", v)}
                   />
                 }
+              />
+              <Row
+                label="DNS-Cache leeren"
+                description="Verwirft alle zwischengespeicherten Antworten sofort."
+                details="Löscht den gesamten Antwort-Cache. Die nächste Anfrage je Name wird wieder frisch beim Upstream geholt oder von einem Rewrite beantwortet. Nützlich, wenn sich eine IP geändert hat oder ein Rewrite sofort greifen soll."
+                control={<ClearCacheButton />}
               />
             </Category>
           )}

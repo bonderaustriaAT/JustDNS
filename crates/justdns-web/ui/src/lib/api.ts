@@ -90,10 +90,12 @@ export interface Preset {
 }
 
 /** A local DNS rewrite: an exact name the resolver answers itself from fixed
- *  IP addresses (v4 → A record, v6 → AAAA) instead of forwarding it upstream. */
+ *  IP addresses (v4 → A record, v6 → AAAA) instead of forwarding it upstream.
+ *  A disabled rewrite stays in the list but is not answered locally. */
 export interface Rewrite {
   name: string;
   ips: string[];
+  enabled: boolean;
 }
 
 /** Everything the rewrites view shows in one payload. */
@@ -236,10 +238,19 @@ export const api = {
     sendJson<ListsView>("PUT", `/api/lists/presets/${encodeURIComponent(key)}`, { on }),
   refreshLists: () => sendJson<RefreshResponse>("POST", "/api/lists/refresh"),
   rewrites: (signal?: AbortSignal) => getJson<RewritesView>("/api/rewrites", signal),
-  setRewrite: (name: string, ips: string[]) =>
-    sendJson<RewritesView>("POST", "/api/rewrites", { name, ips }),
+  /** Add one or more names that share the same addresses. */
+  setRewrites: (names: string[], ips: string[]) =>
+    sendJson<RewritesView>("POST", "/api/rewrites", { names, ips }),
+  /** Rename a rewrite and replace its addresses, keeping its enabled state. */
+  editRewrite: (oldName: string, name: string, ips: string[]) =>
+    sendJson<RewritesView>("PUT", "/api/rewrites", { oldName, name, ips }),
+  /** Switch a rewrite on or off. */
+  setRewriteEnabled: (name: string, enabled: boolean) =>
+    sendJson<RewritesView>("PUT", "/api/rewrites/enabled", { name, enabled }),
   removeRewrite: (name: string) =>
     sendJson<RewritesView>("DELETE", "/api/rewrites", { name }),
+  /** Drop every entry in the DNS response cache. */
+  clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
   authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
   setup: (username: string, password: string) =>
     postJson<{ username: string }>("/api/auth/setup", { username, password }),
