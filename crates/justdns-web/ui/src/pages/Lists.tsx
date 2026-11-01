@@ -201,6 +201,9 @@ export function Lists() {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [presetFilter, setPresetFilter] = useState<string>("all");
+  // The URL-feed section is collapsed by default so the page stays short; a
+  // badge on its header shows how many feeds hide inside when it's closed.
+  const [feedsOpen, setFeedsOpen] = useState(false);
 
   // Hand-added subscription form.
   const [feedName, setFeedName] = useState("");
@@ -396,17 +399,28 @@ export function Lists() {
         </div>
       </section>
 
-      <section className={styles.section} aria-labelledby="feeds-title">
-        <div className={styles.sectionHead}>
-          <h2 id="feeds-title" className={styles.sectionTitle}>
-            Eigene Listen per URL
-          </h2>
-          <p className={styles.sectionLead}>
-            Abonniere jede Blockliste oder Freigabeliste im Hosts- oder AdGuard-Format über ihre
-            URL. JustDNS lädt sie regelmäßig neu.
-          </p>
-        </div>
+      <details
+        className={styles.collapsible}
+        open={feedsOpen}
+        onToggle={(event) => setFeedsOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className={styles.collapsibleHead}>
+          <span className={styles.collapsibleText}>
+            <span className={styles.collapsibleTitle}>
+              Eigene Listen per URL
+              {feeds.length > 0 ? <span className={styles.countPill}>{feeds.length}</span> : null}
+            </span>
+            <span className={styles.sectionLead}>
+              Abonniere jede Blockliste oder Freigabeliste im Hosts- oder AdGuard-Format über ihre
+              URL. JustDNS lädt sie regelmäßig neu.
+            </span>
+          </span>
+          <span className={styles.chevron} aria-hidden="true">
+            ›
+          </span>
+        </summary>
 
+        <div className={styles.collapsibleBody}>
         <form className={styles.feedForm} onSubmit={addFeed}>
           <input
             className={styles.input}
@@ -479,7 +493,8 @@ export function Lists() {
             ))}
           </ul>
         )}
-      </section>
+        </div>
+      </details>
     </div>
   );
 }
