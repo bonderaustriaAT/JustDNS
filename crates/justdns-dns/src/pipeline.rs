@@ -13,14 +13,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
-use hickory_proto::rr::rdata::{A, AAAA};
-use hickory_proto::rr::{RData, Record, RecordType};
+use hickory_proto::rr::rdata::{A, AAAA, CNAME};
+use hickory_proto::rr::{Name, RData, Record, RecordType};
 use justdns_filter::Blocker;
 use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheKey, CachedEntry, CachedResponse, DnsCache};
 use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
 use crate::router::{Resolve, Router};
+use crate::safesearch;
 
 /// Negative answers without an SOA are cached this long (seconds).
 const DEFAULT_NEGATIVE_TTL: u64 = 60;
@@ -38,13 +39,17 @@ pub struct PipelineOptions {
     /// Whether to answer AAAA queries. Off by default, so IPv6 names resolve to
     /// nothing and clients fall back to IPv4.
     pub ipv6_enabled: Arc<AtomicBool>,
+    /// Whether to force the big search engines to their safe-search endpoints.
+    /// A shared flag so the config store can flip it live, like `ipv6_enabled`.
+    pub safe_search: Arc<AtomicBool>,
 }
 
 impl PipelineOptions {
-    /// Build options with a fresh IPv6 flag set to `enabled`.
+    /// Build options with a fresh IPv6 flag set to `enabled` and safe search off.
     pub fn with_ipv6(enabled: bool) -> Self {
         Self {
             ipv6_enabled: Arc::new(AtomicBool::new(enabled)),
+            safe_search: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -164,6 +169,16 @@ impl<R: Resolve + Sync> Pipeline<R> {
             return AnswerSource::Local;
         }
 
+        // Safe search: force the big search engines to their filtered endpoint
+        // by resolving that target and returning it under a CNAME. Checked before
+        // the cache so a previously cached unfiltered answer is never served, and
+        // never cached itself so flipping the flag off takes effect at once.
+        if self.options.safe_search.load(Ordering::Relaxed) {
+            if let Some(target) = safesearch::target(query.name(), query.query_type()) {
+                return self.answer_safe_search(query, response, target).await;
+            }
+        }
+
         let key = CacheKey::new(query.name(), query.query_type());
 
         if let Some(hit) = self.cache.get(&key).await {
@@ -242,6 +257,39 @@ impl<R: Resolve + Sync> Pipeline<R> {
             }
             _ => {}
         }
+    }
+
+    /// Answer `query` from its safe-search `target`: resolve the target for the
+    /// same record type upstream, then return a CNAME from the queried name to
+    /// the target followed by the target's address records. Not cached, so the
+    /// mapping disappears the instant safe search is switched off.
+    async fn answer_safe_search(
+        &self,
+        query: &Query,
+        response: &mut Message,
+        target: Name,
+    ) -> AnswerSource {
+        match self
+            .router
+            .resolve(target.clone(), query.query_type())
+            .await
+        {
+            Ok(upstream) => {
+                response.set_response_code(upstream.response_code());
+                response.add_answer(Record::from_rdata(
+                    query.name().clone(),
+                    REWRITE_TTL,
+                    RData::CNAME(CNAME(target)),
+                ));
+                for record in upstream.answers() {
+                    response.add_answer(record.clone());
+                }
+            }
+            Err(_) => {
+                response.set_response_code(ResponseCode::ServFail);
+            }
+        }
+        AnswerSource::Upstream
     }
 }
 
@@ -527,6 +575,59 @@ mod tests {
             .handle(&request("example.com.", RecordType::A), CLIENT)
             .await;
         assert_eq!(other.answers().len(), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn safe_search_rewrites_to_the_filtered_endpoint() {
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(216, 239, 38, 120)));
+        let calls = mock.calls.clone();
+        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let options = PipelineOptions {
+            ipv6_enabled: Arc::new(AtomicBool::new(false)),
+            safe_search: Arc::new(AtomicBool::new(true)),
+        };
+        let pipe = Pipeline::new(DnsCache::new(100), router, options);
+
+        let response = pipe
+            .handle(&request("www.google.com.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(response.response_code(), ResponseCode::NoError);
+
+        // The answer carries a CNAME to the safe-search host plus its address.
+        let cname = response
+            .answers()
+            .iter()
+            .find_map(|r| r.data().as_cname().map(|c| c.0.to_ascii()));
+        assert_eq!(
+            cname.as_deref(),
+            Some("forcesafesearch.google.com."),
+            "CNAME to the safe-search host"
+        );
+        assert!(
+            response.answers().iter().any(|r| r.data().as_a().is_some()),
+            "address record included"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1, "target was resolved once");
+    }
+
+    #[tokio::test]
+    async fn safe_search_off_leaves_search_engines_alone() {
+        let (pipe, calls) = pipeline(
+            Reply::A(Ipv4Addr::new(142, 250, 0, 0)),
+            PipelineOptions::default(),
+        );
+        let response = pipe
+            .handle(&request("google.com.", RecordType::A), CLIENT)
+            .await;
+        // Plain A answer, no CNAME rewrite.
+        assert!(
+            response
+                .answers()
+                .iter()
+                .all(|r| r.data().as_cname().is_none()),
+            "no safe-search CNAME when the flag is off"
+        );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 

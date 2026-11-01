@@ -154,6 +154,7 @@ async fn main() -> ExitCode {
         router,
         PipelineOptions {
             ipv6_enabled: config_store.ipv6_flag(),
+            safe_search: config_store.safe_search_flag(),
         },
     )
     .with_observer(observer)
