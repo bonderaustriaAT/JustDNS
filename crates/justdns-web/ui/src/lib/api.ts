@@ -47,11 +47,64 @@ export interface QueryRow {
 }
 
 /** Which list a name is on and the rule that matched, or null if on no list. */
-export type BlockList = "ads" | "malware";
+export type BlockList = "ads" | "malware" | "custom";
 
 export interface ClassifyResult {
   list: BlockList;
   rule: string;
+}
+
+/** Whether a list adds names to the allow set or the block set. */
+export type ListKind = "allow" | "block";
+
+/** A subscription to an external feed, with the status of its last fetch. */
+export interface Subscription {
+  id: string;
+  name: string;
+  url: string;
+  kind: ListKind;
+  enabled: boolean;
+  /** Set when this feed was switched on as a curated preset. */
+  preset?: string;
+  lastFetchedMs?: number;
+  lastCount?: number;
+  lastError?: string;
+}
+
+/** One curated catalogue entry, with its live on/off state. */
+export interface Preset {
+  key: string;
+  name: string;
+  url: string;
+  kind: ListKind;
+  description: string;
+  falsePositive: string;
+  /** False-positive risk on a 1 (negligible) to 5 (high) scale. */
+  fpLevel: number;
+  active: boolean;
+  enabled: boolean;
+}
+
+/** Everything the "Listen" view shows in one payload. */
+export interface ListsView {
+  allow: string[];
+  block: string[];
+  subscriptions: Subscription[];
+  presets: Preset[];
+  allowActive: number;
+  blockActive: number;
+}
+
+/** The outcome of refreshing one feed. */
+export interface RefreshOutcome {
+  id: string;
+  count?: number;
+  error?: string;
+}
+
+export interface RefreshResponse {
+  outcomes: RefreshOutcome[];
+  lists: ListsView;
 }
 
 /** Whether an admin exists yet and who, if anyone, the caller is logged in as. */
@@ -106,6 +159,22 @@ async function putJson<T>(path: string, body: T, signal?: AbortSignal): Promise<
   return response.json() as Promise<T>;
 }
 
+/** Send a guarded mutation (POST/PUT/DELETE). A 401 bounces to login like the
+ * read calls; other failures carry the server's message so the UI can show it. */
+async function sendJson<Res>(method: string, path: string, body?: unknown): Promise<Res> {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    if (response.status === 401) onUnauthorized?.();
+    const detail = await response.text().catch(() => "");
+    throw new ApiError(response.status, detail || `${path} antwortete mit ${response.status}`);
+  }
+  return (response.status === 204 ? undefined : await response.json()) as Res;
+}
+
 /** POST JSON without expecting a 401 to bounce the user (used by the auth
  * endpoints themselves, where a 401 means "wrong password", not "logged out"). */
 async function postJson<Res>(path: string, body: unknown): Promise<Res> {
@@ -136,6 +205,20 @@ export const api = {
     const params = new URLSearchParams({ name });
     return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);
   },
+  lists: (signal?: AbortSignal) => getJson<ListsView>("/api/lists", signal),
+  addAllow: (domain: string) => sendJson<ListsView>("POST", "/api/lists/allow", { domain }),
+  removeAllow: (domain: string) => sendJson<ListsView>("DELETE", "/api/lists/allow", { domain }),
+  addBlock: (domain: string) => sendJson<ListsView>("POST", "/api/lists/block", { domain }),
+  removeBlock: (domain: string) => sendJson<ListsView>("DELETE", "/api/lists/block", { domain }),
+  addSubscription: (name: string, url: string, kind: ListKind) =>
+    sendJson<ListsView>("POST", "/api/lists/subscriptions", { name, url, kind }),
+  setSubscriptionEnabled: (id: string, enabled: boolean) =>
+    sendJson<ListsView>("PUT", `/api/lists/subscriptions/${encodeURIComponent(id)}`, { enabled }),
+  removeSubscription: (id: string) =>
+    sendJson<ListsView>("DELETE", `/api/lists/subscriptions/${encodeURIComponent(id)}`),
+  setPreset: (key: string, on: boolean) =>
+    sendJson<ListsView>("PUT", `/api/lists/presets/${encodeURIComponent(key)}`, { on }),
+  refreshLists: () => sendJson<RefreshResponse>("POST", "/api/lists/refresh"),
   authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
   setup: (username: string, password: string) =>
     postJson<{ username: string }>("/api/auth/setup", { username, password }),

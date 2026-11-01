@@ -30,6 +30,12 @@ export function Shell({ children }: { children: ReactNode }) {
               Protokoll
             </NavLink>
             <NavLink
+              to="/listen"
+              className={({ isActive }) => (isActive ? styles.active : styles.link)}
+            >
+              Listen
+            </NavLink>
+            <NavLink
               to="/einstellungen"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >

@@ -11,6 +11,7 @@ axum-extra = { version = "0.10.1", features = ["cookie"] }
 justdns-auth = { path = "../justdns-auth" }
 justdns-config = { path = "../justdns-config" }
 justdns-filter = { path = "../justdns-filter" }
+justdns-lists = { path = "../justdns-lists" }
 justdns-store = { path = "../justdns-store" }
 rust-embed = { version = "8.7.2", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }

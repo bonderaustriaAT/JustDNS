@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { Shell } from "./components/Shell";
 import { CreateAdmin } from "./pages/CreateAdmin";
+import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Overview } from "./pages/Overview";
@@ -28,6 +29,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/protokoll" element={<Logs />} />
+          <Route path="/listen" element={<Lists />} />
           <Route path="/einstellungen" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -20,6 +20,8 @@ const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 const DEFAULT_DB_PATH: &str = "queries.duckdb";
 const DEFAULT_CONFIG_PATH: &str = "config.json";
 const DEFAULT_AUTH_PATH: &str = "auth.json";
+const DEFAULT_LISTS_PATH: &str = "lists.json";
+const DEFAULT_LISTS_CACHE: &str = "lists-cache";
 
 #[derive(Debug)]
 pub struct Config {
@@ -33,6 +35,10 @@ pub struct Config {
     pub config_path: PathBuf,
     /// Where the account list (admin password hash) is stored.
     pub auth_path: PathBuf,
+    /// Where the user's allow/block lists and subscriptions are stored.
+    pub lists_path: PathBuf,
+    /// Directory where fetched external feeds are cached.
+    pub lists_cache_dir: PathBuf,
     pub upstreams: UpstreamConfig,
 }
 
@@ -96,6 +102,14 @@ impl Config {
             read_var("JUSTDNS_AUTH_PATH")?.unwrap_or_else(|| DEFAULT_AUTH_PATH.to_owned()),
         );
 
+        let lists_path = PathBuf::from(
+            read_var("JUSTDNS_LISTS_PATH")?.unwrap_or_else(|| DEFAULT_LISTS_PATH.to_owned()),
+        );
+
+        let lists_cache_dir = PathBuf::from(
+            read_var("JUSTDNS_LISTS_CACHE")?.unwrap_or_else(|| DEFAULT_LISTS_CACHE.to_owned()),
+        );
+
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
             None => UpstreamConfig::eu_defaults(),
@@ -109,6 +123,8 @@ impl Config {
             db_path,
             config_path,
             auth_path,
+            lists_path,
+            lists_cache_dir,
             upstreams,
         })
     }

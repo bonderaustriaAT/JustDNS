@@ -377,6 +377,73 @@
   color: var(--text-muted);
 }
 
+/* The one-click list fix, offered right in the entry's detail panel. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.actionNote {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.actionRow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.actionButton {
+  align-self: start;
+  font: inherit;
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--surface);
+  border: 1px solid transparent;
+}
+
+.actionButton[data-variant="allow"] {
+  background: var(--signal);
+  border-color: var(--signal-strong);
+}
+
+.actionButton[data-variant="allow"]:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.actionButton[data-variant="block"] {
+  background: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 70%, black);
+}
+
+.actionButton[data-variant="block"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
+
+.actionButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.actionDone {
+  font-size: var(--step--1);
+  color: var(--signal-strong);
+  font-weight: 500;
+}
+
+.actionError {
+  font-size: var(--step--1);
+  color: var(--danger);
+}
+
 @media (max-width: 600px) {
   .columns {
     display: none;

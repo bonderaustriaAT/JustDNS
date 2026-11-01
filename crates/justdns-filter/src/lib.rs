@@ -19,6 +19,8 @@ pub use domain::{DomainSet, parse_rule};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use arc_swap::ArcSwap;
+
 /// The advertising and tracking starter list.
 const ADS_LIST: &str = include_str!("../lists/ads.txt");
 /// The malware and phishing starter list.
@@ -31,6 +33,8 @@ pub enum BlockCategory {
     AdsTrackers,
     /// Malware, phishing or fraud.
     Malware,
+    /// A domain the user added to their own block list.
+    Custom,
 }
 
 impl BlockCategory {
@@ -39,6 +43,7 @@ impl BlockCategory {
         match self {
             BlockCategory::AdsTrackers => "ads",
             BlockCategory::Malware => "malware",
+            BlockCategory::Custom => "custom",
         }
     }
 }
@@ -53,20 +58,27 @@ pub struct BlockMatch {
     pub rule: String,
 }
 
-/// The blocking engine. Holds one domain set per category and a live flag for
-/// each; a category only blocks while its flag is on. Cheap to share: clone the
-/// [`Arc`] the binary wraps it in.
+/// The blocking engine. Holds the bundled category lists (each gated by a live
+/// flag) plus the user's own allow and block lists, which can be swapped at
+/// runtime so a dashboard edit takes effect on the next query. The allow list
+/// wins over every block list. Cheap to share: clone the [`Arc`] the binary
+/// wraps it in.
 #[derive(Debug)]
 pub struct Blocker {
     ads: DomainSet,
     ads_on: Arc<AtomicBool>,
     malware: DomainSet,
     malware_on: Arc<AtomicBool>,
+    /// The user's allow list: a match here is never blocked, whatever the block
+    /// lists say. Replaced wholesale on every edit.
+    allow: ArcSwap<DomainSet>,
+    /// The user's own block list, always on (they added it on purpose).
+    custom: ArcSwap<DomainSet>,
 }
 
 impl Blocker {
-    /// Build a blocker from explicit domain sets and live flags. Used by tests
-    /// and by anything that loads its own lists.
+    /// Build a blocker from explicit category sets and live flags, with empty
+    /// user lists. Used by tests and by anything that loads its own lists.
     pub fn new(
         ads: DomainSet,
         ads_on: Arc<AtomicBool>,
@@ -78,6 +90,8 @@ impl Blocker {
             ads_on,
             malware,
             malware_on,
+            allow: ArcSwap::from_pointee(DomainSet::new()),
+            custom: ArcSwap::from_pointee(DomainSet::new()),
         }
     }
 
@@ -92,11 +106,29 @@ impl Blocker {
         )
     }
 
-    /// The category that blocks `name`, or `None` if it is allowed. A category
-    /// whose flag is off never blocks, even if the name is on its list.
+    /// Replace the user's allow list. Takes effect on the next query.
+    pub fn set_allow(&self, allow: DomainSet) {
+        self.allow.store(Arc::new(allow));
+    }
+
+    /// Replace the user's own block list. Takes effect on the next query.
+    pub fn set_custom(&self, custom: DomainSet) {
+        self.custom.store(Arc::new(custom));
+    }
+
+    /// The category that blocks `name`, or `None` if it is allowed. The allow
+    /// list is checked first and overrides every block list; a bundled category
+    /// whose flag is off never blocks.
     pub fn classify(&self, name: &str) -> Option<BlockCategory> {
+        // The allow list wins over everything, so a name on it is never blocked.
+        if self.allow.load().blocks(name) {
+            return None;
+        }
         if self.malware_on.load(Ordering::Relaxed) && self.malware.blocks(name) {
             return Some(BlockCategory::Malware);
+        }
+        if self.custom.load().blocks(name) {
+            return Some(BlockCategory::Custom);
         }
         if self.ads_on.load(Ordering::Relaxed) && self.ads.blocks(name) {
             return Some(BlockCategory::AdsTrackers);
@@ -104,20 +136,30 @@ impl Blocker {
         None
     }
 
-    /// Whether `name` is blocked under the current flags.
+    /// Whether `name` is blocked under the current flags and lists.
     pub fn blocks(&self, name: &str) -> bool {
         self.classify(name).is_some()
     }
 
-    /// Explain why `name` is on a list, *ignoring* the on/off flags, so a query
-    /// already logged as blocked can be explained even if the category was since
-    /// switched off. Malware takes precedence over ads, matching [`classify`].
+    /// Explain why `name` would be blocked, *ignoring* the bundled on/off flags,
+    /// so a query already logged as blocked can be explained even if a category
+    /// was since switched off. The allow list still wins, so an allow-listed
+    /// name explains to `None`. Order matches [`classify`]: malware, custom, ads.
     ///
     /// [`classify`]: Self::classify
     pub fn explain(&self, name: &str) -> Option<BlockMatch> {
+        if self.allow.load().blocks(name) {
+            return None;
+        }
         if let Some(rule) = self.malware.matching(name) {
             return Some(BlockMatch {
                 category: BlockCategory::Malware,
+                rule,
+            });
+        }
+        if let Some(rule) = self.custom.load().matching(name) {
+            return Some(BlockMatch {
+                category: BlockCategory::Custom,
                 rule,
             });
         }
@@ -138,6 +180,16 @@ impl Blocker {
     /// Number of domains in the malware/phishing list.
     pub fn malware_len(&self) -> usize {
         self.malware.len()
+    }
+
+    /// Number of domains on the user's allow list.
+    pub fn allow_len(&self) -> usize {
+        self.allow.load().len()
+    }
+
+    /// Number of domains on the user's own block list.
+    pub fn custom_len(&self) -> usize {
+        self.custom.load().len()
     }
 }
 
@@ -214,6 +266,43 @@ mod tests {
     fn disabled_blocker_allows_everything() {
         let b = Blocker::with_bundled_lists(flag(false), flag(false));
         assert!(!b.blocks("doubleclick.net"));
+    }
+
+    #[test]
+    fn allow_list_overrides_every_block_list() {
+        let b = Blocker::with_bundled_lists(flag(true), flag(true));
+        assert!(b.blocks("doubleclick.net"), "blocked before allow-listing");
+
+        b.set_allow(DomainSet::from_rules("doubleclick.net\n"));
+        assert!(!b.blocks("doubleclick.net"), "allow list wins");
+        assert!(!b.blocks("ad.doubleclick.net"), "and covers sub-domains");
+        assert_eq!(b.classify("doubleclick.net"), None);
+        // explain also respects the allow list.
+        assert_eq!(b.explain("doubleclick.net"), None);
+    }
+
+    #[test]
+    fn custom_block_list_is_always_on_and_live() {
+        // Both bundled categories off, so only the custom list can block.
+        let b = blocker(false, false);
+        assert!(!b.blocks("tracker.test"));
+
+        b.set_custom(DomainSet::from_rules("tracker.test\n"));
+        assert_eq!(b.classify("tracker.test"), Some(BlockCategory::Custom));
+        assert_eq!(b.classify("a.tracker.test"), Some(BlockCategory::Custom));
+        assert_eq!(BlockCategory::Custom.as_str(), "custom");
+
+        // Clearing it stops blocking, live.
+        b.set_custom(DomainSet::new());
+        assert!(!b.blocks("tracker.test"));
+    }
+
+    #[test]
+    fn allow_list_beats_custom_block_for_the_same_name() {
+        let b = blocker(false, false);
+        b.set_custom(DomainSet::from_rules("intra.test\n"));
+        b.set_allow(DomainSet::from_rules("intra.test\n"));
+        assert!(!b.blocks("intra.test"), "allow wins over custom block");
     }
 
     #[test]
