@@ -7,12 +7,17 @@ import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import {
   useSettings,
+  type BlockLevel,
   type CustomTransport,
   type CustomUpstream,
   type SpeedProfile,
   type UpstreamMode,
 } from "../state/settings";
 import styles from "./Settings.module.css";
+
+/** The applicable block levels, in order of strength. "custom" is a read-only
+ *  state the server reports, never a button. */
+const BLOCK_LEVELS: Exclude<BlockLevel, "custom">[] = ["off", "minimal", "standard", "extreme"];
 
 /** The "clear DNS cache" action: a one-shot button that drops every cached
  *  answer, with a short confirmation once it is done. */
@@ -246,6 +251,57 @@ function CustomUpstreamsEditor() {
   );
 }
 
+/** The block-level control: a segmented switch over the applicable levels, plus
+ *  the "Eigen" (custom) state the server reports when the live lists match no
+ *  level. Picking a level applies it through its own endpoint. */
+function BlockLevelControl() {
+  const { t } = useI18n();
+  const { settings, applyBlockLevel } = useSettings();
+  const [busy, setBusy] = useState(false);
+  const level = settings.blockLevel;
+
+  const choose = async (next: Exclude<BlockLevel, "custom">) => {
+    if (busy || next === level) return;
+    setBusy(true);
+    try {
+      await applyBlockLevel(next);
+    } catch {
+      // A failed apply leaves the shown level in place; the next pick retries.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.profile}>
+      <span className={styles.labelLine}>
+        <span className={styles.label}>{t("settings.blockLevelLabel")}</span>
+        <InfoHint label={t("settings.blockLevelLabel")} text={t("settings.blockLevelDetails")} />
+      </span>
+      <div className={styles.profileSwitch} role="group" aria-label={t("settings.blockLevelLabel")}>
+        {BLOCK_LEVELS.map((lvl) => (
+          <button
+            key={lvl}
+            type="button"
+            className={styles.profileButton}
+            data-active={level === lvl || undefined}
+            aria-pressed={level === lvl}
+            disabled={busy}
+            onClick={() => choose(lvl)}
+          >
+            {t(`settings.blockLevel.${lvl}` as MessageKey)}
+          </button>
+        ))}
+      </div>
+      <p className={styles.profileDesc}>
+        {level === "custom"
+          ? t("settings.blockLevel.customDesc")
+          : t(`settings.blockLevel.${level}Desc` as MessageKey)}
+      </p>
+    </div>
+  );
+}
+
 export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -312,6 +368,22 @@ export function Settings() {
               title={t("settings.cat.schutz")}
               description={t("settings.schutzDesc")}
             >
+              <Row
+                label={t("settings.instanceNameLabel")}
+                description={t("settings.instanceNameDesc")}
+                details={t("settings.instanceNameDetails")}
+                control={
+                  <input
+                    className={styles.select}
+                    type="text"
+                    aria-label={t("settings.instanceNameLabel")}
+                    value={settings.instanceName}
+                    placeholder="JustDNS"
+                    onChange={(e) => update("instanceName", e.target.value)}
+                  />
+                }
+              />
+              <BlockLevelControl />
               <Row
                 label={t("settings.adsLabel")}
                 description={t("settings.adsDesc")}

@@ -22,6 +22,10 @@ interface AuthContextValue {
   username: string | null;
   /// Create the first administrator and log in. Throws on failure.
   setup: (username: string, password: string) => Promise<void>;
+  /// Mark setup finished locally after the wizard has already created the admin
+  /// (via the API) and applied its configuration. Flipping the gate only at the
+  /// end keeps the wizard mounted across its own steps.
+  completeSetup: (username: string) => void;
   /// Log in with an existing account. Throws on a wrong password.
   login: (username: string, password: string) => Promise<void>;
   /// Log out and return to the login screen.
@@ -74,6 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsername(result.username);
   }, []);
 
+  const completeSetup = useCallback((user: string) => {
+    setConfigured(true);
+    setAuthenticated(true);
+    setUsername(user);
+  }, []);
+
   const login = useCallback(async (user: string, password: string) => {
     const result = await api.login(user, password);
     setAuthenticated(true);
@@ -92,8 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, configured, authenticated, username, setup, login, logout }),
-    [status, configured, authenticated, username, setup, login, logout],
+    () => ({ status, configured, authenticated, username, setup, completeSetup, login, logout }),
+    [status, configured, authenticated, username, setup, completeSetup, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,0 +1,250 @@
+/* The first-run setup wizard. It borrows the auth screen's card, brand and form
+   styles (Auth.module.css) and adds only what a multi-step flow needs: a step
+   indicator, segmented choices, and a two-button nav row. */
+
+.card {
+  inline-size: min(100%, 480px);
+}
+
+/* Brand on the left, language switch on the right, so the user can set the
+   wizard's language before anything else — the header's switch is not shown
+   during setup. */
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.langSwitch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.langButton {
+  font: inherit;
+  font-size: var(--step--2);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.langButton + .langButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.langButton:hover {
+  color: var(--text);
+}
+
+.langButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .langButton {
+    transition: none;
+  }
+}
+
+/* Step indicator: a dot per step with the current one filled and the passed
+   ones marked done, plus the step's name next to the active dot. */
+.steps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.step {
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background 0.15s ease;
+}
+
+.step[data-state="done"] {
+  background: var(--signal);
+}
+
+.step[data-state="current"] {
+  background: var(--signal-strong);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 22%, transparent);
+}
+
+.stepName {
+  margin-inline-start: auto;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A segmented control: several choices sharing one outline, the active one
+   filled. Used for the block level and the upstream profile. */
+.segmented {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segment {
+  flex: 1;
+  font: inherit;
+  font-size: var(--step--1);
+  text-align: center;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.segment + .segment {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.segment:hover {
+  color: var(--text);
+}
+
+.segment[data-active] {
+  color: #fff;
+  background: var(--signal-strong);
+}
+
+/* The description that explains the currently chosen option, with its own
+   false-positive note underneath. */
+.choiceDesc {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  max-inline-size: 60ch;
+}
+
+.fpNote {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+
+.fpLabel {
+  color: var(--text-muted);
+}
+
+.fpValue {
+  font-weight: 500;
+}
+
+.fpValue[data-risk="low"] {
+  color: var(--signal-strong);
+}
+
+.fpValue[data-risk="medium"] {
+  color: var(--warn);
+}
+
+.fpValue[data-risk="high"] {
+  color: var(--danger);
+}
+
+/* A plain select, matching the settings page's controls. */
+.select {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* The review list on the final step: label/value rows. */
+.summary {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.summaryRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--step--1);
+  padding-block: var(--space-1);
+  border-block-start: 1px dashed var(--line);
+}
+
+.summaryLabel {
+  color: var(--text-muted);
+}
+
+.summaryValue {
+  font-weight: 500;
+  text-align: end;
+}
+
+/* Two-button navigation: Back on the left, the primary action on the right. */
+.nav {
+  display: flex;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.back {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.back:hover {
+  border-color: var(--text-muted);
+}
+
+.next {
+  flex: 1;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--signal-strong);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.next:hover:not(:disabled) {
+  background: var(--signal);
+}
+
+.next:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step,
+  .segment,
+  .next {
+    transition: none;
+  }
+}

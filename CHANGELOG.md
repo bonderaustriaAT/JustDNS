@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.17] - 2026-11-01
+
+- New: **setup wizard.** On the very first start, JustDNS now walks you through
+  setup step by step: administrator account and a name for the instance, the
+  protection strength you want (Off/Minimal/Standard/Extreme, each with a plain
+  description and a note on its false-positive risk), a resolver profile, and how
+  long logs are kept.
+- New: **protection strength as one setting.** Under Settings → Protection you
+  pick the level with a single switch; it turns on the matching block lists
+  automatically. Change individual lists by hand and the level reads "Custom".
+- New: **instance name.** Give your JustDNS a name that shows in the top bar —
+  handy when you run more than one.
+
 ## [0.1.16] - 2026-11-01
 
 - New: **your own resolvers.** Under Settings → Upstream resolvers, you can now

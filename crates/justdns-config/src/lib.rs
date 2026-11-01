@@ -40,6 +40,29 @@ pub enum SpeedProfile {
     Speed,
 }
 
+/// How hard JustDNS blocks, as one plain choice the setup wizard offers and the
+/// settings page shows. Each level stands for a curated set of block feeds plus
+/// the ads/malware switches; the mapping lives in the lists crate, which owns the
+/// catalogue. `Custom` means the active lists match no level — the user has since
+/// tuned them by hand — so it is the default for a config that predates this
+/// field (its lists already stand individually).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BlockLevel {
+    /// No blocking at all.
+    Off,
+    /// A gentle ad/tracker list only.
+    Minimal,
+    /// Ads/trackers plus a malware/phishing list — the recommended default.
+    Standard,
+    /// The strict set: aggressive ad/telemetry lists, malware, and a
+    /// DoH/VPN-bypass list.
+    Extreme,
+    /// The active lists match no level; the user tuned them by hand.
+    #[default]
+    Custom,
+}
+
 /// How a user-defined upstream is reached. Mirrors the DNS core's transport
 /// kinds; kept here as its own type so the config crate stays a leaf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +141,13 @@ pub struct Settings {
     pub query_log: bool,
     /// How many days log entries are kept.
     pub log_retention_days: u32,
+    /// The blocking strength as one plain choice. The lists crate maps each
+    /// level to a set of feeds plus the ads/malware switches; the web layer
+    /// snaps this to `Custom` when the active lists stop matching the level.
+    pub block_level: BlockLevel,
+    /// A display name for this instance, shown in the header. Free text the user
+    /// sets in the setup wizard; defaults to "JustDNS".
+    pub instance_name: String,
 }
 
 impl Default for Settings {
@@ -134,6 +164,8 @@ impl Default for Settings {
             ipv6: false,
             query_log: true,
             log_retention_days: 7,
+            block_level: BlockLevel::Custom,
+            instance_name: "JustDNS".to_owned(),
         }
     }
 }
@@ -471,6 +503,32 @@ mod tests {
         assert!(!settings.custom_upstreams_enabled, "defaults off");
         assert!(settings.custom_upstreams.is_empty());
         assert_eq!(settings.speed_profile, SpeedProfile::Speed);
+        // Fields added later also fall back to their defaults.
+        assert_eq!(settings.block_level, BlockLevel::Custom);
+        assert_eq!(settings.instance_name, "JustDNS");
+    }
+
+    #[test]
+    fn block_level_and_instance_name_round_trip() {
+        let settings = Settings {
+            block_level: BlockLevel::Standard,
+            instance_name: "Heimnetz".to_owned(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"blockLevel\":\"standard\""));
+        assert!(json.contains("\"instanceName\":\"Heimnetz\""));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn block_level_defaults_to_custom() {
+        assert_eq!(Settings::default().block_level, BlockLevel::Custom);
+        assert_eq!(
+            serde_json::from_str::<BlockLevel>("\"extreme\"").unwrap(),
+            BlockLevel::Extreme
+        );
     }
 
     #[test]
