@@ -29,7 +29,10 @@ export function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/protokoll" element={<Logs />} />
-          <Route path="/listen" element={<Lists />} />
+          <Route path="/listen" element={<Navigate to="/listen/eigene" replace />} />
+          <Route path="/listen/eigene" element={<Lists section="own" />} />
+          <Route path="/listen/fertige" element={<Lists section="presets" />} />
+          <Route path="/listen/url" element={<Lists section="feeds" />} />
           <Route path="/einstellungen" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
