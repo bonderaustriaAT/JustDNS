@@ -101,7 +101,7 @@ function BlockReason({ name }: { name: string }) {
   }
   return (
     <dl className={styles.reasonGrid}>
-      <Field label="Liste" value={blockListLabel(result.list)} />
+      <Field label="Liste" value={result.name ?? blockListLabel(result.list)} />
       <Field label="Regel" value={result.rule} hint="hat den Treffer ausgelöst" />
     </dl>
   );

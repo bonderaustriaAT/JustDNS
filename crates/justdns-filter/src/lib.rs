@@ -52,10 +52,26 @@ impl BlockCategory {
 /// exact rule that matched. Returned by [`Blocker::explain`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMatch {
-    /// The list the rule belongs to.
+    /// The broad category the rule belongs to.
     pub category: BlockCategory,
     /// The list entry that matched — the queried name or a parent domain of it.
     pub rule: String,
+    /// For a [`BlockCategory::Custom`] hit, the display name of the exact list
+    /// that matched (the user's own list or a subscribed feed). `None` for the
+    /// bundled ads/malware categories, which already have fixed labels.
+    pub list: Option<String>,
+}
+
+/// One named source in the user's own block set: either their manual list or a
+/// single subscribed feed. The sources are kept separate (rather than merged
+/// into one set) so a block can name the exact list that caught the query.
+#[derive(Clone, Debug)]
+pub struct BlockSource {
+    /// Display name shown in the dashboard, e.g. "Eigene Blockliste" or
+    /// "Hagezi Normal".
+    pub label: String,
+    /// The domains this source blocks.
+    pub set: DomainSet,
 }
 
 /// The blocking engine. Holds the bundled category lists (each gated by a live
@@ -72,8 +88,10 @@ pub struct Blocker {
     /// The user's allow list: a match here is never blocked, whatever the block
     /// lists say. Replaced wholesale on every edit.
     allow: ArcSwap<DomainSet>,
-    /// The user's own block list, always on (they added it on purpose).
-    custom: ArcSwap<DomainSet>,
+    /// The user's own block set as an ordered list of named sources — their
+    /// manual list plus each enabled block subscription. Always on (they turned
+    /// them on). The first source that matches is the one a block reports.
+    custom: ArcSwap<Vec<BlockSource>>,
 }
 
 impl Blocker {
@@ -91,7 +109,7 @@ impl Blocker {
             malware,
             malware_on,
             allow: ArcSwap::from_pointee(DomainSet::new()),
-            custom: ArcSwap::from_pointee(DomainSet::new()),
+            custom: ArcSwap::from_pointee(Vec::new()),
         }
     }
 
@@ -111,9 +129,12 @@ impl Blocker {
         self.allow.store(Arc::new(allow));
     }
 
-    /// Replace the user's own block list. Takes effect on the next query.
-    pub fn set_custom(&self, custom: DomainSet) {
-        self.custom.store(Arc::new(custom));
+    /// Replace the user's own block set: their manual list plus each enabled
+    /// subscription, as an ordered list of named sources. The order is the
+    /// search order, so the first source that matches is the one reported.
+    /// Takes effect on the next query.
+    pub fn set_block_sources(&self, sources: Vec<BlockSource>) {
+        self.custom.store(Arc::new(sources));
     }
 
     /// The category that blocks `name`, or `None` if it is allowed. The allow
@@ -127,8 +148,10 @@ impl Blocker {
         if self.malware_on.load(Ordering::Relaxed) && self.malware.blocks(name) {
             return Some(BlockCategory::Malware);
         }
-        if self.custom.load().blocks(name) {
-            return Some(BlockCategory::Custom);
+        for source in self.custom.load().iter() {
+            if source.set.blocks(name) {
+                return Some(BlockCategory::Custom);
+            }
         }
         if self.ads_on.load(Ordering::Relaxed) && self.ads.blocks(name) {
             return Some(BlockCategory::AdsTrackers);
@@ -155,18 +178,23 @@ impl Blocker {
             return Some(BlockMatch {
                 category: BlockCategory::Malware,
                 rule,
+                list: None,
             });
         }
-        if let Some(rule) = self.custom.load().matching(name) {
-            return Some(BlockMatch {
-                category: BlockCategory::Custom,
-                rule,
-            });
+        for source in self.custom.load().iter() {
+            if let Some(rule) = source.set.matching(name) {
+                return Some(BlockMatch {
+                    category: BlockCategory::Custom,
+                    rule,
+                    list: Some(source.label.clone()),
+                });
+            }
         }
         if let Some(rule) = self.ads.matching(name) {
             return Some(BlockMatch {
                 category: BlockCategory::AdsTrackers,
                 rule,
+                list: None,
             });
         }
         None
@@ -187,9 +215,15 @@ impl Blocker {
         self.allow.load().len()
     }
 
-    /// Number of domains on the user's own block list.
+    /// Total number of domains across the user's own block sources (manual list
+    /// plus enabled subscriptions). Overlaps across sources are counted once per
+    /// source, so this is an upper bound on the distinct blocked names.
     pub fn custom_len(&self) -> usize {
-        self.custom.load().len()
+        self.custom
+            .load()
+            .iter()
+            .map(|source| source.set.len())
+            .sum()
     }
 }
 
@@ -287,20 +321,49 @@ mod tests {
         let b = blocker(false, false);
         assert!(!b.blocks("tracker.test"));
 
-        b.set_custom(DomainSet::from_rules("tracker.test\n"));
+        b.set_block_sources(vec![BlockSource {
+            label: "Eigene Blockliste".into(),
+            set: DomainSet::from_rules("tracker.test\n"),
+        }]);
         assert_eq!(b.classify("tracker.test"), Some(BlockCategory::Custom));
         assert_eq!(b.classify("a.tracker.test"), Some(BlockCategory::Custom));
         assert_eq!(BlockCategory::Custom.as_str(), "custom");
 
         // Clearing it stops blocking, live.
-        b.set_custom(DomainSet::new());
+        b.set_block_sources(vec![]);
         assert!(!b.blocks("tracker.test"));
+    }
+
+    #[test]
+    fn explain_names_the_specific_block_source() {
+        let b = blocker(false, false);
+        b.set_block_sources(vec![
+            BlockSource {
+                label: "Eigene Blockliste".into(),
+                set: DomainSet::from_rules("mine.test\n"),
+            },
+            BlockSource {
+                label: "Hagezi Normal".into(),
+                set: DomainSet::from_rules("ads.feed.test\n"),
+            },
+        ]);
+
+        let m = b.explain("x.ads.feed.test").expect("on the feed");
+        assert_eq!(m.category, BlockCategory::Custom);
+        assert_eq!(m.list.as_deref(), Some("Hagezi Normal"));
+        assert_eq!(m.rule, "ads.feed.test", "reports the parent rule that hit");
+
+        let m = b.explain("mine.test").expect("on the own list");
+        assert_eq!(m.list.as_deref(), Some("Eigene Blockliste"));
     }
 
     #[test]
     fn allow_list_beats_custom_block_for_the_same_name() {
         let b = blocker(false, false);
-        b.set_custom(DomainSet::from_rules("intra.test\n"));
+        b.set_block_sources(vec![BlockSource {
+            label: "Eigene Blockliste".into(),
+            set: DomainSet::from_rules("intra.test\n"),
+        }]);
         b.set_allow(DomainSet::from_rules("intra.test\n"));
         assert!(!b.blocks("intra.test"), "allow wins over custom block");
     }
