@@ -107,9 +107,6 @@
 .feedForm {
   display: flex;
   gap: var(--space-2);
-}
-
-.feedForm {
   flex-wrap: wrap;
 }
 
@@ -189,6 +186,15 @@
   border-radius: var(--radius-sm);
 }
 
+/* The name sits over its optional note, so a row reads domain-first with the
+   note as quiet secondary text. */
+.entryMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
 .entryName {
   font-family: var(--font-mono);
   font-size: var(--step--1);
@@ -196,6 +202,124 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.entryNote {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.entryActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* "Notiz" opens the inline note editor for a row. Quiet by default so it never
+   competes with the name or the remove control. */
+.noteButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+
+.noteButton:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* The optional note field beside the domain in the add row. */
+.noteField {
+  flex: 1 1 12ch;
+  min-inline-size: 10ch;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.noteField:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+/* The row turns into this little form while its note is edited in place. */
+.noteEdit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.noteInput {
+  flex: 1;
+  min-inline-size: 10ch;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.noteInput:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.noteSave {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.noteSave:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.noteCancel {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.noteCancel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.noteSave:disabled,
+.noteCancel:disabled {
+  opacity: 0.55;
+  cursor: progress;
 }
 
 .remove {

@@ -87,14 +87,70 @@ pub struct Subscription {
     pub last_error: Option<String>,
 }
 
+/// One manual list entry: a domain the user added, with an optional free-text
+/// note saying why it is there. The blocker only ever reads `domain`; the note
+/// is metadata the dashboard shows and never affects what is resolved.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ListEntry {
+    pub domain: String,
+    pub note: Option<String>,
+}
+
+// An entry with no note is written as a bare string, exactly as every earlier
+// version wrote it — so upgrading changes nothing on disk and an older build
+// still reads the file. Only an entry that carries a note becomes a
+// `{ "domain": ..., "note": ... }` object. Loading accepts either form.
+impl Serialize for ListEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match &self.note {
+            None => serializer.serialize_str(&self.domain),
+            Some(note) => {
+                use serde::ser::SerializeStruct;
+                let mut entry = serializer.serialize_struct("ListEntry", 2)?;
+                entry.serialize_field("domain", &self.domain)?;
+                entry.serialize_field("note", note)?;
+                entry.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ListEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Bare(String),
+            Full {
+                domain: String,
+                #[serde(default)]
+                note: Option<String>,
+            },
+        }
+        Ok(match Raw::deserialize(deserializer)? {
+            Raw::Bare(domain) => ListEntry { domain, note: None },
+            Raw::Full { domain, note } => ListEntry {
+                domain,
+                note: note.filter(|note| !note.trim().is_empty()),
+            },
+        })
+    }
+}
+
 /// The persisted shape: the user's own entries plus their subscriptions.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserLists {
     /// Domains the user always allows; a match here is never blocked.
-    pub allow: Vec<String>,
+    pub allow: Vec<ListEntry>,
     /// Domains the user always blocks (their own block list).
-    pub block: Vec<String>,
+    pub block: Vec<ListEntry>,
     /// Subscriptions to external feeds.
     pub subscriptions: Vec<Subscription>,
 }
@@ -111,14 +167,34 @@ pub struct PresetView {
     pub enabled: bool,
 }
 
+/// A manual entry as the dashboard sees it: always an object, so the SPA has
+/// one stable shape whether or not a note is set (the on-disk form, by
+/// contrast, stays a bare string when there is no note).
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ListEntryView {
+    pub domain: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl From<&ListEntry> for ListEntryView {
+    fn from(entry: &ListEntry) -> Self {
+        ListEntryView {
+            domain: entry.domain.clone(),
+            note: entry.note.clone(),
+        }
+    }
+}
+
 /// Everything the dashboard's list view needs in one payload.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListsView {
     /// The user's own allow entries.
-    pub allow: Vec<String>,
+    pub allow: Vec<ListEntryView>,
     /// The user's own block entries.
-    pub block: Vec<String>,
+    pub block: Vec<ListEntryView>,
     /// Subscriptions to external feeds, with their status.
     pub subscriptions: Vec<Subscription>,
     /// The curated catalogue, each marked active/enabled.
@@ -229,8 +305,8 @@ impl ListStore {
             })
             .collect();
         ListsView {
-            allow: lists.allow.clone(),
-            block: lists.block.clone(),
+            allow: lists.allow.iter().map(ListEntryView::from).collect(),
+            block: lists.block.iter().map(ListEntryView::from).collect(),
             subscriptions: lists.subscriptions.clone(),
             presets,
             allow_active: self.inner.blocker.allow_len(),
@@ -238,10 +314,12 @@ impl ListStore {
         }
     }
 
-    /// Add a domain to the user's allow list. Validated and normalised; a name
-    /// already present is a no-op. Returns the normalised domain.
-    pub fn add_allow(&self, domain: &str) -> Result<String, ListError> {
-        self.add_entry(domain, Which::Allow)
+    /// Add a domain to the user's allow list, with an optional note. Validated
+    /// and normalised; adding a name already present keeps it, and only sets the
+    /// note when one is given (so a plain re-add never wipes an existing note).
+    /// Returns the normalised domain.
+    pub fn add_allow(&self, domain: &str, note: Option<&str>) -> Result<String, ListError> {
+        self.add_entry(domain, note, Which::Allow)
     }
 
     /// Remove a domain from the user's allow list.
@@ -249,9 +327,14 @@ impl ListStore {
         self.remove_entry(domain, Which::Allow)
     }
 
-    /// Add a domain to the user's own block list.
-    pub fn add_block(&self, domain: &str) -> Result<String, ListError> {
-        self.add_entry(domain, Which::Block)
+    /// Set or clear the note on an existing allow entry. An empty note clears it.
+    pub fn set_allow_note(&self, domain: &str, note: Option<&str>) -> Result<(), ListError> {
+        self.set_note(domain, note, Which::Allow)
+    }
+
+    /// Add a domain to the user's own block list, with an optional note.
+    pub fn add_block(&self, domain: &str, note: Option<&str>) -> Result<String, ListError> {
+        self.add_entry(domain, note, Which::Block)
     }
 
     /// Remove a domain from the user's own block list.
@@ -259,18 +342,56 @@ impl ListStore {
         self.remove_entry(domain, Which::Block)
     }
 
-    fn add_entry(&self, domain: &str, which: Which) -> Result<String, ListError> {
+    /// Set or clear the note on an existing block entry. An empty note clears it.
+    pub fn set_block_note(&self, domain: &str, note: Option<&str>) -> Result<(), ListError> {
+        self.set_note(domain, note, Which::Block)
+    }
+
+    fn add_entry(
+        &self,
+        domain: &str,
+        note: Option<&str>,
+        which: Which,
+    ) -> Result<String, ListError> {
         let normalised =
             parse_rule(domain).ok_or_else(|| ListError::InvalidDomain(domain.to_owned()))?;
+        let note = clean_note(note);
         let mut lists = self.write();
         let bucket = which.bucket_mut(&mut lists);
-        if !bucket.iter().any(|existing| existing == &normalised) {
-            bucket.push(normalised.clone());
-            bucket.sort();
+        match bucket.iter_mut().find(|entry| entry.domain == normalised) {
+            // A re-add only updates the note when one was supplied, so adding an
+            // existing name again from the plain add field never clears its note.
+            Some(existing) => {
+                if note.is_some() {
+                    existing.note = note;
+                }
+            }
+            None => {
+                bucket.push(ListEntry {
+                    domain: normalised.clone(),
+                    note,
+                });
+                bucket.sort_by(|a, b| a.domain.cmp(&b.domain));
+            }
         }
         self.persist(&lists)?;
         self.rebuild(&lists);
         Ok(normalised)
+    }
+
+    fn set_note(&self, domain: &str, note: Option<&str>, which: Which) -> Result<(), ListError> {
+        let target = parse_rule(domain).unwrap_or_else(|| domain.trim().to_ascii_lowercase());
+        let note = clean_note(note);
+        let mut lists = self.write();
+        let bucket = which.bucket_mut(&mut lists);
+        let entry = bucket
+            .iter_mut()
+            .find(|entry| entry.domain == target || entry.domain == domain)
+            .ok_or_else(|| ListError::InvalidDomain(domain.to_owned()))?;
+        entry.note = note;
+        // No rebuild: a note never changes what is allowed or blocked.
+        self.persist(&lists)?;
+        Ok(())
     }
 
     fn remove_entry(&self, domain: &str, which: Which) -> Result<(), ListError> {
@@ -279,7 +400,7 @@ impl ListStore {
         let target = parse_rule(domain).unwrap_or_else(|| domain.trim().to_ascii_lowercase());
         let mut lists = self.write();
         let bucket = which.bucket_mut(&mut lists);
-        bucket.retain(|existing| existing != &target && existing != domain);
+        bucket.retain(|entry| entry.domain != target && entry.domain != domain);
         self.persist(&lists)?;
         self.rebuild(&lists);
         Ok(())
@@ -461,16 +582,16 @@ impl ListStore {
     /// list that caught the query. Reads each enabled feed's cache from disk.
     fn rebuild(&self, lists: &UserLists) {
         let mut allow = DomainSet::new();
-        for domain in &lists.allow {
-            allow.add_rules(domain);
+        for entry in &lists.allow {
+            allow.add_rules(&entry.domain);
         }
 
         let mut sources: Vec<BlockSource> = Vec::new();
         // The user's own manual block list comes first, so an entry they added
         // on purpose is attributed to them rather than to a feed that overlaps.
         let mut own = DomainSet::new();
-        for domain in &lists.block {
-            own.add_rules(domain);
+        for entry in &lists.block {
+            own.add_rules(&entry.domain);
         }
         if !own.is_empty() {
             sources.push(BlockSource {
@@ -540,12 +661,23 @@ enum Which {
 }
 
 impl Which {
-    fn bucket_mut(self, lists: &mut UserLists) -> &mut Vec<String> {
+    fn bucket_mut(self, lists: &mut UserLists) -> &mut Vec<ListEntry> {
         match self {
             Which::Allow => &mut lists.allow,
             Which::Block => &mut lists.block,
         }
     }
+}
+
+/// Longest note we keep, in characters, so a stored note cannot grow without
+/// bound. The dashboard caps its input to match.
+const MAX_NOTE_LEN: usize = 200;
+
+/// Normalise a note: trim it, drop an empty one, and cap its length.
+fn clean_note(note: Option<&str>) -> Option<String> {
+    note.map(str::trim)
+        .filter(|note| !note.is_empty())
+        .map(|note| note.chars().take(MAX_NOTE_LEN).collect())
 }
 
 /// Count how many lines of `text` parse into a usable rule, without building a
@@ -653,7 +785,7 @@ mod tests {
         let (_dir, store, blocker) = store();
         assert!(blocker.blocks("doubleclick.net"), "blocked to start with");
 
-        store.add_allow("doubleclick.net").unwrap();
+        store.add_allow("doubleclick.net", None).unwrap();
         assert!(!blocker.blocks("doubleclick.net"), "allow entry wins, live");
 
         store.remove_allow("doubleclick.net").unwrap();
@@ -666,7 +798,7 @@ mod tests {
     #[test]
     fn custom_block_entry_is_live_and_persists() {
         let (dir, store, blocker) = store();
-        store.add_block("tracker.test").unwrap();
+        store.add_block("tracker.test", None).unwrap();
         assert!(blocker.blocks("tracker.test"));
         assert!(blocker.blocks("sub.tracker.test"), "covers sub-domains");
 
@@ -684,18 +816,21 @@ mod tests {
         )
         .unwrap();
         assert!(fresh.blocks("tracker.test"), "persisted across reload");
-        assert_eq!(reopened.view().block, vec!["tracker.test".to_string()]);
+        let block = reopened.view().block;
+        assert_eq!(block.len(), 1);
+        assert_eq!(block[0].domain, "tracker.test");
+        assert_eq!(block[0].note, None);
     }
 
     #[test]
     fn invalid_domain_is_rejected() {
         let (_dir, store, _blocker) = store();
         assert!(matches!(
-            store.add_allow("not a domain"),
+            store.add_allow("not a domain", None),
             Err(ListError::InvalidDomain(_))
         ));
         assert!(matches!(
-            store.add_block("com"), // a bare TLD is rejected by the parser
+            store.add_block("com", None), // a bare TLD is rejected by the parser
             Err(ListError::InvalidDomain(_))
         ));
     }
@@ -703,9 +838,98 @@ mod tests {
     #[test]
     fn entries_are_normalised_and_deduplicated() {
         let (_dir, store, _blocker) = store();
-        store.add_allow("Example.COM.").unwrap();
-        store.add_allow("example.com").unwrap();
-        assert_eq!(store.view().allow, vec!["example.com".to_string()]);
+        store.add_allow("Example.COM.", None).unwrap();
+        store.add_allow("example.com", None).unwrap();
+        let allow = store.view().allow;
+        assert_eq!(allow.len(), 1);
+        assert_eq!(allow[0].domain, "example.com");
+    }
+
+    #[test]
+    fn a_note_is_stored_and_survives_a_reload() {
+        let (dir, store, _blocker) = store();
+        store
+            .add_block("tracker.test", Some("  blocks the smart-TV phone-home  "))
+            .unwrap();
+        let block = store.view().block;
+        assert_eq!(block[0].domain, "tracker.test");
+        assert_eq!(
+            block[0].note.as_deref(),
+            Some("blocks the smart-TV phone-home")
+        );
+
+        // Reopen the same file: the note comes back.
+        let fresh = Arc::new(Blocker::new(
+            DomainSet::new(),
+            flag(),
+            DomainSet::new(),
+            flag(),
+        ));
+        let reopened = ListStore::load(
+            dir.path().join("lists.json"),
+            dir.path().join("cache"),
+            fresh,
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.view().block[0].note.as_deref(),
+            Some("blocks the smart-TV phone-home")
+        );
+    }
+
+    #[test]
+    fn re_adding_keeps_the_note_but_set_note_can_change_or_clear_it() {
+        let (_dir, store, _blocker) = store();
+        store.add_allow("nas.home", Some("my own box")).unwrap();
+
+        // Re-adding from the plain add field (no note) must not wipe the note.
+        store.add_allow("nas.home", None).unwrap();
+        assert_eq!(store.view().allow[0].note.as_deref(), Some("my own box"));
+
+        // The edit action replaces the note...
+        store.set_allow_note("nas.home", Some("home NAS")).unwrap();
+        assert_eq!(store.view().allow[0].note.as_deref(), Some("home NAS"));
+
+        // ...and an empty note clears it.
+        store.set_allow_note("nas.home", Some("   ")).unwrap();
+        assert_eq!(store.view().allow[0].note, None);
+    }
+
+    #[test]
+    fn set_note_on_a_missing_entry_is_rejected() {
+        let (_dir, store, _blocker) = store();
+        assert!(matches!(
+            store.set_block_note("nope.test", Some("x")),
+            Err(ListError::InvalidDomain(_))
+        ));
+    }
+
+    #[test]
+    fn bare_string_entries_from_an_older_file_still_load() {
+        let dir = tempfile::tempdir().unwrap();
+        // A lists.json exactly as an older version wrote it: allow/block are
+        // plain string arrays, with no note field anywhere.
+        std::fs::write(
+            dir.path().join("lists.json"),
+            r#"{"allow":["nas.home"],"block":["ads.test"],"subscriptions":[]}"#,
+        )
+        .unwrap();
+        let blocker = Arc::new(Blocker::new(
+            DomainSet::new(),
+            flag(),
+            DomainSet::new(),
+            flag(),
+        ));
+        let store = ListStore::load(
+            dir.path().join("lists.json"),
+            dir.path().join("cache"),
+            blocker,
+        )
+        .unwrap();
+        let view = store.view();
+        assert_eq!(view.allow[0].domain, "nas.home");
+        assert_eq!(view.allow[0].note, None);
+        assert_eq!(view.block[0].domain, "ads.test");
     }
 
     #[test]

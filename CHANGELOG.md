@@ -3,6 +3,23 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.18] - 2026-11-01
+
+- New: **notes on your allow and block entries.** Add an optional note to any
+  domain you allow or block — a reminder of why it is there, like "my own NAS" or
+  "smart-TV telemetry". The note shows under the name and can be edited or cleared
+  at any time; it is never required and never changes what is resolved.
+- Your own allow and block entries now stand out more clearly from the rest of
+  the card, so a name you added by hand is easy to spot.
+- Rewrites: deleting a rewrite now asks you to confirm first, so nothing goes by
+  accident.
+- Rewrites: edit a rewrite right in its row, instead of the form at the top
+  filling back up.
+- Rewrites: the target addresses now line up in neat columns, so a longer list is
+  easy to read down.
+- The Overview's "Protection active" marker gently pulses, so you can see at a
+  glance that it is live.
+
 ## [0.1.17] - 2026-11-01
 
 - New: **setup wizard.** On the very first start, JustDNS now walks you through
