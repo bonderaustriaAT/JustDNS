@@ -36,6 +36,17 @@ pub struct Rewrite {
     /// The addresses the name resolves to. IPv4 addresses answer A queries,
     /// IPv6 addresses answer AAAA queries.
     pub ips: Vec<IpAddr>,
+    /// Whether the rewrite is active. A disabled entry stays in the list and the
+    /// file but is left out of the live table, so the name falls through to the
+    /// normal upstream path until it is switched on again. Defaults to `true` so
+    /// entries written by an older build load as enabled.
+    #[serde(default = "enabled_default")]
+    pub enabled: bool,
+}
+
+/// The default for a rewrite's `enabled` flag: a new or legacy entry is active.
+fn enabled_default() -> bool {
+    true
 }
 
 /// The compiled lookup table: normalised name → addresses. Built fresh on every
@@ -46,9 +57,12 @@ struct RewriteTable {
 }
 
 impl RewriteTable {
+    /// Build the live table from the stored rewrites, skipping disabled ones so
+    /// they are never answered locally while switched off.
     fn from_rewrites(rewrites: &[Rewrite]) -> Self {
         let by_name = rewrites
             .iter()
+            .filter(|rewrite| rewrite.enabled)
             .map(|rewrite| (rewrite.name.clone(), rewrite.ips.clone()))
             .collect();
         Self { by_name }
@@ -158,6 +172,7 @@ mod tests {
                 IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5)),
                 IpAddr::V6(Ipv6Addr::LOCALHOST),
             ],
+            enabled: true,
         }]);
 
         // A wire-form name (trailing dot, mixed case) still hits the entry.
@@ -165,5 +180,26 @@ mod tests {
         assert_eq!(ips.len(), 2);
         assert!(rewriter.lookup("other.home").is_none());
         assert_eq!(rewriter.len(), 1);
+    }
+
+    #[test]
+    fn disabled_rewrite_is_not_answered() {
+        let rewriter = Rewriter::new();
+        rewriter.set(&[
+            Rewrite {
+                name: "on.home".to_owned(),
+                ips: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+                enabled: true,
+            },
+            Rewrite {
+                name: "off.home".to_owned(),
+                ips: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+                enabled: false,
+            },
+        ]);
+
+        assert!(rewriter.lookup("on.home").is_some());
+        assert!(rewriter.lookup("off.home").is_none(), "disabled falls through");
+        assert_eq!(rewriter.len(), 1, "only enabled entries are live");
     }
 }

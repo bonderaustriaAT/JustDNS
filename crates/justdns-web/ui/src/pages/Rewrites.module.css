@@ -75,6 +75,34 @@
   cursor: progress;
 }
 
+.cancelButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.cancelButton:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.cancelButton:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  margin-block-start: calc(-1 * var(--space-3));
+}
+
 .empty {
   color: var(--text-muted);
   font-size: var(--step--1);
@@ -92,18 +120,65 @@
 .entry {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
   padding-block: var(--space-3);
   border-block-start: 1px solid var(--line);
 }
 
+.entryToggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
 .entryMain {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
   min-inline-size: 0;
+}
+
+/* A disabled rewrite is listed but not answered — dim the name and addresses so
+   its "off" state reads at a glance. The toggle and actions stay full strength. */
+.entry[data-off] .entryMain {
+  opacity: 0.5;
+}
+
+/* The row currently loaded into the edit form, marked with the signal accent. */
+.entry[data-editing] {
+  box-shadow: inset 2px 0 0 var(--signal);
+  padding-inline-start: var(--space-3);
+}
+
+.entryActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.action:disabled {
+  opacity: 0.4;
+  cursor: progress;
 }
 
 .entryName {

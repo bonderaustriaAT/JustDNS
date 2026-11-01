@@ -119,37 +119,71 @@ impl RewriteStore {
 
     /// Add a rewrite, or replace the addresses of one that already exists. The
     /// name is validated and normalised, and every address is parsed; an entry
-    /// with no usable address is refused. Returns the stored rewrite.
+    /// with no usable address is refused. Returns the stored rewrite. A replaced
+    /// entry keeps its enabled state; a new one starts enabled.
     pub fn set(&self, name: &str, ips: &[String]) -> Result<Rewrite, RewriteError> {
-        if !valid_host(name) {
-            return Err(RewriteError::InvalidName(name.to_owned()));
-        }
-        if ips.is_empty() {
-            return Err(RewriteError::NoIps);
-        }
-        let mut parsed = Vec::with_capacity(ips.len());
-        for ip in ips {
-            let ip = ip.trim();
-            let address: IpAddr = ip
-                .parse()
-                .map_err(|_| RewriteError::InvalidIp(ip.to_owned()))?;
-            if !parsed.contains(&address) {
-                parsed.push(address);
-            }
-        }
-        let rewrite = Rewrite {
-            name: normalise(name),
-            ips: parsed,
-        };
-
+        let name = validate_name(name)?;
+        let parsed = parse_ips(ips)?;
         let mut rewrites = self.inner.rewrites.write().expect("rewrites lock poisoned");
-        match rewrites.iter_mut().find(|r| r.name == rewrite.name) {
-            Some(existing) => existing.ips = rewrite.ips.clone(),
-            None => rewrites.push(rewrite.clone()),
-        }
+        let stored = upsert(&mut rewrites, name, parsed, true);
         rewrites.sort_by(|a, b| a.name.cmp(&b.name));
         self.persist_and_publish(&rewrites)?;
-        Ok(rewrite)
+        Ok(stored)
+    }
+
+    /// Point several names at the same addresses in one edit. Every name is
+    /// validated and the addresses parsed before anything is stored, so a single
+    /// bad entry leaves the whole set unchanged. Existing names keep their
+    /// enabled state; new ones start enabled.
+    pub fn set_many(&self, names: &[String], ips: &[String]) -> Result<(), RewriteError> {
+        if names.is_empty() {
+            return Err(RewriteError::InvalidName(String::new()));
+        }
+        let mut normalised = Vec::with_capacity(names.len());
+        for name in names {
+            normalised.push(validate_name(name)?);
+        }
+        let parsed = parse_ips(ips)?;
+
+        let mut rewrites = self.inner.rewrites.write().expect("rewrites lock poisoned");
+        for name in normalised {
+            upsert(&mut rewrites, name, parsed.clone(), true);
+        }
+        rewrites.sort_by(|a, b| a.name.cmp(&b.name));
+        self.persist_and_publish(&rewrites)
+    }
+
+    /// Rename a rewrite and replace its addresses, keeping its enabled state.
+    /// Used by the dashboard's edit control. The new name and addresses are
+    /// validated first; an unknown `old` name is reported.
+    pub fn edit(&self, old: &str, new_name: &str, ips: &[String]) -> Result<(), RewriteError> {
+        let new_name = validate_name(new_name)?;
+        let parsed = parse_ips(ips)?;
+        let old = normalise(old);
+
+        let mut rewrites = self.inner.rewrites.write().expect("rewrites lock poisoned");
+        let Some(position) = rewrites.iter().position(|r| r.name == old) else {
+            return Err(RewriteError::Unknown(old));
+        };
+        // Drop the old entry, then re-add it under the new name carrying its
+        // enabled state. If the new name happens to collide with another entry,
+        // that entry keeps its own state (upsert only replaces the addresses).
+        let enabled = rewrites.remove(position).enabled;
+        upsert(&mut rewrites, new_name, parsed, enabled);
+        rewrites.sort_by(|a, b| a.name.cmp(&b.name));
+        self.persist_and_publish(&rewrites)
+    }
+
+    /// Switch a rewrite on or off by name. A disabled entry stays stored but is
+    /// left out of the live table. An unknown name is reported.
+    pub fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), RewriteError> {
+        let target = normalise(name);
+        let mut rewrites = self.inner.rewrites.write().expect("rewrites lock poisoned");
+        let Some(entry) = rewrites.iter_mut().find(|r| r.name == target) else {
+            return Err(RewriteError::Unknown(target));
+        };
+        entry.enabled = enabled;
+        self.persist_and_publish(&rewrites)
     }
 
     /// Remove the rewrite for `name`. Unknown names are reported, so a stale
@@ -177,6 +211,65 @@ impl RewriteStore {
                 rewrites: rewrites.to_vec(),
             },
         )
+    }
+}
+
+/// Validate a host name and return its normalised form.
+fn validate_name(name: &str) -> Result<String, RewriteError> {
+    if !valid_host(name) {
+        return Err(RewriteError::InvalidName(name.to_owned()));
+    }
+    Ok(normalise(name))
+}
+
+/// Parse and de-duplicate the addresses for a rewrite. At least one usable
+/// address is required.
+fn parse_ips(ips: &[String]) -> Result<Vec<IpAddr>, RewriteError> {
+    if ips.is_empty() {
+        return Err(RewriteError::NoIps);
+    }
+    let mut parsed = Vec::with_capacity(ips.len());
+    for ip in ips {
+        let ip = ip.trim();
+        if ip.is_empty() {
+            continue;
+        }
+        let address: IpAddr = ip
+            .parse()
+            .map_err(|_| RewriteError::InvalidIp(ip.to_owned()))?;
+        if !parsed.contains(&address) {
+            parsed.push(address);
+        }
+    }
+    if parsed.is_empty() {
+        return Err(RewriteError::NoIps);
+    }
+    Ok(parsed)
+}
+
+/// Insert a rewrite, or replace the addresses of one that already has this name.
+/// An existing entry keeps its own enabled state; a new one takes
+/// `enabled_for_new`. Returns the stored rewrite.
+fn upsert(
+    rewrites: &mut Vec<Rewrite>,
+    name: String,
+    ips: Vec<IpAddr>,
+    enabled_for_new: bool,
+) -> Rewrite {
+    match rewrites.iter_mut().find(|r| r.name == name) {
+        Some(existing) => {
+            existing.ips = ips;
+            existing.clone()
+        }
+        None => {
+            let rewrite = Rewrite {
+                name,
+                ips,
+                enabled: enabled_for_new,
+            };
+            rewrites.push(rewrite.clone());
+            rewrite
+        }
     }
 }
 
@@ -277,6 +370,85 @@ mod tests {
         assert!(rewriter.lookup("nas.home").is_none(), "dropped live");
         assert!(matches!(
             store.remove("nas.home"),
+            Err(RewriteError::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn set_many_points_several_names_at_one_ip() {
+        let (_dir, store, rewriter) = store();
+        store
+            .set_many(
+                &["a.home".to_owned(), "b.home".to_owned(), "c.home".to_owned()],
+                &["192.168.20.11".to_owned()],
+            )
+            .unwrap();
+
+        for name in ["a.home", "b.home", "c.home"] {
+            assert_eq!(
+                rewriter.lookup(name).unwrap(),
+                vec!["192.168.20.11".parse::<IpAddr>().unwrap()],
+                "{name} is live"
+            );
+        }
+        assert_eq!(store.view().rewrites.len(), 3);
+    }
+
+    #[test]
+    fn set_many_rejects_the_whole_batch_on_a_bad_name() {
+        let (_dir, store, rewriter) = store();
+        assert!(matches!(
+            store.set_many(
+                &["good.home".to_owned(), "bad name".to_owned()],
+                &["1.2.3.4".to_owned()],
+            ),
+            Err(RewriteError::InvalidName(_))
+        ));
+        // Nothing was stored — validation happens before any write.
+        assert!(rewriter.lookup("good.home").is_none());
+        assert_eq!(store.view().rewrites.len(), 0);
+    }
+
+    #[test]
+    fn edit_renames_and_keeps_enabled_state() {
+        let (_dir, store, rewriter) = store();
+        store.set("old.home", &["10.0.0.1".to_owned()]).unwrap();
+        store.set_enabled("old.home", false).unwrap();
+
+        store
+            .edit("old.home", "new.home", &["10.0.0.2".to_owned()])
+            .unwrap();
+
+        assert!(rewriter.lookup("old.home").is_none(), "old name is gone");
+        // Still disabled after the rename, so not live.
+        assert!(rewriter.lookup("new.home").is_none(), "stays disabled");
+        let view = store.view();
+        assert_eq!(view.rewrites.len(), 1);
+        assert_eq!(view.rewrites[0].name, "new.home");
+        assert!(!view.rewrites[0].enabled);
+        assert_eq!(view.rewrites[0].ips, vec!["10.0.0.2".parse::<IpAddr>().unwrap()]);
+
+        assert!(matches!(
+            store.edit("missing.home", "x.home", &["10.0.0.3".to_owned()]),
+            Err(RewriteError::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn set_enabled_toggles_the_live_table() {
+        let (_dir, store, rewriter) = store();
+        store.set("nas.home", &["192.168.20.5".to_owned()]).unwrap();
+        assert!(rewriter.lookup("nas.home").is_some());
+
+        store.set_enabled("NAS.home.", false).unwrap();
+        assert!(rewriter.lookup("nas.home").is_none(), "disabled, falls through");
+        assert!(!store.view().rewrites[0].enabled, "still listed, just off");
+
+        store.set_enabled("nas.home", true).unwrap();
+        assert!(rewriter.lookup("nas.home").is_some(), "back on");
+
+        assert!(matches!(
+            store.set_enabled("missing.home", false),
             Err(RewriteError::Unknown(_))
         ));
     }

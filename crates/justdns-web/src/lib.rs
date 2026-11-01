@@ -22,6 +22,7 @@ use axum::routing::{get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use justdns_auth::{SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
+use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome};
 use justdns_rewrite::{RewriteError, RewriteStore, RewritesView};
@@ -58,6 +59,7 @@ struct AppState {
     blocker: Arc<Blocker>,
     lists: ListStore,
     rewrites: RewriteStore,
+    cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
 }
@@ -92,6 +94,12 @@ impl FromRef<AppState> for RewriteStore {
     }
 }
 
+impl FromRef<AppState> for DnsCache {
+    fn from_ref(state: &AppState) -> Self {
+        state.cache.clone()
+    }
+}
+
 impl FromRef<AppState> for UserStore {
     fn from_ref(state: &AppState) -> Self {
         state.users.clone()
@@ -116,6 +124,7 @@ pub async fn serve(
     blocker: Arc<Blocker>,
     lists: ListStore,
     rewrites: RewriteStore,
+    cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
 ) -> std::io::Result<()> {
@@ -129,6 +138,7 @@ pub async fn serve(
             blocker,
             lists,
             rewrites,
+            cache,
             users,
             sessions,
         }),
@@ -157,8 +167,13 @@ fn router(state: AppState) -> Router {
         .route("/api/lists/refresh", post(refresh_lists))
         .route(
             "/api/rewrites",
-            get(get_rewrites).post(set_rewrite).delete(remove_rewrite),
+            get(get_rewrites)
+                .post(set_rewrite)
+                .put(edit_rewrite)
+                .delete(remove_rewrite),
         )
+        .route("/api/rewrites/enabled", put(set_rewrite_enabled))
+        .route("/api/cache/clear", post(clear_cache))
         .layer(from_fn_with_state(state.clone(), require_auth));
 
     let public = Router::new()
@@ -474,10 +489,12 @@ async fn get_rewrites(State(rewrites): State<RewriteStore>) -> Json<RewritesView
     Json(rewrites.view())
 }
 
-/// Add a rewrite or replace the addresses of an existing one.
+/// Add one or more rewrites that share the same addresses. A single name is just
+/// a list of one, so the add form and the "same IP for several names" case use
+/// one endpoint.
 #[derive(Deserialize)]
 struct RewriteBody {
-    name: String,
+    names: Vec<String>,
     ips: Vec<String>,
 }
 
@@ -485,7 +502,45 @@ async fn set_rewrite(
     State(rewrites): State<RewriteStore>,
     Json(body): Json<RewriteBody>,
 ) -> Result<Json<RewritesView>, (StatusCode, String)> {
-    rewrites.set(&body.name, &body.ips).map_err(rewrite_error)?;
+    rewrites
+        .set_many(&body.names, &body.ips)
+        .map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Rename a rewrite and replace its addresses, keeping its enabled state.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RewriteEditBody {
+    old_name: String,
+    name: String,
+    ips: Vec<String>,
+}
+
+async fn edit_rewrite(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<RewriteEditBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites
+        .edit(&body.old_name, &body.name, &body.ips)
+        .map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Switch a rewrite on or off by name.
+#[derive(Deserialize)]
+struct RewriteEnabledBody {
+    name: String,
+    enabled: bool,
+}
+
+async fn set_rewrite_enabled(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<RewriteEnabledBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites
+        .set_enabled(&body.name, body.enabled)
+        .map_err(rewrite_error)?;
     Ok(Json(rewrites.view()))
 }
 
@@ -501,6 +556,12 @@ async fn remove_rewrite(
 ) -> Result<Json<RewritesView>, (StatusCode, String)> {
     rewrites.remove(&body.name).map_err(rewrite_error)?;
     Ok(Json(rewrites.view()))
+}
+
+/// Drop every entry in the DNS response cache. Returns 204 on success.
+async fn clear_cache(State(cache): State<DnsCache>) -> StatusCode {
+    cache.clear();
+    StatusCode::NO_CONTENT
 }
 
 /// Return the current settings so the dashboard can show them.
@@ -689,6 +750,7 @@ mod tests {
             config: test_config(),
             lists: test_lists(blocker.clone()),
             rewrites: test_rewrites(),
+            cache: DnsCache::new(100),
             blocker,
             users: test_users(),
             sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
@@ -982,14 +1044,16 @@ mod tests {
         .await;
         assert!(body.contains("\"rewrites\":[]"), "{body}");
 
-        // Add one; it comes back in the view.
+        // Add two names at once sharing one address; both come back normalised.
         let res = app
             .clone()
             .oneshot(
                 Request::post("/api/rewrites")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie)
-                    .body(Body::from(r#"{"name":"NAS.home.","ips":["192.168.20.5"]}"#))
+                    .body(Body::from(
+                        r#"{"names":["NAS.home.","PiHole.home"],"ips":["192.168.20.5"]}"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -997,7 +1061,9 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = body_of(res).await;
         assert!(body.contains("\"nas.home\""), "normalised + echoed: {body}");
+        assert!(body.contains("\"pihole.home\""), "second name: {body}");
         assert!(body.contains("192.168.20.5"), "{body}");
+        assert!(body.contains("\"enabled\":true"), "enabled by default: {body}");
 
         // A bad IP is refused.
         let res = app
@@ -1006,27 +1072,91 @@ mod tests {
                 Request::post("/api/rewrites")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie)
-                    .body(Body::from(r#"{"name":"x.home","ips":["nope"]}"#))
+                    .body(Body::from(r#"{"names":["x.home"],"ips":["nope"]}"#))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
-        // Delete it; the view is empty again.
+        // Disable one of them; it stays listed but is marked off.
         let res = app
+            .clone()
             .oneshot(
-                Request::delete("/api/rewrites")
+                Request::put("/api/rewrites/enabled")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie)
-                    .body(Body::from(r#"{"name":"nas.home"}"#))
+                    .body(Body::from(r#"{"name":"nas.home","enabled":false}"#))
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let body = body_of(res).await;
+        assert!(body.contains("\"enabled\":false"), "disabled: {body}");
+
+        // Rename it; the old name is gone, the new one is present.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"oldName":"nas.home","name":"storage.home","ips":["192.168.20.9"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"storage.home\""), "renamed: {body}");
+        assert!(!body.contains("\"nas.home\""), "old name gone: {body}");
+
+        // Delete both; the view is empty again.
+        for name in ["storage.home", "pihole.home"] {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::delete("/api/rewrites")
+                        .header("content-type", "application/json")
+                        .header("cookie", &cookie)
+                        .body(Body::from(format!(r#"{{"name":"{name}"}}"#)))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+        }
+        let body = body_of(
+            app.oneshot(
+                Request::get("/api/rewrites")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
         assert!(body.contains("\"rewrites\":[]"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn clearing_the_cache_returns_no_content() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+        let res = app
+            .oneshot(
+                Request::post("/api/cache/clear")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
     }
 
     /// The `Set-Cookie` value a response sends for the session cookie, if any.

@@ -112,6 +112,10 @@ impl Expiry<CacheKey, CachedEntry> for TtlExpiry {
     }
 }
 
+/// The response cache. Cloning shares the one underlying store (`moka` keeps it
+/// behind an `Arc`), so the DNS pipeline and the web layer's "clear cache"
+/// action can hold their own handles to the same cache.
+#[derive(Clone)]
 pub struct DnsCache {
     inner: Cache<CacheKey, CachedEntry>,
 }
@@ -132,6 +136,12 @@ impl DnsCache {
 
     pub async fn get(&self, key: &CacheKey) -> Option<CachedResponse> {
         self.inner.get(key).await?.response(Instant::now())
+    }
+
+    /// Drop every cached entry. The next query for each name goes upstream (or to
+    /// a local rewrite) again. Used by the dashboard's "clear DNS cache" action.
+    pub fn clear(&self) {
+        self.inner.invalidate_all();
     }
 }
 
@@ -217,6 +227,21 @@ mod tests {
     async fn missing_key_misses() {
         let cache = DnsCache::new(100);
         assert!(cache.get(&key()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_drops_every_entry() {
+        let cache = DnsCache::new(100);
+        cache
+            .insert(
+                key(),
+                CachedEntry::positive(vec![a_record(300)], Duration::from_secs(300)),
+            )
+            .await;
+        assert!(cache.get(&key()).await.is_some());
+
+        cache.clear();
+        assert!(cache.get(&key()).await.is_none(), "cleared");
     }
 
     #[tokio::test]

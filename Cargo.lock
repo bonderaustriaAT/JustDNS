@@ -1342,6 +1342,7 @@ dependencies = [
  "axum-extra",
  "justdns-auth",
  "justdns-config",
+ "justdns-dns",
  "justdns-filter",
  "justdns-lists",
  "justdns-rewrite",
