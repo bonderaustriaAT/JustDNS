@@ -3,6 +3,11 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.14] - 2026-11-01
+
+- The top menu bar no longer wraps onto a second line and sits more tidily —
+  including in German, where the labels are longer.
+
 ## [0.1.13] - 2026-11-01
 
 - The whole interface is now available in **English and German**. A DE/EN switch
