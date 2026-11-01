@@ -24,7 +24,28 @@
   block-size: 9px;
   border-radius: 50%;
   background: var(--signal);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 20%, transparent);
+  /* A soft ring that expands and fades, so "protection active" reads as live. */
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);
+  animation: dotPulse 2.2s ease-out infinite;
+}
+
+@keyframes dotPulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--signal) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 20%, transparent);
+  }
 }
 
 .figure {

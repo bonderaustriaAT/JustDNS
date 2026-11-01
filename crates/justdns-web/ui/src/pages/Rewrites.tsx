@@ -253,8 +253,10 @@ function RewriteRow({
         />
       ) : (
         <>
-          <div className={styles.entryMain}>
-            <span className={styles.entryName}>{rewrite.name}</span>
+          <span className={styles.entryName} title={rewrite.name}>
+            {rewrite.name}
+          </span>
+          <div className={styles.entryValue}>
             <span className={styles.arrow} aria-hidden="true">
               →
             </span>
