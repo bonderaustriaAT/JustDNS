@@ -23,6 +23,10 @@ export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 /// eagerly answers are cached. Matches the Rust `SpeedProfile`.
 export type SpeedProfile = "privacy" | "balanced" | "speed";
 
+/// How hard JustDNS blocks, as one plain choice. Matches the Rust `BlockLevel`.
+/// "custom" means the active lists match no level (hand-tuned).
+export type BlockLevel = "off" | "minimal" | "standard" | "extreme" | "custom";
+
 /// How a user-defined resolver is reached. Matches the Rust `CustomTransport`.
 export type CustomTransport = "plain" | "dot" | "doh";
 
@@ -49,6 +53,11 @@ export interface ServerSettings {
   ipv6: boolean;
   queryLog: boolean;
   logRetentionDays: number;
+  /// The blocking strength as one plain choice; "custom" when the active lists
+  /// match no level. Changed via `setBlockLevel`, not a plain settings save.
+  blockLevel: BlockLevel;
+  /// A display name for this instance, shown in the header.
+  instanceName: string;
 }
 
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
@@ -240,6 +249,15 @@ export const api = {
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/api/settings", signal),
   saveSettings: (settings: ServerSettings, signal?: AbortSignal) =>
     putJson<ServerSettings>("/api/settings", settings, signal),
+  /** Apply a block level: the server toggles the matching feeds and switches,
+   *  stores the level, and returns the fresh settings and lists. "custom" is not
+   *  applicable and is rejected. */
+  setBlockLevel: (level: BlockLevel) =>
+    sendJson<{ settings: ServerSettings; lists: ListsView }>(
+      "PUT",
+      "/api/settings/block-level",
+      { level },
+    ),
   classify: (name: string, signal?: AbortSignal) => {
     const params = new URLSearchParams({ name });
     return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);

@@ -21,7 +21,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use justdns_auth::{SessionStore, UserStore};
-use justdns_config::{ConfigStore, Settings};
+use justdns_config::{BlockLevel, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome};
@@ -31,6 +31,8 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
+
+mod levels;
 
 /// Name of the cookie that carries the session token. HttpOnly and
 /// SameSite=Strict; not marked Secure because the dashboard is served over
@@ -154,6 +156,7 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
+        .route("/api/settings/block-level", put(set_block_level))
         .route("/api/classify", get(classify))
         .route("/api/lists", get(get_lists))
         .route("/api/lists/allow", post(add_allow).delete(remove_allow))
@@ -443,11 +446,88 @@ struct PresetBody {
 
 async fn set_preset(
     State(lists): State<ListStore>,
+    State(config): State<ConfigStore>,
     Path(key): Path<String>,
     Json(body): Json<PresetBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
     lists.set_preset(&key, body.on).map_err(list_error)?;
+    // Switching a feed by hand may no longer match the stored block level, so
+    // snap the level (usually to Custom) to what the lists now represent.
+    sync_block_level(&lists, &config)?;
     Ok(Json(lists.view()))
+}
+
+/// What a block-level change returns: both the new settings and the lists view,
+/// since applying a level touches each.
+#[derive(Serialize)]
+struct BlockLevelResponse {
+    settings: Settings,
+    lists: ListsView,
+}
+
+/// The body of a block-level change: the level to apply.
+#[derive(Deserialize)]
+struct BlockLevelBody {
+    level: BlockLevel,
+}
+
+/// Apply a block level: turn its block feeds on and the other level feeds off,
+/// set the ads/malware switches, and store the level. `Custom` cannot be applied
+/// (it only ever results from hand-tuning), so it is rejected.
+async fn set_block_level(
+    State(lists): State<ListStore>,
+    State(config): State<ConfigStore>,
+    Json(body): Json<BlockLevelBody>,
+) -> Result<Json<BlockLevelResponse>, (StatusCode, String)> {
+    let targets = levels::level_targets(body.level).ok_or((
+        StatusCode::BAD_REQUEST,
+        "block level 'custom' cannot be applied".to_owned(),
+    ))?;
+    let want: HashSet<&str> = targets.presets.iter().copied().collect();
+
+    // Toggle every catalogue block feed to match the level's set, touching only
+    // the ones whose state actually changes.
+    for view in lists.view().presets {
+        if view.preset.kind != ListKind::Block {
+            continue;
+        }
+        let on = want.contains(view.preset.key);
+        if view.enabled != on {
+            lists.set_preset(view.preset.key, on).map_err(list_error)?;
+        }
+    }
+
+    // Record the switches and the chosen level in one settings write.
+    let mut settings = config.get();
+    settings.block_ads_trackers = targets.block_ads;
+    settings.block_malware = targets.block_malware;
+    settings.block_level = body.level;
+    config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    Ok(Json(BlockLevelResponse {
+        settings: config.get(),
+        lists: lists.view(),
+    }))
+}
+
+/// Recompute which level the live lists represent and store it if it changed.
+/// Called after any change that can alter the block signature, so a hand edit
+/// shows up as `Custom` and re-selecting a level's exact set snaps back to it.
+fn sync_block_level(lists: &ListStore, config: &ConfigStore) -> Result<(), (StatusCode, String)> {
+    let settings = config.get();
+    let effective = levels::effective_level(&lists.view(), &settings);
+    if settings.block_level != effective {
+        let next = Settings {
+            block_level: effective,
+            ..settings
+        };
+        config
+            .set(next)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    }
+    Ok(())
 }
 
 /// What a manual refresh returns: the per-feed outcomes and the fresh view.
@@ -574,12 +654,16 @@ async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
 /// not saved durably.
 async fn put_settings(
     State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
     Json(settings): Json<Settings>,
 ) -> Result<Json<Settings>, (StatusCode, String)> {
-    match config.set(settings) {
-        Ok(()) => Ok(Json(config.get())),
-        Err(error) => Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
-    }
+    config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    // The ads/malware switches feed the block level, so a direct edit here may
+    // move it off a named level onto Custom.
+    sync_block_level(&lists, &config)?;
+    Ok(Json(config.get()))
 }
 
 /// Totals for the dashboard.
@@ -919,6 +1003,76 @@ mod tests {
         assert!(
             body.contains("\"logRetentionDays\":14"),
             "persisted: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn applying_a_block_level_toggles_feeds_and_a_hand_edit_makes_it_custom() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        // Apply the Standard level: it turns on the multi + threat-intel feeds.
+        let put = Request::put("/api/settings/block-level")
+            .header("content-type", "application/json")
+            .header("cookie", &cookie)
+            .body(Body::from(r#"{"level":"standard"}"#))
+            .unwrap();
+        let body = body_of(app.clone().oneshot(put).await.unwrap()).await;
+        assert!(body.contains("\"blockLevel\":\"standard\""), "{body}");
+        assert!(body.contains("hagezi-multi"), "{body}");
+
+        // The stored settings now read back as Standard.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/settings")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"blockLevel\":\"standard\""), "{body}");
+
+        // Switching an extra block feed on by hand drops the level to Custom.
+        let put = Request::put("/api/lists/presets/hagezi-pro")
+            .header("content-type", "application/json")
+            .header("cookie", &cookie)
+            .body(Body::from(r#"{"on":true}"#))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(put).await.unwrap().status(),
+            StatusCode::OK
+        );
+
+        let body = body_of(
+            app.oneshot(
+                Request::get("/api/settings")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"blockLevel\":\"custom\""), "{body}");
+    }
+
+    #[tokio::test]
+    async fn custom_block_level_cannot_be_applied() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+        let put = Request::put("/api/settings/block-level")
+            .header("content-type", "application/json")
+            .header("cookie", &cookie)
+            .body(Body::from(r#"{"level":"custom"}"#))
+            .unwrap();
+        assert_eq!(
+            app.oneshot(put).await.unwrap().status(),
+            StatusCode::BAD_REQUEST
         );
     }
 

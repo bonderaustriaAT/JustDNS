@@ -43,6 +43,20 @@
   letter-spacing: -0.02em;
 }
 
+/* The instance name, shown as a quiet tag after the wordmark so the header
+   identifies which box this is without competing with the brand. */
+.instance {
+  padding: 2px var(--space-2);
+  border-inline-start: 1px solid var(--line-strong);
+  margin-inline-start: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nav {
   display: flex;
   align-items: center;

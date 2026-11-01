@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.17] - 2026-11-01
+
+- Neu: **Einrichtungs-Assistent.** Beim allerersten Start führt dich JustDNS
+  jetzt Schritt für Schritt durch die Einrichtung: Administratorkonto und Name
+  der Instanz, gewünschte Schutz-Stärke (Aus/Minimal/Standard/Extrem, jeweils mit
+  Erklärung und Hinweis zum Fehlalarm-Risiko), Resolver-Profil und Aufbewahrung
+  der Protokolle.
+- Neu: **Schutz-Stärke als eine Einstellung.** Unter Einstellungen → Schutz
+  wählst du die Stufe mit einem Schalter; sie setzt die passenden Sperrlisten
+  automatisch. Stellst du einzelne Listen von Hand um, steht die Stufe auf
+  „Eigen“.
+- Neu: **Name der Instanz.** Gib deiner JustDNS-Installation einen Namen, der
+  oben in der Leiste erscheint — praktisch, wenn du mehrere betreibst.
+
 ## [0.1.16] - 2026-11-01
 
 - Neu: **Eigene Resolver.** Unter Einstellungen → Upstream-Resolver kannst du

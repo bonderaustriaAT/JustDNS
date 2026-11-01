@@ -1,13 +1,13 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { Shell } from "./components/Shell";
-import { CreateAdmin } from "./pages/CreateAdmin";
 import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Overview } from "./pages/Overview";
 import { Rewrites } from "./pages/Rewrites";
 import { Settings } from "./pages/Settings";
+import { SetupWizard } from "./pages/SetupWizard";
 import { useAuth } from "./state/auth";
 import { SettingsProvider } from "./state/settings";
 
@@ -18,8 +18,8 @@ export function App() {
   // dashboard never flashes before the gate decides.
   if (status === "loading") return null;
 
-  // First run: no admin yet, so offer to create one. Otherwise require a login.
-  if (!configured) return <CreateAdmin />;
+  // First run: no admin yet, so run the setup wizard. Otherwise require a login.
+  if (!configured) return <SetupWizard />;
   if (!authenticated) return <Login />;
 
   // The settings only load once a login is in place, so their guarded fetch

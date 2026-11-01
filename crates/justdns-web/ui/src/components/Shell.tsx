@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "../state/auth";
 import { LANGS, useI18n } from "../lib/i18n";
+import { useSettings } from "../state/settings";
 import styles from "./Shell.module.css";
 
 /** The sub-pages the "Block/Allow" area is split across, shown as a dropdown in
@@ -100,6 +101,15 @@ function LangSwitch() {
 export function Shell({ children }: { children: ReactNode }) {
   const { username, logout } = useAuth();
   const { t } = useI18n();
+  const { settings } = useSettings();
+
+  // Show the instance name next to the wordmark (and in the tab title) when the
+  // user has set one that is not the default.
+  const instance = settings.instanceName.trim();
+  const showInstance = instance !== "" && instance !== "JustDNS";
+  useEffect(() => {
+    document.title = showInstance ? `${instance} · JustDNS` : "JustDNS";
+  }, [instance, showInstance]);
 
   return (
     <div className={styles.shell}>
@@ -108,6 +118,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className={styles.brand}>
             <span className={styles.mark} aria-hidden="true" />
             <span className={styles.wordmark}>JustDNS</span>
+            {showInstance && <span className={styles.instance}>{instance}</span>}
           </div>
           <nav className={styles.nav}>
             <NavLink
