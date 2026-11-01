@@ -47,6 +47,9 @@ pub struct Preset {
     /// The false-positive risk on a 1 (negligible) to 5 (high) scale, so the
     /// dashboard can show it as a meter next to the prose.
     pub fp_level: u8,
+    /// Coarse grouping for the dashboard's catalogue filter: one of `ads`,
+    /// `security`, `privacy`, `bypass` or `allow`.
+    pub category: &'static str,
 }
 
 /// The whole catalogue, ordered from the gentlest list to the most aggressive.
@@ -62,6 +65,7 @@ pub fn preset(key: &str) -> Option<&'static Preset> {
 static PRESETS: &[Preset] = &[
     Preset {
         key: "hagezi-light",
+        category: "ads",
         name: "Hagezi Light",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
         kind: ListKind::Block,
@@ -74,6 +78,7 @@ nie etwas Gewünschtes verloren.",
     },
     Preset {
         key: "hagezi-multi",
+        category: "ads",
         name: "Hagezi Normal",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
         kind: ListKind::Block,
@@ -85,6 +90,7 @@ Website zum Laden braucht — im Zweifel die Domain auf die eigene Allowlist set
     },
     Preset {
         key: "hagezi-pro",
+        category: "ads",
         name: "Hagezi Pro",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
         kind: ListKind::Block,
@@ -96,6 +102,7 @@ beeinträchtigt; rechne damit, hin und wieder etwas freizugeben.",
     },
     Preset {
         key: "hagezi-pro-plus",
+        category: "ads",
         name: "Hagezi Pro++",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
         kind: ListKind::Block,
@@ -108,6 +115,7 @@ können ausfallen. Nur mit Bereitschaft zur Pflege der Allowlist einsetzen.",
     },
     Preset {
         key: "hagezi-ultimate",
+        category: "ads",
         name: "Hagezi Ultimate",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt",
         kind: ListKind::Block,
@@ -119,6 +127,7 @@ Allowlist. Nicht für ein Netz empfohlen, in dem andere mitnutzen.",
     },
     Preset {
         key: "hagezi-tif",
+        category: "security",
         name: "Hagezi Threat Intelligence",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt",
         kind: ListKind::Block,
@@ -131,6 +140,7 @@ zu einer Werbeliste aktivieren.",
     },
     Preset {
         key: "hagezi-doh-vpn",
+        category: "bypass",
         name: "Hagezi DoH/VPN-Bypass",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/doh-vpn-proxy-bypass-onlydomains.txt",
         kind: ListKind::Block,
@@ -143,6 +153,7 @@ dessen Domain freigeben — sonst funktioniert es nicht mehr.",
     },
     Preset {
         key: "hagezi-native-apple",
+        category: "privacy",
         name: "Hagezi Apple-Telemetrie",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/native.apple-onlydomains.txt",
         kind: ListKind::Block,
@@ -154,6 +165,7 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
     },
     Preset {
         key: "hagezi-referral-allow",
+        category: "allow",
         name: "Hagezi Referral-Freigabe",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt",
         kind: ListKind::Allow,
@@ -187,6 +199,12 @@ mod tests {
             assert!(!preset.description.is_empty());
             assert!(!preset.false_positive.is_empty());
             assert!((1..=5).contains(&preset.fp_level));
+            assert!(
+                ["ads", "security", "privacy", "bypass", "allow"].contains(&preset.category),
+                "{} has an unknown category {}",
+                preset.key,
+                preset.category
+            );
         }
     }
 

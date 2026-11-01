@@ -244,10 +244,65 @@
   max-inline-size: var(--measure);
 }
 
+/* Filter bar: a row of category chips that narrows the catalogue. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.filter:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.filter[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal-strong);
+}
+
+.filterCount {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.75;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-3);
+}
+
+.cardTags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.categoryTag {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
 }
 
 .card {

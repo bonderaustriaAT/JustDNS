@@ -35,6 +35,17 @@ function relativeTime(ms: number): string {
 
 const RISK_WORDS = ["sehr gering", "gering", "mittel", "erhöht", "hoch"];
 
+/** German labels for the catalogue categories, in the order the filter shows
+ *  them. Keyed by the machine `category` the server sends. */
+const CATEGORY_LABELS: Record<Preset["category"], string> = {
+  ads: "Werbung",
+  security: "Sicherheit",
+  privacy: "Telemetrie",
+  bypass: "Umgehung",
+  allow: "Freigabe",
+};
+const CATEGORY_ORDER: Preset["category"][] = ["ads", "security", "privacy", "bypass", "allow"];
+
 /** A five-pip meter for a list's false-positive risk: how much legitimate
  *  traffic it might catch by mistake. The subject here is risk, so it reads as
  *  a scale, not a badge. */
@@ -157,9 +168,12 @@ function PresetCard({
       <header className={styles.cardHead}>
         <div className={styles.cardTitleWrap}>
           <h3 className={styles.cardTitle}>{preset.name}</h3>
-          <span className={styles.kind} data-kind={preset.kind}>
-            {preset.kind === "allow" ? "Freigabe" : "Sperrliste"}
-          </span>
+          <div className={styles.cardTags}>
+            <span className={styles.kind} data-kind={preset.kind}>
+              {preset.kind === "allow" ? "Freigabe" : "Sperrliste"}
+            </span>
+            <span className={styles.categoryTag}>{CATEGORY_LABELS[preset.category]}</span>
+          </div>
         </div>
         <Toggle
           label={`${preset.name} aktivieren`}
@@ -186,6 +200,7 @@ export function Lists() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [presetFilter, setPresetFilter] = useState<string>("all");
 
   // Hand-added subscription form.
   const [feedName, setFeedName] = useState("");
@@ -266,6 +281,25 @@ export function Lists() {
 
   const feeds = view.subscriptions.filter((sub) => !sub.preset);
 
+  // Build the filter chips from the categories actually present, each with its
+  // count, so the bar mirrors the catalogue. "Alle" always leads.
+  const categoryCounts = view.presets.reduce<Record<string, number>>((acc, preset) => {
+    acc[preset.category] = (acc[preset.category] ?? 0) + 1;
+    return acc;
+  }, {});
+  const filterChips = [
+    { key: "all", label: "Alle", count: view.presets.length },
+    ...CATEGORY_ORDER.filter((category) => categoryCounts[category]).map((category) => ({
+      key: category,
+      label: CATEGORY_LABELS[category],
+      count: categoryCounts[category],
+    })),
+  ];
+  const visiblePresets =
+    presetFilter === "all"
+      ? view.presets
+      : view.presets.filter((preset) => preset.category === presetFilter);
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -329,8 +363,26 @@ export function Lists() {
             Fehlalarme ist.
           </p>
         </div>
+
+        <div className={styles.filters} role="tablist" aria-label="Listen filtern">
+          {filterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              role="tab"
+              aria-selected={presetFilter === chip.key}
+              className={styles.filter}
+              data-active={presetFilter === chip.key || undefined}
+              onClick={() => setPresetFilter(chip.key)}
+            >
+              {chip.label}
+              <span className={styles.filterCount}>{chip.count}</span>
+            </button>
+          ))}
+        </div>
+
         <div className={styles.cards}>
-          {view.presets.map((preset) => (
+          {visiblePresets.map((preset) => (
             <PresetCard
               key={preset.key}
               preset={preset}
