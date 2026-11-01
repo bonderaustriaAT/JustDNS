@@ -195,9 +195,10 @@ function PresetCard({
   );
 }
 
-/** Which single section of the Listen area this page shows. The header nav
- *  splits the area into three sub-pages so no one page runs long. */
-export type ListsSection = "own" | "presets" | "feeds";
+/** Which part of the Block/Allow area this page shows. The header nav splits it
+ *  so no one page runs long: "mine" holds the user's own entries (manual
+ *  allow/block plus URL subscriptions), "presets" the curated catalogue. */
+export type ListsSection = "mine" | "presets";
 
 export function Lists({ section }: { section: ListsSection }) {
   const [view, setView] = useState<ListsView | null>(null);
@@ -275,7 +276,7 @@ export function Lists({ section }: { section: ListsSection }) {
   if (!view) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Listen</h1>
+        <h1 className={styles.title}>Block/Allow</h1>
         <p className={styles.lead}>
           {error ?? "Lädt …"}
         </p>
@@ -308,8 +309,8 @@ export function Lists({ section }: { section: ListsSection }) {
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Listen</h1>
-          {section === "own" ? (
+          <h1 className={styles.title}>Block/Allow</h1>
+          {section === "mine" ? (
             <p className={styles.lead}>
               Lege fest, was JustDNS für das ganze Netzwerk sperrt oder immer durchlässt. Eine
               Freigabe gewinnt dabei immer — ein freigegebener Name wird nie geblockt, egal was eine
@@ -317,16 +318,14 @@ export function Lists({ section }: { section: ListsSection }) {
             </p>
           ) : null}
         </div>
-        {section !== "own" ? (
-          <button
-            type="button"
-            className={styles.refresh}
-            onClick={refreshAll}
-            disabled={refreshing}
-          >
-            {refreshing ? "Aktualisiert …" : "Alle Listen aktualisieren"}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className={styles.refresh}
+          onClick={refreshAll}
+          disabled={refreshing}
+        >
+          {refreshing ? "Aktualisiert …" : "Alle Listen aktualisieren"}
+        </button>
       </div>
 
       {error ? (
@@ -335,7 +334,7 @@ export function Lists({ section }: { section: ListsSection }) {
         </p>
       ) : null}
 
-      {section === "own" ? (
+      {section === "mine" ? (
       <div className={styles.editors}>
         <EntryEditor
           title="Immer erlauben"
@@ -408,7 +407,7 @@ export function Lists({ section }: { section: ListsSection }) {
       </section>
       ) : null}
 
-      {section === "feeds" ? (
+      {section === "mine" ? (
       <section className={styles.section} aria-labelledby="feeds-title">
         <div className={styles.sectionHead}>
           <h2 id="feeds-title" className={styles.sectionTitle}>

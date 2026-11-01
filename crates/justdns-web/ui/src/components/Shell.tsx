@@ -4,15 +4,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "../state/auth";
 import styles from "./Shell.module.css";
 
-/** The sub-pages the "Listen" area is split across, shown as a dropdown in the
- *  header so no single page runs long. */
+/** The sub-pages the "Block/Allow" area is split across, shown as a dropdown in
+ *  the header so no single page runs long. The user's own entries (manual
+ *  allow/block plus URL subscriptions) live together on the first page. */
 const LIST_ITEMS = [
-  { to: "/listen/eigene", label: "Immer erlauben / blockieren" },
-  { to: "/listen/fertige", label: "Fertige Listen" },
   { to: "/listen/url", label: "Eigene Listen per URL" },
+  { to: "/listen/fertige", label: "Fertige Listen" },
 ];
 
-/** The "Listen" header entry: a button that opens a menu of its sub-pages.
+/** The "Block/Allow" header entry: a button that opens a menu of its sub-pages.
  *  Closes on outside click, Escape, or navigating — the usual menu behaviour. */
 function ListsMenu() {
   const location = useLocation();
@@ -49,7 +49,7 @@ function ListsMenu() {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        Listen
+        Block/Allow
         <span className={styles.caret} data-open={open || undefined} aria-hidden="true">
           ›
         </span>
