@@ -7,18 +7,20 @@
 //! straight away; a miss goes to the [`Router`], and the upstream's answer is
 //! cached before it is returned. IPv6 answers are suppressed unless enabled.
 
+use std::collections::HashSet;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, CNAME};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
+use hickory_proto::xfer::DnsResponse;
 use justdns_filter::Blocker;
 use justdns_rewrite::Rewriter;
 
-use crate::cache::{CacheKey, CachedEntry, CachedResponse, DnsCache};
+use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
 use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
 use crate::router::{Resolve, Router};
 use crate::safesearch;
@@ -62,15 +64,18 @@ impl Default for PipelineOptions {
 
 pub struct Pipeline<R> {
     cache: DnsCache,
-    router: Router<R>,
+    router: Arc<Router<R>>,
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
     blocker: Option<Arc<Blocker>>,
     rewriter: Option<Arc<Rewriter>>,
+    /// Keys with a background refresh in flight, so however many clients hit a
+    /// stale or near-expiry entry at once, only one of them forwards upstream.
+    refreshing: Arc<Mutex<HashSet<CacheKey>>>,
 }
 
-impl<R: Resolve + Sync> Pipeline<R> {
-    pub fn new(cache: DnsCache, router: Router<R>, options: PipelineOptions) -> Self {
+impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
+    pub fn new(cache: DnsCache, router: Arc<Router<R>>, options: PipelineOptions) -> Self {
         Self {
             cache,
             router,
@@ -78,6 +83,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
             observer: None,
             blocker: None,
             rewriter: None,
+            refreshing: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -183,7 +189,16 @@ impl<R: Resolve + Sync> Pipeline<R> {
         let key = CacheKey::new(query.name(), query.query_type());
 
         if let Some(hit) = self.cache.get(&key).await {
-            apply_cached(response, hit);
+            let CacheHit {
+                response: cached,
+                needs_refresh,
+            } = hit;
+            apply_cached(response, cached);
+            // The answer is already served; a near-expiry or stale entry is
+            // renewed behind it so the next client keeps hitting a warm cache.
+            if needs_refresh {
+                self.spawn_refresh(key, query.name().clone(), query.query_type());
+            }
             return AnswerSource::Cache;
         }
 
@@ -193,30 +208,11 @@ impl<R: Resolve + Sync> Pipeline<R> {
             .await
         {
             Ok(upstream) => {
-                let rcode = upstream.response_code();
-                response.set_response_code(rcode);
-
-                let answers = upstream.answers().to_vec();
-                if answers.is_empty() {
-                    let ttl = negative_ttl(&upstream);
-                    self.cache
-                        .insert(key, CachedEntry::negative(rcode, Duration::from_secs(ttl)))
-                        .await;
-                } else {
-                    let ttl = answers.iter().map(|record| record.ttl()).min().unwrap_or(0);
-                    self.cache
-                        .insert(
-                            key,
-                            CachedEntry::positive(
-                                answers.clone(),
-                                Duration::from_secs(u64::from(ttl)),
-                            ),
-                        )
-                        .await;
-                    for record in answers {
-                        response.add_answer(record);
-                    }
+                response.set_response_code(upstream.response_code());
+                for record in upstream.answers() {
+                    response.add_answer(record.clone());
                 }
+                self.cache.insert(key, entry_from_response(&upstream)).await;
             }
             Err(_) => {
                 response.set_response_code(ResponseCode::ServFail);
@@ -224,6 +220,36 @@ impl<R: Resolve + Sync> Pipeline<R> {
         }
 
         AnswerSource::Upstream
+    }
+
+    /// Refresh `key` from upstream in the background and store the fresh answer,
+    /// so the serving path never waits on it. At most one refresh per key runs at
+    /// a time; concurrent triggers for the same name are dropped.
+    fn spawn_refresh(&self, key: CacheKey, name: Name, record_type: RecordType) {
+        if !self
+            .refreshing
+            .lock()
+            .expect("refresh set is not poisoned")
+            .insert(key.clone())
+        {
+            // A refresh for this name is already in flight.
+            return;
+        }
+
+        let cache = self.cache.clone();
+        let router = self.router.clone();
+        let refreshing = self.refreshing.clone();
+        tokio::spawn(async move {
+            if let Ok(upstream) = router.resolve(name, record_type).await {
+                cache
+                    .insert(key.clone(), entry_from_response(&upstream))
+                    .await;
+            }
+            refreshing
+                .lock()
+                .expect("refresh set is not poisoned")
+                .remove(&key);
+        });
     }
 
     /// Answer `query` from a rewrite's `ips`. An A query gets the IPv4 addresses
@@ -309,6 +335,22 @@ fn answer_addresses(response: &Message) -> Vec<IpAddr> {
         .collect()
 }
 
+/// Turn an upstream response into the cache entry to store for it: a positive
+/// entry at the smallest record TTL, or a negative entry at the negative TTL.
+/// Shared by the synchronous miss path and the background refresh.
+fn entry_from_response(upstream: &DnsResponse) -> CachedEntry {
+    let answers = upstream.answers();
+    if answers.is_empty() {
+        CachedEntry::negative(
+            upstream.response_code(),
+            Duration::from_secs(negative_ttl(upstream)),
+        )
+    } else {
+        let ttl = answers.iter().map(|record| record.ttl()).min().unwrap_or(0);
+        CachedEntry::positive(answers.to_vec(), Duration::from_secs(u64::from(ttl)))
+    }
+}
+
 fn apply_cached(response: &mut Message, hit: CachedResponse) {
     match hit {
         CachedResponse::Positive(records) => {
@@ -374,6 +416,7 @@ mod tests {
 
     struct Mock {
         reply: Reply,
+        ttl: u32,
         calls: Arc<AtomicUsize>,
     }
 
@@ -381,8 +424,16 @@ mod tests {
         fn new(reply: Reply) -> Self {
             Self {
                 reply,
+                ttl: 120,
                 calls: Arc::new(AtomicUsize::new(0)),
             }
+        }
+
+        /// Answer with records carrying `ttl` seconds instead of the default, so
+        /// a test can make an answer expire (or go stale) on demand.
+        fn with_ttl(mut self, ttl: u32) -> Self {
+            self.ttl = ttl;
+            self
         }
     }
 
@@ -398,11 +449,11 @@ mod tests {
             match &self.reply {
                 Reply::A(ip) => {
                     message.set_response_code(ResponseCode::NoError);
-                    message.add_answer(Record::from_rdata(name, 120, RData::A(A(*ip))));
+                    message.add_answer(Record::from_rdata(name, self.ttl, RData::A(A(*ip))));
                 }
                 Reply::Aaaa(ip) => {
                     message.set_response_code(ResponseCode::NoError);
-                    message.add_answer(Record::from_rdata(name, 120, RData::AAAA(AAAA(*ip))));
+                    message.add_answer(Record::from_rdata(name, self.ttl, RData::AAAA(AAAA(*ip))));
                 }
                 Reply::Empty(code) => {
                     message.set_response_code(*code);
@@ -416,7 +467,7 @@ mod tests {
     fn pipeline(reply: Reply, options: PipelineOptions) -> (Pipeline<Mock>, Arc<AtomicUsize>) {
         let mock = Mock::new(reply);
         let calls = mock.calls.clone();
-        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
         (Pipeline::new(DnsCache::new(100), router, options), calls)
     }
 
@@ -450,6 +501,40 @@ mod tests {
             calls.load(Ordering::Relaxed),
             1,
             "second query should hit the cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_hit_is_served_and_refreshed_in_background() {
+        // A zero-TTL answer is stale the moment it is cached, so the second query
+        // serves it from the stale copy and kicks off exactly one background
+        // refresh instead of making the client wait on upstream.
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34))).with_ttl(0);
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default());
+        let req = request("example.com.", RecordType::A);
+
+        // First query misses and forwards (call 1).
+        pipe.handle(&req, CLIENT).await;
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+
+        // Second query is answered straight from the stale entry, and a refresh
+        // is spawned behind it.
+        let stale = pipe.handle(&req, CLIENT).await;
+        assert_eq!(stale.answers().len(), 1, "stale answer is still served");
+
+        // The background refresh reaches upstream once more (call 2).
+        for _ in 0..200 {
+            if calls.load(Ordering::Relaxed) >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            2,
+            "a stale hit refreshes exactly once in the background"
         );
     }
 
@@ -520,7 +605,7 @@ mod tests {
 
         let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
         let calls = mock.calls.clone();
-        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
         let blocker = Arc::new(Blocker::new(
             DomainSet::from_rules("ads.example\n"),
             Arc::new(AtomicBool::new(true)),
@@ -557,7 +642,7 @@ mod tests {
 
         let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
         let calls = mock.calls.clone();
-        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
         let rewriter = Arc::new(Rewriter::new());
         rewriter.set(&[Rewrite {
             name: "nas.home".to_owned(),
@@ -599,7 +684,7 @@ mod tests {
     async fn safe_search_rewrites_to_the_filtered_endpoint() {
         let mock = Mock::new(Reply::A(Ipv4Addr::new(216, 239, 38, 120)));
         let calls = mock.calls.clone();
-        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
         let options = PipelineOptions {
             ipv6_enabled: Arc::new(AtomicBool::new(false)),
             safe_search: Arc::new(AtomicBool::new(true)),
@@ -660,10 +745,10 @@ mod tests {
     #[tokio::test]
     async fn observer_sees_the_handled_query() {
         let observer = Arc::new(Recording::default());
-        let router = Router::new(
+        let router = Arc::new(Router::new(
             UpstreamMode::Racing,
             vec![Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)))],
-        );
+        ));
         let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
             .with_observer(observer.clone());
 
@@ -689,7 +774,10 @@ mod tests {
 
         let observer = Arc::new(Recording::default());
         // The rewrite short-circuits before upstream, so this mock is never hit.
-        let router = Router::new(UpstreamMode::Racing, vec![Mock::new(Reply::Fail)]);
+        let router = Arc::new(Router::new(
+            UpstreamMode::Racing,
+            vec![Mock::new(Reply::Fail)],
+        ));
         let rewriter = Arc::new(Rewriter::new());
         rewriter.set(&[Rewrite {
             name: "nas.home".to_owned(),

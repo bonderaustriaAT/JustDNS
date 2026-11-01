@@ -93,7 +93,7 @@ async fn handle_datagram<R>(
     client: IpAddr,
 ) -> Option<Vec<u8>>
 where
-    R: Resolve + Sync,
+    R: Resolve + Send + Sync + 'static,
 {
     let request = match Message::from_vec(request) {
         Ok(request) => request,
@@ -121,7 +121,7 @@ async fn handle_stream<R>(
     client: IpAddr,
 ) -> io::Result<()>
 where
-    R: Resolve + Sync,
+    R: Resolve + Send + Sync + 'static,
 {
     loop {
         let mut length = [0u8; 2];
@@ -207,7 +207,7 @@ mod tests {
     }
 
     fn pipeline(answers: usize) -> Pipeline<Mock> {
-        let router = Router::new(UpstreamMode::Racing, vec![Mock { answers }]);
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![Mock { answers }]));
         Pipeline::new(DnsCache::new(100), router, Default::default())
     }
 

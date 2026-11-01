@@ -102,6 +102,22 @@ impl Router<UpstreamClient> {
             next: AtomicUsize::new(0),
         }
     }
+
+    /// Prime every upstream by sending one throwaway query, so its connection
+    /// (for DoT/DoH, the TLS session) is established and held open before real
+    /// traffic arrives. Called at startup and periodically, it turns the first
+    /// real lookup after an idle stretch from a cold handshake into a warm
+    /// round-trip. Errors are ignored — this is best-effort warming, not a query
+    /// anyone is waiting on.
+    pub async fn warm(&self) {
+        let name = Name::root();
+        for client in &self.pool {
+            let _ = client.resolve(name.clone(), RecordType::NS).await;
+        }
+        for route in &self.routes {
+            let _ = route.resolver.resolve(name.clone(), RecordType::NS).await;
+        }
+    }
 }
 
 impl<R: Resolve + Sync> Router<R> {
