@@ -1063,7 +1063,10 @@ mod tests {
         assert!(body.contains("\"nas.home\""), "normalised + echoed: {body}");
         assert!(body.contains("\"pihole.home\""), "second name: {body}");
         assert!(body.contains("192.168.20.5"), "{body}");
-        assert!(body.contains("\"enabled\":true"), "enabled by default: {body}");
+        assert!(
+            body.contains("\"enabled\":true"),
+            "enabled by default: {body}"
+        );
 
         // A bad IP is refused.
         let res = app

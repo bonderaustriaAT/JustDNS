@@ -379,7 +379,11 @@ mod tests {
         let (_dir, store, rewriter) = store();
         store
             .set_many(
-                &["a.home".to_owned(), "b.home".to_owned(), "c.home".to_owned()],
+                &[
+                    "a.home".to_owned(),
+                    "b.home".to_owned(),
+                    "c.home".to_owned(),
+                ],
                 &["192.168.20.11".to_owned()],
             )
             .unwrap();
@@ -426,7 +430,10 @@ mod tests {
         assert_eq!(view.rewrites.len(), 1);
         assert_eq!(view.rewrites[0].name, "new.home");
         assert!(!view.rewrites[0].enabled);
-        assert_eq!(view.rewrites[0].ips, vec!["10.0.0.2".parse::<IpAddr>().unwrap()]);
+        assert_eq!(
+            view.rewrites[0].ips,
+            vec!["10.0.0.2".parse::<IpAddr>().unwrap()]
+        );
 
         assert!(matches!(
             store.edit("missing.home", "x.home", &["10.0.0.3".to_owned()]),
@@ -441,7 +448,10 @@ mod tests {
         assert!(rewriter.lookup("nas.home").is_some());
 
         store.set_enabled("NAS.home.", false).unwrap();
-        assert!(rewriter.lookup("nas.home").is_none(), "disabled, falls through");
+        assert!(
+            rewriter.lookup("nas.home").is_none(),
+            "disabled, falls through"
+        );
         assert!(!store.view().rewrites[0].enabled, "still listed, just off");
 
         store.set_enabled("nas.home", true).unwrap();

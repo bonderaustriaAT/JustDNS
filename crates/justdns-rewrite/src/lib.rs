@@ -199,7 +199,10 @@ mod tests {
         ]);
 
         assert!(rewriter.lookup("on.home").is_some());
-        assert!(rewriter.lookup("off.home").is_none(), "disabled falls through");
+        assert!(
+            rewriter.lookup("off.home").is_none(),
+            "disabled falls through"
+        );
         assert_eq!(rewriter.len(), 1, "only enabled entries are live");
     }
 }
