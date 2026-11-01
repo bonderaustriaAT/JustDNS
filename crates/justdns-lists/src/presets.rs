@@ -174,8 +174,16 @@ mod tests {
     fn keys_are_unique_and_urls_are_hagezi_https() {
         let mut keys = std::collections::HashSet::new();
         for preset in presets() {
-            assert!(keys.insert(preset.key), "duplicate preset key {}", preset.key);
-            assert!(preset.url.starts_with(HAGEZI), "{} off-catalogue", preset.key);
+            assert!(
+                keys.insert(preset.key),
+                "duplicate preset key {}",
+                preset.key
+            );
+            assert!(
+                preset.url.starts_with(HAGEZI),
+                "{} off-catalogue",
+                preset.key
+            );
             assert!(!preset.description.is_empty());
             assert!(!preset.false_positive.is_empty());
             assert!((1..=5).contains(&preset.fp_level));
