@@ -134,6 +134,9 @@ export function LogDetail({ row }: { row: LogRow }) {
         <Field label="Antwort" value={row.rcode} hint={row.rcodeDesc} />
         <Field label="Quelle" value={row.sourceText} />
         <Field label="Antworten" value={String(row.answers)} />
+        {row.addresses.length > 0 ? (
+          <Field label="Aufgelöst zu" value={row.addresses.join(", ")} />
+        ) : null}
         <Field label="Dauer" value={`${row.durationMs} ms`} />
         <Field label="Zeit" value={row.fullTime} />
       </dl>

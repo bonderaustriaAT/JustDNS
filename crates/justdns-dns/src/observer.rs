@@ -17,6 +17,8 @@ pub enum AnswerSource {
     Upstream,
     /// Answered locally without a lookup (for example a suppressed AAAA).
     Local,
+    /// Answered from a user-defined local rewrite (name → fixed IPs).
+    Rewrite,
     /// Refused by the blocking engine without a lookup.
     Blocked,
 }
@@ -39,6 +41,9 @@ pub struct QueryRecord {
     pub duration: Duration,
     /// Number of answer records returned.
     pub answers: u16,
+    /// The IPv4/IPv6 addresses the query resolved to, in answer order. Empty for
+    /// a block, a NODATA answer, or a non-address record type.
+    pub addresses: Vec<IpAddr>,
 }
 
 /// Something that records handled queries. Implementations must not block for

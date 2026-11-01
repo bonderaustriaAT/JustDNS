@@ -84,8 +84,18 @@ export function Logs() {
                   >
                     <span className={styles.time}>{row.time}</span>
                     <span className={styles.client}>{row.client}</span>
-                    <span className={styles.domain} title={row.name}>
-                      {row.name}
+                    <span className={styles.domainCell}>
+                      <span className={styles.domain} title={row.name}>
+                        {row.name}
+                      </span>
+                      {row.addresses.length > 0 ? (
+                        <span className={styles.resolved} title={row.addresses.join(", ")}>
+                          <span className={styles.resolvedArrow} aria-hidden="true">
+                            →
+                          </span>{" "}
+                          {row.addresses.join(", ")}
+                        </span>
+                      ) : null}
                     </span>
                     <span className={styles.meta}>
                       <span className={styles.type}>{row.type}</span>

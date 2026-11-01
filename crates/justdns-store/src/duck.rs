@@ -30,11 +30,20 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
     response_code INTEGER NOT NULL,
     source        VARCHAR NOT NULL,
     duration_ms   BIGINT  NOT NULL,
-    answers       INTEGER NOT NULL
+    answers       INTEGER NOT NULL,
+    addresses     VARCHAR DEFAULT ''
 );";
 
+/// Schema upgrades for a log written by an older build. `addresses` (the IPs a
+/// query resolved to) was added after the first release, so an existing file
+/// gains the column with an empty default; its old rows then read back as having
+/// no recorded addresses. The column is nullable because DuckDB will not add a
+/// NOT NULL column with `IF NOT EXISTS`; every write still sets it.
+const MIGRATIONS: &str =
+    "ALTER TABLE queries ADD COLUMN IF NOT EXISTS addresses VARCHAR DEFAULT '';";
+
 const SELECT_COLUMNS: &str =
-    "at_ms, client, name, record_type, response_code, source, duration_ms, answers";
+    "at_ms, client, name, record_type, response_code, source, duration_ms, answers, addresses";
 
 /// Errors from the DuckDB query log.
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +71,7 @@ impl DuckStore {
 
     fn from_connection(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(MIGRATIONS)?;
         Ok(Self { conn })
     }
 
@@ -73,6 +83,7 @@ impl DuckStore {
         let mut appender = self.conn.appender("queries")?;
         for event in events {
             let client = event.client.to_string();
+            let addresses = join_addresses(&event.addresses);
             appender.append_row(params![
                 event.at_ms,
                 client,
@@ -82,6 +93,7 @@ impl DuckStore {
                 event.source.label(),
                 i64::from(event.duration_ms),
                 i32::from(event.answers),
+                addresses,
             ])?;
         }
         appender.flush()?;
@@ -107,7 +119,7 @@ impl DuckStore {
                 COUNT(*),
                 COUNT(*) FILTER (WHERE source = 'cache'),
                 COUNT(*) FILTER (WHERE source = 'upstream'),
-                COUNT(*) FILTER (WHERE source = 'local'),
+                COUNT(*) FILTER (WHERE source IN ('local', 'rewrite')),
                 COUNT(*) FILTER (WHERE source = 'blocked'),
                 COUNT(*) FILTER (WHERE response_code = 3),
                 COUNT(*) FILTER (WHERE response_code = 2)
@@ -164,7 +176,27 @@ fn row_to_event(row: &duckdb::Row<'_>) -> duckdb::Result<QueryEvent> {
         source: QuerySource::from_label(&row.get::<_, String>(5)?).unwrap_or(QuerySource::Upstream),
         duration_ms: u32::try_from(row.get::<_, i64>(6)?).unwrap_or_default(),
         answers: u16::try_from(row.get::<_, i32>(7)?).unwrap_or_default(),
+        addresses: parse_addresses(&row.get::<_, Option<String>>(8)?.unwrap_or_default()),
     })
+}
+
+/// Join a query's resolved addresses into the comma-separated form stored in the
+/// log. No addresses becomes the empty string.
+fn join_addresses(addresses: &[IpAddr]) -> String {
+    addresses
+        .iter()
+        .map(IpAddr::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Parse the stored comma-separated addresses back into a list, dropping any
+/// fragment that no longer parses rather than failing the whole read.
+fn parse_addresses(stored: &str) -> Vec<IpAddr> {
+    stored
+        .split(',')
+        .filter_map(|part| part.trim().parse().ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -184,6 +216,7 @@ mod tests {
             source,
             duration_ms: 4,
             answers: 2,
+            addresses: vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
         }
     }
 
@@ -229,6 +262,27 @@ mod tests {
         assert_eq!(times, vec![3, 2, 1]);
         assert_eq!(recent[0].response_code, 3);
         assert_eq!(recent[1].source, QuerySource::Cache);
+        assert_eq!(
+            recent[0].addresses,
+            vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
+            "resolved addresses round-trip through the log"
+        );
+    }
+
+    #[test]
+    fn rewrite_source_round_trips_and_counts_as_local() {
+        let store = DuckStore::open_in_memory().unwrap();
+        store
+            .insert_batch(&[
+                event(1, QuerySource::Local, 0),
+                event(2, QuerySource::Rewrite, 0),
+            ])
+            .unwrap();
+
+        // Newest first: the rewrite (at_ms 2) comes back with its own source.
+        assert_eq!(store.recent(10).unwrap()[0].source, QuerySource::Rewrite);
+        // Both a plain local answer and a rewrite count toward the "local" total.
+        assert_eq!(store.stats().unwrap().local, 2);
     }
 
     #[test]

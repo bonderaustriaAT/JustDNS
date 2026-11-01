@@ -30,6 +30,7 @@ impl QueryObserver for StoreObserver {
             source: map_source(record.source),
             duration_ms: u32::try_from(record.duration.as_millis()).unwrap_or(u32::MAX),
             answers: record.answers,
+            addresses: record.addresses,
         });
     }
 }
@@ -39,6 +40,7 @@ fn map_source(source: AnswerSource) -> QuerySource {
         AnswerSource::Cache => QuerySource::Cache,
         AnswerSource::Upstream => QuerySource::Upstream,
         AnswerSource::Local => QuerySource::Local,
+        AnswerSource::Rewrite => QuerySource::Rewrite,
         AnswerSource::Blocked => QuerySource::Blocked,
     }
 }

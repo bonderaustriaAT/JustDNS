@@ -777,6 +777,7 @@ mod tests {
             source,
             duration_ms: 5,
             answers: 1,
+            addresses: Vec::new(),
         }
     }
 

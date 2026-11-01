@@ -111,7 +111,9 @@ impl Recorder {
         match event.source {
             QuerySource::Cache => state.stats.cache_hits += 1,
             QuerySource::Upstream => state.stats.upstream += 1,
-            QuerySource::Local => state.stats.local += 1,
+            // A rewrite is answered locally too, so it counts toward the same
+            // "local" total; the log keeps the finer source for each entry.
+            QuerySource::Local | QuerySource::Rewrite => state.stats.local += 1,
             QuerySource::Blocked => state.stats.blocked += 1,
         }
         match event.response_code {
@@ -202,6 +204,7 @@ mod tests {
             source,
             duration_ms: 3,
             answers: 1,
+            addresses: Vec::new(),
         }
     }
 

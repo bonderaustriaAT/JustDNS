@@ -134,6 +134,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
                 source,
                 duration: start.elapsed(),
                 answers: u16::try_from(response.answers().len()).unwrap_or(u16::MAX),
+                addresses: answer_addresses(&response),
             });
         }
 
@@ -148,7 +149,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
         if let Some(rewriter) = &self.rewriter {
             if let Some(ips) = rewriter.lookup(&query.name().to_string()) {
                 self.answer_rewrite(query, response, &ips);
-                return AnswerSource::Local;
+                return AnswerSource::Rewrite;
             }
         }
 
@@ -291,6 +292,21 @@ impl<R: Resolve + Sync> Pipeline<R> {
         }
         AnswerSource::Upstream
     }
+}
+
+/// The IPv4/IPv6 addresses in a response's answer section, in order. Non-address
+/// records (CNAME, SOA, …) are skipped, so a CNAME chain reports only the final
+/// addresses. Used to record what a query actually resolved to in the query log.
+fn answer_addresses(response: &Message) -> Vec<IpAddr> {
+    response
+        .answers()
+        .iter()
+        .filter_map(|record| match record.data() {
+            RData::A(a) => Some(IpAddr::V4(a.0)),
+            RData::AAAA(aaaa) => Some(IpAddr::V6(aaaa.0)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn apply_cached(response: &mut Message, hit: CachedResponse) {
@@ -660,6 +676,39 @@ mod tests {
         assert_eq!(seen[0].name, "example.com.");
         assert_eq!(seen[0].source, AnswerSource::Upstream);
         assert_eq!(seen[0].answers, 1);
+        assert_eq!(
+            seen[0].addresses,
+            vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
+            "records what the query resolved to"
+        );
+    }
+
+    #[tokio::test]
+    async fn observer_reports_rewrite_source_and_addresses() {
+        use justdns_rewrite::Rewrite;
+
+        let observer = Arc::new(Recording::default());
+        // The rewrite short-circuits before upstream, so this mock is never hit.
+        let router = Router::new(UpstreamMode::Racing, vec![Mock::new(Reply::Fail)]);
+        let rewriter = Arc::new(Rewriter::new());
+        rewriter.set(&[Rewrite {
+            name: "nas.home".to_owned(),
+            ips: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))],
+            enabled: true,
+        }]);
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_observer(observer.clone())
+            .with_rewriter(rewriter);
+
+        pipe.handle(&request("nas.home.", RecordType::A), CLIENT)
+            .await;
+
+        let seen = observer.seen.lock().unwrap();
+        assert_eq!(seen[0].source, AnswerSource::Rewrite);
+        assert_eq!(
+            seen[0].addresses,
+            vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))]
+        );
     }
 
     #[test]

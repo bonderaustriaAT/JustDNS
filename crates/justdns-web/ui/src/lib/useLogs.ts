@@ -54,6 +54,8 @@ export interface LogRow {
   rcodeDesc?: string;
   rcodeTone: RcodeTone;
   answers: number;
+  /** The IPs the query resolved to, in answer order. */
+  addresses: string[];
   durationMs: number;
 }
 
@@ -87,6 +89,7 @@ function toLogRow(row: QueryRow): LogRow {
     rcodeDesc: responseCodeDescription(row.response_code),
     rcodeTone: rcodeTone(row.response_code, isBlocked),
     answers: row.answers,
+    addresses: row.addresses ?? [],
     durationMs: row.duration_ms,
   };
 }
