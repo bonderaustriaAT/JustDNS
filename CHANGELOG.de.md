@@ -4,7 +4,7 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
-## [Unveröffentlicht]
+## [0.1.14] - 2026-11-01
 
 - Die obere Menüleiste bricht nicht mehr in eine zweite Zeile um und wirkt
   aufgeräumter — auch auf Deutsch, wo die Beschriftungen länger sind.
