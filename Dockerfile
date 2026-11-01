@@ -40,7 +40,8 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_CONFIG_PATH=/data/config.json \
     JUSTDNS_AUTH_PATH=/data/auth.json \
     JUSTDNS_LISTS_PATH=/data/lists.json \
-    JUSTDNS_LISTS_CACHE=/data/lists-cache
+    JUSTDNS_LISTS_CACHE=/data/lists-cache \
+    JUSTDNS_REWRITES_PATH=/data/rewrites.json
 
 # The query log persists here; mount a volume to keep it across restarts.
 VOLUME /data
