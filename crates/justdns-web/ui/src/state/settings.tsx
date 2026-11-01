@@ -9,9 +9,16 @@ import {
   type ReactNode,
 } from "react";
 
-import { api, type ServerSettings, type SpeedProfile, type UpstreamMode } from "../lib/api";
+import {
+  api,
+  type CustomTransport,
+  type CustomUpstream,
+  type ServerSettings,
+  type SpeedProfile,
+  type UpstreamMode,
+} from "../lib/api";
 
-export type { SpeedProfile, UpstreamMode };
+export type { CustomTransport, CustomUpstream, SpeedProfile, UpstreamMode };
 
 /// The full settings the UI works with: the server-persisted fields plus
 /// `expertMode`, a per-browser preference about what the UI reveals that the
@@ -29,6 +36,8 @@ const SERVER_DEFAULTS: ServerSettings = {
   upstreamMode: "racing",
   encryptUpstream: true,
   speedProfile: "balanced",
+  customUpstreamsEnabled: false,
+  customUpstreams: [],
   ipv6: false,
   queryLog: true,
   logRetentionDays: 7,
@@ -44,6 +53,8 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "upstreamMode",
   "encryptUpstream",
   "speedProfile",
+  "customUpstreamsEnabled",
+  "customUpstreams",
   "ipv6",
   "queryLog",
   "logRetentionDays",

@@ -5,7 +5,13 @@ import { Toggle } from "../components/Toggle";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
-import { useSettings, type SpeedProfile, type UpstreamMode } from "../state/settings";
+import {
+  useSettings,
+  type CustomTransport,
+  type CustomUpstream,
+  type SpeedProfile,
+  type UpstreamMode,
+} from "../state/settings";
 import styles from "./Settings.module.css";
 
 /** The "clear DNS cache" action: a one-shot button that drops every cached
@@ -127,6 +133,119 @@ const PROFILE_RESOLVERS: Record<SpeedProfile, { ip: string; host: string }[]> = 
   ],
 };
 
+/** The transports a custom resolver can use, in dropdown order. */
+const TRANSPORTS: CustomTransport[] = ["plain", "dot", "doh"];
+
+/** A permissive check that a string looks like an IPv4 or IPv6 literal — enough
+ *  to flag an obviously wrong entry in the UI; the server validates for real. */
+function looksLikeIp(value: string): boolean {
+  const v = value.trim();
+  if (v === "") return false;
+  if (v.includes(":")) return /^[0-9a-fA-F:]+$/.test(v) && (v.match(/:/g)?.length ?? 0) >= 2;
+  const parts = v.split(".");
+  return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+}
+
+/** A custom resolver is usable once its address parses and — for the encrypted
+ *  transports — it carries a certificate name. */
+function customUpstreamValid(entry: CustomUpstream): boolean {
+  if (!looksLikeIp(entry.address)) return false;
+  if (entry.transport !== "plain" && !(entry.serverName ?? "").trim()) return false;
+  return true;
+}
+
+/** Editor for the user's own resolver list, shown when "use my own resolvers"
+ *  is on. Each row is an address, a transport, and — for DoT/DoH — a certificate
+ *  name; invalid rows are flagged here and skipped by the server. */
+function CustomUpstreamsEditor() {
+  const { t } = useI18n();
+  const { settings, update } = useSettings();
+  const entries = settings.customUpstreams;
+
+  const setEntry = (index: number, patch: Partial<CustomUpstream>) =>
+    update(
+      "customUpstreams",
+      entries.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)),
+    );
+  const addEntry = () =>
+    update("customUpstreams", [
+      ...entries,
+      { address: "", port: null, transport: "plain", serverName: null },
+    ]);
+  const removeEntry = (index: number) =>
+    update(
+      "customUpstreams",
+      entries.filter((_, i) => i !== index),
+    );
+
+  const anyValid = entries.some(customUpstreamValid);
+
+  return (
+    <div className={styles.custom}>
+      {entries.length === 0 ? (
+        <p className={styles.customEmpty}>{t("settings.customEmpty")}</p>
+      ) : (
+        <ul className={styles.customList}>
+          {entries.map((entry, index) => {
+            const needsName = entry.transport !== "plain";
+            const invalid = !customUpstreamValid(entry);
+            return (
+              <li key={index} className={styles.customRow} data-invalid={invalid || undefined}>
+                <input
+                  className={styles.customInput}
+                  value={entry.address}
+                  onChange={(e) => setEntry(index, { address: e.target.value })}
+                  placeholder={t("settings.customAddrPlaceholder")}
+                  aria-label={t("settings.customAddrLabel")}
+                  inputMode="numeric"
+                />
+                <select
+                  className={styles.select}
+                  value={entry.transport}
+                  aria-label={t("settings.customTransportLabel")}
+                  onChange={(e) =>
+                    setEntry(index, { transport: e.target.value as CustomTransport })
+                  }
+                >
+                  {TRANSPORTS.map((transport) => (
+                    <option key={transport} value={transport}>
+                      {t(`settings.transport.${transport}` as MessageKey)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={styles.customInput}
+                  value={entry.serverName ?? ""}
+                  onChange={(e) => setEntry(index, { serverName: e.target.value || null })}
+                  placeholder={t("settings.customNamePlaceholder")}
+                  aria-label={t("settings.customNameLabel")}
+                  disabled={!needsName}
+                  data-hidden={!needsName || undefined}
+                />
+                <button
+                  type="button"
+                  className={styles.customRemove}
+                  onClick={() => removeEntry(index)}
+                  aria-label={t("settings.customRemove")}
+                  title={t("settings.customRemove")}
+                >
+                  ✕
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <button type="button" className={styles.actionButton} onClick={addEntry}>
+        {t("settings.customAdd")}
+      </button>
+      {entries.length > 0 && !anyValid ? (
+        <p className={styles.customWarn}>{t("settings.customNoneValid")}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -238,7 +357,23 @@ export function Settings() {
               title={t("settings.cat.upstream")}
               description={t("settings.upstreamDesc")}
             >
-              <div className={styles.profile}>
+              <Row
+                label={t("settings.customLabel")}
+                description={t("settings.customDesc")}
+                details={t("settings.customDetails")}
+                control={
+                  <Toggle
+                    label={t("settings.customLabel")}
+                    checked={settings.customUpstreamsEnabled}
+                    onChange={(v) => update("customUpstreamsEnabled", v)}
+                  />
+                }
+              />
+
+              {settings.customUpstreamsEnabled ? (
+                <CustomUpstreamsEditor />
+              ) : (
+                <div className={styles.profile}>
                 <span className={styles.labelLine}>
                   <span className={styles.label}>{t("settings.profileLabel")}</span>
                   <InfoHint label={t("settings.profileLabel")} text={t("settings.profileDetails")} />
@@ -280,7 +415,8 @@ export function Settings() {
                     </li>
                   ))}
                 </ul>
-              </div>
+                </div>
+              )}
 
               {settings.expertMode && (
                 <Row

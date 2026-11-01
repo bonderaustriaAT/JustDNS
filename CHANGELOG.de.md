@@ -4,6 +4,15 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.16] - 2026-11-01
+
+- Neu: **Eigene Resolver.** Unter Einstellungen → Upstream-Resolver kannst du
+  jetzt die Server der Profile durch deine eigene Liste ersetzen. Pro Eintrag
+  gibst du eine IP-Adresse und die Übertragungsart an — Klartext, DNS over TLS
+  oder DNS over HTTPS — und bei den verschlüsselten Varianten den Servernamen.
+  Die Änderung greift sofort, ganz ohne Neustart; solange noch kein gültiger
+  Eintrag vorhanden ist, bleiben die Profil-Server aktiv.
+
 ## [0.1.15] - 2026-11-01
 
 - Neu: **Geschwindigkeitsprofile.** Unter Einstellungen → Upstream-Resolver
