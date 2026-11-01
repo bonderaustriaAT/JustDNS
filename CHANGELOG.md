@@ -3,7 +3,7 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
-## [Unreleased]
+## [0.1.13] - 2026-11-01
 
 - The whole interface is now available in **English and German**. A DE/EN switch
   in the top bar changes the language instantly, and your choice is remembered

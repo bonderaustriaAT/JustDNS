@@ -4,7 +4,7 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
-## [Unveröffentlicht]
+## [0.1.13] - 2026-11-01
 
 - Die gesamte Oberfläche gibt es jetzt auf **Deutsch und Englisch**. Ein
   DE/EN-Schalter oben in der Leiste wechselt die Sprache sofort, und deine Wahl
