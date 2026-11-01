@@ -158,6 +158,10 @@ const de = {
   "rewrites.removeAria": "{name} entfernen",
   "rewrites.editTitle": "Bearbeiten",
   "rewrites.removeTitle": "Entfernen",
+  "rewrites.removeConfirmTitle": "Rewrite löschen?",
+  "rewrites.removeConfirmBody":
+    "„{name}“ wird dauerhaft entfernt und nicht mehr lokal beantwortet.",
+  "rewrites.removeConfirm": "Löschen",
 
   // Lists (Block/Allow) page.
   "lists.badDomain": "Das ist keine gültige Domain oder URL.",
@@ -513,6 +517,10 @@ const en: Catalog = {
   "rewrites.removeAria": "Remove {name}",
   "rewrites.editTitle": "Edit",
   "rewrites.removeTitle": "Remove",
+  "rewrites.removeConfirmTitle": "Delete rewrite?",
+  "rewrites.removeConfirmBody":
+    "“{name}” will be permanently removed and no longer answered locally.",
+  "rewrites.removeConfirm": "Delete",
 
   "lists.badDomain": "That is not a valid domain or URL.",
   "lists.loadFailed": "The lists could not be loaded.",

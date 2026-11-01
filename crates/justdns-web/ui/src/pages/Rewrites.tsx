@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { ApiError, api, type Rewrite, type RewritesView } from "../lib/api";
@@ -33,10 +34,13 @@ export function Rewrites() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
 
+  // The top form only ever adds; editing happens inline in the row.
   const [name, setName] = useState("");
   const [ips, setIps] = useState("");
-  // The original name of the entry being edited, or null when adding.
+  // The name of the row being edited inline, or null when none is.
   const [editing, setEditing] = useState<string | null>(null);
+  // The name of the row awaiting a delete confirmation, or null.
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,37 +77,33 @@ export function Rewrites() {
     }
   }
 
-  function resetForm() {
-    setName("");
-    setIps("");
-    setEditing(null);
-  }
-
-  function startEdit(rewrite: Rewrite) {
-    setEditing(rewrite.name);
-    setName(rewrite.name);
-    setIps(rewrite.ips.join(", "));
-    setError(null);
-  }
-
-  function submit(event: FormEvent) {
+  function submitAdd(event: FormEvent) {
     event.preventDefault();
     const addresses = splitTokens(ips);
     if (addresses.length === 0) return;
+    const names = splitTokens(name);
+    if (names.length === 0) return;
+    run("add", () => api.setRewrites(names, addresses)).then((ok) => {
+      if (ok) {
+        setName("");
+        setIps("");
+      }
+    });
+  }
 
-    if (editing) {
-      const target = name.trim();
-      if (!target) return;
-      run(`edit:${editing}`, () => api.editRewrite(editing, target, addresses)).then((ok) => {
-        if (ok) resetForm();
-      });
-    } else {
-      const names = splitTokens(name);
-      if (names.length === 0) return;
-      run("add", () => api.setRewrites(names, addresses)).then((ok) => {
-        if (ok) resetForm();
-      });
-    }
+  function saveEdit(original: string, newName: string, addresses: string[]) {
+    run(`edit:${original}`, () => api.editRewrite(original, newName, addresses)).then((ok) => {
+      if (ok) setEditing(null);
+    });
+  }
+
+  function confirmRemove() {
+    const target = confirming;
+    if (!target) return;
+    run(`rm:${target}`, () => api.removeRewrite(target)).then((ok) => {
+      if (ok && editing === target) setEditing(null);
+      setConfirming(null);
+    });
   }
 
   if (!view) {
@@ -135,13 +135,13 @@ export function Rewrites() {
         </p>
       ) : null}
 
-      <form className={styles.addForm} onSubmit={submit}>
+      <form className={styles.addForm} onSubmit={submitAdd}>
         <input
           className={styles.input}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder={editing ? t("rewrites.namePlaceholderEdit") : t("rewrites.namePlaceholderAdd")}
-          aria-label={editing ? t("rewrites.nameAriaEdit") : t("rewrites.nameAriaAdd")}
+          placeholder={t("rewrites.namePlaceholderAdd")}
+          aria-label={t("rewrites.nameAriaAdd")}
           autoComplete="off"
           spellCheck={false}
         />
@@ -155,20 +155,10 @@ export function Rewrites() {
           spellCheck={false}
         />
         <button type="submit" className={styles.addButton} disabled={busy}>
-          {editing ? t("rewrites.update") : t("rewrites.save")}
+          {t("rewrites.save")}
         </button>
-        {editing ? (
-          <button
-            type="button"
-            className={styles.cancelButton}
-            onClick={resetForm}
-            disabled={busy}
-          >
-            {t("rewrites.cancel")}
-          </button>
-        ) : null}
       </form>
-      {!editing ? <p className={styles.hint}>{t("rewrites.multiHint")}</p> : null}
+      <p className={styles.hint}>{t("rewrites.multiHint")}</p>
 
       {view.rewrites.length === 0 ? (
         <p className={styles.empty}>{t("rewrites.empty")}</p>
@@ -184,88 +174,194 @@ export function Rewrites() {
                 pending.has(`en:${rewrite.name}`) ||
                 pending.has(`rm:${rewrite.name}`)
               }
-              onEdit={() => startEdit(rewrite)}
+              onStartEdit={() => {
+                setError(null);
+                setEditing(rewrite.name);
+              }}
+              onCancelEdit={() => setEditing(null)}
+              onSaveEdit={(newName, addresses) => saveEdit(rewrite.name, newName, addresses)}
               onToggle={(enabled) =>
                 run(`en:${rewrite.name}`, () => api.setRewriteEnabled(rewrite.name, enabled))
               }
-              onRemove={() => {
-                run(`rm:${rewrite.name}`, () => api.removeRewrite(rewrite.name)).then((ok) => {
-                  if (ok && editing === rewrite.name) resetForm();
-                });
-              }}
+              onRemove={() => setConfirming(rewrite.name)}
             />
           ))}
         </ul>
       )}
+
+      {confirming ? (
+        <ConfirmDialog
+          title={t("rewrites.removeConfirmTitle")}
+          body={t("rewrites.removeConfirmBody", { name: confirming })}
+          confirmLabel={t("rewrites.removeConfirm")}
+          cancelLabel={t("rewrites.cancel")}
+          busy={pending.has(`rm:${confirming}`)}
+          onConfirm={confirmRemove}
+          onCancel={() => setConfirming(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-/** One rewrite: an on/off toggle, the name, its addresses as chips, and edit and
- *  remove controls. A disabled rewrite is dimmed to show it is not answered. */
+/** One rewrite. Normally a row with an on/off toggle, the name, its addresses as
+ *  chips, and edit/remove controls. In edit mode the name and addresses turn
+ *  into inputs right here in the row — no jumping back up to the top form. */
 function RewriteRow({
   rewrite,
   editing,
   busy,
-  onEdit,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
   onToggle,
   onRemove,
 }: {
   rewrite: Rewrite;
   editing: boolean;
   busy: boolean;
-  onEdit: () => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (name: string, ips: string[]) => void;
   onToggle: (enabled: boolean) => void;
   onRemove: () => void;
 }) {
   const { t } = useI18n();
   return (
-    <li className={styles.entry} data-editing={editing || undefined} data-off={!rewrite.enabled || undefined}>
+    <li
+      className={styles.entry}
+      data-editing={editing || undefined}
+      data-off={!rewrite.enabled || undefined}
+    >
       <div className={styles.entryToggle}>
         <Toggle
           label={t(rewrite.enabled ? "rewrites.disableAria" : "rewrites.enableAria", {
             name: rewrite.name,
           })}
           checked={rewrite.enabled}
-          disabled={busy}
+          disabled={busy || editing}
           onChange={onToggle}
         />
       </div>
-      <div className={styles.entryMain}>
-        <span className={styles.entryName}>{rewrite.name}</span>
-        <span className={styles.arrow} aria-hidden="true">
-          →
-        </span>
-        <span className={styles.ips}>
-          {rewrite.ips.map((ip) => (
-            <span key={ip} className={styles.ip}>
-              {ip}
+
+      {editing ? (
+        <RewriteEditor
+          rewrite={rewrite}
+          busy={busy}
+          onSave={onSaveEdit}
+          onCancel={onCancelEdit}
+        />
+      ) : (
+        <>
+          <span className={styles.entryName} title={rewrite.name}>
+            {rewrite.name}
+          </span>
+          <div className={styles.entryValue}>
+            <span className={styles.arrow} aria-hidden="true">
+              →
             </span>
-          ))}
-        </span>
-      </div>
-      <div className={styles.entryActions}>
-        <button
-          type="button"
-          className={styles.action}
-          aria-label={t("rewrites.editAria", { name: rewrite.name })}
-          title={t("rewrites.editTitle")}
-          disabled={busy}
-          onClick={onEdit}
-        >
-          {t("rewrites.editTitle")}
-        </button>
-        <button
-          type="button"
-          className={styles.remove}
-          aria-label={t("rewrites.removeAria", { name: rewrite.name })}
-          title={t("rewrites.removeTitle")}
-          disabled={busy}
-          onClick={onRemove}
-        >
-          ✕
-        </button>
-      </div>
+            <span className={styles.ips}>
+              {rewrite.ips.map((ip) => (
+                <span key={ip} className={styles.ip}>
+                  {ip}
+                </span>
+              ))}
+            </span>
+          </div>
+          <div className={styles.entryActions}>
+            <button
+              type="button"
+              className={styles.action}
+              aria-label={t("rewrites.editAria", { name: rewrite.name })}
+              title={t("rewrites.editTitle")}
+              disabled={busy}
+              onClick={onStartEdit}
+            >
+              {t("rewrites.editTitle")}
+            </button>
+            <button
+              type="button"
+              className={styles.remove}
+              aria-label={t("rewrites.removeAria", { name: rewrite.name })}
+              title={t("rewrites.removeTitle")}
+              disabled={busy}
+              onClick={onRemove}
+            >
+              ✕
+            </button>
+          </div>
+        </>
+      )}
     </li>
+  );
+}
+
+/** The inline editor shown in place of a row's name/addresses while it is being
+ *  edited. It keeps its own draft, seeded from the rewrite when it mounts, and
+ *  reports the new name and addresses on save. */
+function RewriteEditor({
+  rewrite,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  rewrite: Rewrite;
+  busy: boolean;
+  onSave: (name: string, ips: string[]) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const [draftName, setDraftName] = useState(rewrite.name);
+  const [draftIps, setDraftIps] = useState(rewrite.ips.join(", "));
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  // Put the cursor in the name field as editing opens.
+  useEffect(() => {
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, []);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const addresses = splitTokens(draftIps);
+    const target = draftName.trim();
+    if (!target || addresses.length === 0) return;
+    onSave(target, addresses);
+  }
+
+  return (
+    <form className={styles.rowEdit} onSubmit={submit}>
+      <input
+        ref={nameRef}
+        className={styles.rowEditInput}
+        value={draftName}
+        onChange={(event) => setDraftName(event.target.value)}
+        aria-label={t("rewrites.nameAriaEdit")}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <span className={styles.arrow} aria-hidden="true">
+        →
+      </span>
+      <input
+        className={styles.rowEditInput}
+        value={draftIps}
+        onChange={(event) => setDraftIps(event.target.value)}
+        aria-label={t("rewrites.ipAria")}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <button type="submit" className={styles.rowSave} disabled={busy}>
+        {t("rewrites.update")}
+      </button>
+      <button
+        type="button"
+        className={styles.rowCancel}
+        onClick={onCancel}
+        disabled={busy}
+      >
+        {t("rewrites.cancel")}
+      </button>
+    </form>
   );
 }

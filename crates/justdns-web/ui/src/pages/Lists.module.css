@@ -172,24 +172,27 @@
   padding: 0;
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
 }
 
+/* Each own entry is a filled, outlined row so a hand-added name stands out from
+   the card instead of reading as faint text on dark. The allow/block colour
+   already comes from the card's own accent, so the rows stay neutral. */
 .entry {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding-block: var(--space-2);
-  border-block-start: 1px solid var(--line);
-}
-
-.entry:first-child {
-  border-block-start: none;
+  padding: var(--space-2) var(--space-3);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 
 .entryName {
   font-family: var(--font-mono);
   font-size: var(--step--1);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
