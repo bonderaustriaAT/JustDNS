@@ -15,7 +15,8 @@
 .inner {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  flex-wrap: nowrap;
+  gap: var(--space-4);
   max-inline-size: 960px;
   margin-inline: auto;
   padding-inline: var(--space-4);
@@ -44,6 +45,8 @@
 
 .nav {
   display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: var(--space-4);
 }
 
@@ -52,6 +55,7 @@
   align-items: center;
   gap: var(--space-3);
   margin-inline-start: auto;
+  flex: none;
 }
 
 .user {
@@ -130,6 +134,7 @@
   color: var(--text-muted);
   padding-block: var(--space-1);
   position: relative;
+  white-space: nowrap;
 }
 
 .link:hover {
@@ -166,6 +171,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .caret {
