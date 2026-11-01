@@ -9,26 +9,32 @@ import {
   responseCodeLabel,
   sourceLabel,
 } from "./dns";
+import { useI18n, type Lang } from "./i18n";
 
 /** How many log entries the page shows at once. */
 export const LOG_LIMIT = 100;
 /** How often to pull fresh entries while live mode is on. */
 const LIVE_REFRESH_MS = 2_000;
 
-const timeFmt = new Intl.DateTimeFormat("de-DE", {
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-});
-
-const dateTimeFmt = new Intl.DateTimeFormat("de-DE", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-});
+/** Time and date formatters for the active locale. Recreated per render of the
+ *  hook, which only changes when the locale does. */
+function formatters(locale: string) {
+  return {
+    time: new Intl.DateTimeFormat(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+    dateTime: new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }),
+  };
+}
 
 /** How to tint the response-code tag in the list. NXDOMAIN is normal, so it is
  *  "neutral", not an alarm; only a real failure (SERVFAIL) is "danger". A code
@@ -71,22 +77,22 @@ export interface LogsState {
   loading: boolean;
 }
 
-function toLogRow(row: QueryRow): LogRow {
+function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>): LogRow {
   const isBlocked = row.source === "blocked";
   return {
     at_ms: row.at_ms,
-    time: timeFmt.format(row.at_ms),
-    fullTime: dateTimeFmt.format(row.at_ms),
+    time: fmt.time.format(row.at_ms),
+    fullTime: fmt.dateTime.format(row.at_ms),
     client: row.client,
     name: displayName(row.name),
     type: recordTypeLabel(row.record_type),
-    typeDesc: recordTypeDescription(row.record_type),
+    typeDesc: recordTypeDescription(row.record_type, lang),
     source: row.source,
-    sourceText: sourceLabel(row.source),
+    sourceText: sourceLabel(row.source, lang),
     isBlocked,
     responseCode: row.response_code,
     rcode: responseCodeLabel(row.response_code),
-    rcodeDesc: responseCodeDescription(row.response_code),
+    rcodeDesc: responseCodeDescription(row.response_code, lang),
     rcodeTone: rcodeTone(row.response_code, isBlocked),
     answers: row.answers,
     addresses: row.addresses ?? [],
@@ -98,6 +104,7 @@ function toLogRow(row: QueryRow): LogRow {
  *  while `live` is on. Entries already on screen stay put during a refetch, so
  *  the list never flashes empty between polls or while a new search resolves. */
 export function useLogs(query: string, live: boolean): LogsState {
+  const { lang, t, locale } = useI18n();
   const [state, setState] = useState<LogsState>({
     rows: null,
     error: null,
@@ -107,17 +114,22 @@ export function useLogs(query: string, live: boolean): LogsState {
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    const fmt = formatters(locale);
 
     async function load() {
       try {
         const rows = await api.queries(LOG_LIMIT, query, controller.signal);
         if (!active) return;
-        setState({ rows: rows.map(toLogRow), error: null, loading: false });
+        setState({
+          rows: rows.map((row) => toLogRow(row, lang, fmt)),
+          error: null,
+          loading: false,
+        });
       } catch (error) {
         if (!active || controller.signal.aborted) return;
         setState((prev) => ({
           rows: prev.rows,
-          error: error instanceof Error ? error.message : "Unbekannter Fehler",
+          error: error instanceof Error ? error.message : t("common.unknownError"),
           loading: false,
         }));
       }
@@ -130,7 +142,9 @@ export function useLogs(query: string, live: boolean): LogsState {
       controller.abort();
       if (timer) clearInterval(timer);
     };
-  }, [query, live]);
+    // `lang`/`locale` are in the deps so the labels and the time formatting are
+    // rebuilt in the new language when the user switches.
+  }, [query, live, lang, locale, t]);
 
   return state;
 }

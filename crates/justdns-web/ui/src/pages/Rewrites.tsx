@@ -3,15 +3,17 @@ import { useEffect, useState, type FormEvent } from "react";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { ApiError, api, type Rewrite, type RewritesView } from "../lib/api";
+import { useI18n } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import styles from "./Rewrites.module.css";
 
-/** Turn a mutation's failure into a short German message for the banner. */
-function errorMessage(error: unknown): string {
+/** Pick the message key for a mutation's failure, shown in the banner. */
+function errorKey(error: unknown): MessageKey {
   if (error instanceof ApiError) {
-    if (error.status === 400) return "Name oder IP-Adresse ist ungültig.";
-    if (error.status === 404) return "Der Eintrag wurde nicht gefunden.";
+    if (error.status === 400) return "rewrites.badInput";
+    if (error.status === 404) return "common.notFound";
   }
-  return "Die Änderung ließ sich nicht speichern.";
+  return "common.saveFailed";
 }
 
 /** Split a free-text field into separate tokens: entries are separated by commas
@@ -26,6 +28,7 @@ function splitTokens(raw: string): string[] {
 }
 
 export function Rewrites() {
+  const { t } = useI18n();
   const [view, setView] = useState<RewritesView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -42,10 +45,10 @@ export function Rewrites() {
       .then(setView)
       .catch(() => {
         if (controller.signal.aborted) return;
-        setError("Die Rewrites konnten nicht geladen werden.");
+        setError(t("rewrites.loadFailed"));
       });
     return () => controller.abort();
-  }, []);
+  }, [t]);
 
   function mark(key: string, on: boolean) {
     setPending((prev) => {
@@ -63,7 +66,7 @@ export function Rewrites() {
       setView(await action());
       return true;
     } catch (err) {
-      setError(errorMessage(err));
+      setError(t(errorKey(err)));
       return false;
     } finally {
       mark(key, false);
@@ -106,8 +109,8 @@ export function Rewrites() {
   if (!view) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>DNS-Rewrites</h1>
-        <p className={styles.lead}>{error ?? "Lädt …"}</p>
+        <h1 className={styles.title}>{t("nav.rewrites")}</h1>
+        <p className={styles.lead}>{error ?? t("common.loading")}</p>
       </div>
     );
   }
@@ -119,16 +122,10 @@ export function Rewrites() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>
-            DNS-Rewrites
-            <InfoHint
-              label="DNS-Rewrites"
-              text="Lass JustDNS einen Namen selbst beantworten, statt ihn an den Upstream weiterzugeben — etwa um einen lokalen Dienst über einen festen Namen erreichbar zu machen (nas.home → 192.168.20.5). Mehrere IPs sind erlaubt; IPv4 beantwortet A-Abfragen, IPv6 beantwortet AAAA-Abfragen. Es greift nur der exakte Name; Subdomains trägst du einzeln ein."
-            />
+            {t("nav.rewrites")}
+            <InfoHint label={t("nav.rewrites")} text={t("rewrites.hint")} />
           </h1>
-          <p className={styles.lead}>
-            Feste Zuordnungen von Name zu IP-Adresse, die JustDNS lokal beantwortet. Ein Rewrite
-            gewinnt vor jeder Sperrliste und erreicht den Upstream nie.
-          </p>
+          <p className={styles.lead}>{t("rewrites.lead")}</p>
         </div>
       </div>
 
@@ -143,8 +140,8 @@ export function Rewrites() {
           className={styles.input}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder={editing ? "Name" : "Name(n), z. B. nas.home drucker.home"}
-          aria-label={editing ? "Name" : "Name oder mehrere Namen"}
+          placeholder={editing ? t("rewrites.namePlaceholderEdit") : t("rewrites.namePlaceholderAdd")}
+          aria-label={editing ? t("rewrites.nameAriaEdit") : t("rewrites.nameAriaAdd")}
           autoComplete="off"
           spellCheck={false}
         />
@@ -152,13 +149,13 @@ export function Rewrites() {
           className={styles.input}
           value={ips}
           onChange={(event) => setIps(event.target.value)}
-          placeholder="IP-Adresse(n), z. B. 192.168.20.5"
-          aria-label="IP-Adressen"
+          placeholder={t("rewrites.ipPlaceholder")}
+          aria-label={t("rewrites.ipAria")}
           autoComplete="off"
           spellCheck={false}
         />
         <button type="submit" className={styles.addButton} disabled={busy}>
-          {editing ? "Aktualisieren" : "Speichern"}
+          {editing ? t("rewrites.update") : t("rewrites.save")}
         </button>
         {editing ? (
           <button
@@ -167,18 +164,14 @@ export function Rewrites() {
             onClick={resetForm}
             disabled={busy}
           >
-            Abbrechen
+            {t("rewrites.cancel")}
           </button>
         ) : null}
       </form>
-      {!editing ? (
-        <p className={styles.hint}>
-          Mehrere Namen durch Leerzeichen oder Komma trennen, um sie auf dieselbe IP zu zeigen.
-        </p>
-      ) : null}
+      {!editing ? <p className={styles.hint}>{t("rewrites.multiHint")}</p> : null}
 
       {view.rewrites.length === 0 ? (
-        <p className={styles.empty}>Noch keine Rewrites angelegt.</p>
+        <p className={styles.empty}>{t("rewrites.empty")}</p>
       ) : (
         <ul className={styles.entries}>
           {view.rewrites.map((rewrite) => (
@@ -225,11 +218,14 @@ function RewriteRow({
   onToggle: (enabled: boolean) => void;
   onRemove: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <li className={styles.entry} data-editing={editing || undefined} data-off={!rewrite.enabled || undefined}>
       <div className={styles.entryToggle}>
         <Toggle
-          label={`${rewrite.name} ${rewrite.enabled ? "deaktivieren" : "aktivieren"}`}
+          label={t(rewrite.enabled ? "rewrites.disableAria" : "rewrites.enableAria", {
+            name: rewrite.name,
+          })}
           checked={rewrite.enabled}
           disabled={busy}
           onChange={onToggle}
@@ -252,18 +248,18 @@ function RewriteRow({
         <button
           type="button"
           className={styles.action}
-          aria-label={`${rewrite.name} bearbeiten`}
-          title="Bearbeiten"
+          aria-label={t("rewrites.editAria", { name: rewrite.name })}
+          title={t("rewrites.editTitle")}
           disabled={busy}
           onClick={onEdit}
         >
-          Bearbeiten
+          {t("rewrites.editTitle")}
         </button>
         <button
           type="button"
           className={styles.remove}
-          aria-label={`${rewrite.name} entfernen`}
-          title="Entfernen"
+          aria-label={t("rewrites.removeAria", { name: rewrite.name })}
+          title={t("rewrites.removeTitle")}
           disabled={busy}
           onClick={onRemove}
         >
