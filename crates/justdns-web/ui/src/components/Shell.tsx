@@ -1,8 +1,76 @@
-import { NavLink } from "react-router-dom";
-import type { ReactNode } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "../state/auth";
 import styles from "./Shell.module.css";
+
+/** The sub-pages the "Listen" area is split across, shown as a dropdown in the
+ *  header so no single page runs long. */
+const LIST_ITEMS = [
+  { to: "/listen/eigene", label: "Immer erlauben / blockieren" },
+  { to: "/listen/fertige", label: "Fertige Listen" },
+  { to: "/listen/url", label: "Eigene Listen per URL" },
+];
+
+/** The "Listen" header entry: a button that opens a menu of its sub-pages.
+ *  Closes on outside click, Escape, or navigating — the usual menu behaviour. */
+function ListsMenu() {
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const onLists = location.pathname.startsWith("/listen");
+
+  // Any route change closes the menu (e.g. after picking an item).
+  useEffect(() => setOpen(false), [location.pathname]);
+
+  // While open, a click outside or an Escape dismisses it.
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={styles.menu} ref={ref}>
+      <button
+        type="button"
+        className={onLists ? styles.active : styles.link}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        Listen
+        <span className={styles.caret} data-open={open || undefined} aria-hidden="true">
+          ›
+        </span>
+      </button>
+      {open ? (
+        <div className={styles.menuList} role="menu">
+          {LIST_ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              role="menuitem"
+              className={({ isActive }) => (isActive ? styles.menuItemActive : styles.menuItem)}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function Shell({ children }: { children: ReactNode }) {
   const { username, logout } = useAuth();
@@ -29,12 +97,7 @@ export function Shell({ children }: { children: ReactNode }) {
             >
               Protokoll
             </NavLink>
-            <NavLink
-              to="/listen"
-              className={({ isActive }) => (isActive ? styles.active : styles.link)}
-            >
-              Listen
-            </NavLink>
+            <ListsMenu />
             <NavLink
               to="/einstellungen"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}

@@ -109,6 +109,78 @@
   background: var(--signal);
 }
 
+/* "Listen" is a menu rather than a single link: a trigger button plus a small
+   popover of its sub-pages. */
+.menu {
+  position: relative;
+  display: flex;
+}
+
+.menu > button {
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.caret {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.caret[data-open] {
+  transform: rotate(90deg);
+}
+
+.menuList {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-start: 0;
+  min-inline-size: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 28px -14px rgb(0 0 0 / 0.55);
+  z-index: 20;
+}
+
+.menuItem,
+.menuItemActive {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.menuItem:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+}
+
+/* Active sub-page: the same inset spine the lists UI uses elsewhere. */
+.menuItemActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    transition: none;
+  }
+}
+
 .main {
   padding: var(--space-6) var(--space-4);
   max-inline-size: 960px;
