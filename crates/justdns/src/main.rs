@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use justdns_auth::{DEFAULT_SESSION_TTL, SessionStore, UserStore};
-use justdns_config::{ConfigStore, Settings, SpeedProfile};
+use justdns_config::{ConfigStore, CustomTransport, CustomUpstream, Settings, SpeedProfile};
 use justdns_dns::cache::{CacheTuning, DnsCache};
 use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
@@ -310,11 +310,58 @@ fn cache_tuning_for(profile: SpeedProfile) -> CacheTuning {
     }
 }
 
-/// The upstream pool to run for `settings`: the profile's resolvers, or the
-/// explicitly configured ones when `JUSTDNS_UPSTREAMS` pinned them (`overridden`
-/// / `pinned`). Either way the encryption toggle chooses DoT vs plaintext and
-/// the mode chooses how the resolvers are combined.
+/// Turn one hand-entered resolver into an [`Upstream`], or `None` when it does
+/// not make sense: an address that will not parse, or DoT/DoH without a
+/// certificate name (TLS cannot verify a nameless host). A half-finished entry
+/// the user is still typing is simply skipped rather than breaking the pool.
+fn map_custom(entry: &CustomUpstream) -> Option<Upstream> {
+    let address: IpAddr = entry.address.trim().parse().ok()?;
+    let with_port = |mut upstream: Upstream| {
+        if let Some(port) = entry.port {
+            upstream.port = port;
+        }
+        upstream
+    };
+    match entry.transport {
+        CustomTransport::Plain => Some(with_port(Upstream::plain(address))),
+        CustomTransport::Dot | CustomTransport::Doh => {
+            let name = entry.server_name.as_deref().map(str::trim).unwrap_or("");
+            if name.is_empty() {
+                return None;
+            }
+            Some(with_port(match entry.transport {
+                CustomTransport::Doh => Upstream::doh(address, name),
+                _ => Upstream::dot(address, name),
+            }))
+        }
+    }
+}
+
+/// The upstream pool to run for `settings`. The user's own resolvers win when
+/// that switch is on and at least one entry is valid; otherwise the explicitly
+/// pinned env resolvers (`JUSTDNS_UPSTREAMS`) or the profile's resolvers are
+/// used, with the encryption toggle choosing DoT vs plaintext. The mode always
+/// chooses how the resolvers are combined.
 fn upstreams_for(settings: &Settings, overridden: bool, pinned: &[Upstream]) -> UpstreamConfig {
+    let mode = to_dns_mode(settings.upstream_mode);
+
+    if settings.custom_upstreams_enabled {
+        let custom: Vec<Upstream> = settings
+            .custom_upstreams
+            .iter()
+            .filter_map(map_custom)
+            .collect();
+        // Only replace the defaults once there is something usable, so an empty
+        // or still-being-typed list never leaves the resolver with no upstream.
+        if !custom.is_empty() {
+            return UpstreamConfig {
+                mode,
+                upstreams: custom,
+                rules: Vec::new(),
+            };
+        }
+    }
+
     let base: Vec<Upstream> = if overridden {
         pinned.to_vec()
     } else {
@@ -325,7 +372,7 @@ fn upstreams_for(settings: &Settings, overridden: bool, pinned: &[Upstream]) -> 
         .map(|upstream| upstream.with_encryption(settings.encrypt_upstream))
         .collect();
     UpstreamConfig {
-        mode: to_dns_mode(settings.upstream_mode),
+        mode,
         upstreams,
         rules: Vec::new(),
     }

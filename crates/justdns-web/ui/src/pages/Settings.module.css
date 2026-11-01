@@ -278,6 +278,109 @@
   background: color-mix(in srgb, var(--warn) 16%, transparent);
 }
 
+/* Editor for the user's own resolver list: one row per resolver with an
+   address, a transport, and — for the encrypted transports — a certificate
+   name, plus a button to drop the row. */
+.custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.customEmpty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.customList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.customRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.customInput {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-inline-size: 0;
+}
+
+.customInput:first-child {
+  flex: 1 1 10ch;
+}
+
+.customInput:nth-child(3) {
+  flex: 2 1 14ch;
+}
+
+.customInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Keep the row's layout steady for a plaintext resolver, where the name field
+   does not apply, rather than letting the row reflow. */
+.customInput[data-hidden] {
+  visibility: hidden;
+}
+
+.customRow[data-invalid] .customInput:first-child {
+  border-color: var(--warn);
+}
+
+.customRemove {
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.customRemove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.customWarn {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 540px) {
+  .customRow {
+    flex-wrap: wrap;
+  }
+
+  .customInput:first-child,
+  .customInput:nth-child(3) {
+    flex: 1 1 100%;
+  }
+
+  .customInput[data-hidden] {
+    display: none;
+  }
+}
+
 .number {
   display: inline-flex;
   align-items: center;

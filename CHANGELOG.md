@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.16] - 2026-11-01
+
+- New: **your own resolvers.** Under Settings → Upstream resolvers, you can now
+  replace the profile's servers with a list of your own. Each entry takes an IP
+  address and a transport — plaintext, DNS over TLS or DNS over HTTPS — plus the
+  server name for the encrypted ones. The change takes effect immediately, with
+  no restart; until there is a valid entry, the profile servers stay active.
+
 ## [0.1.15] - 2026-11-01
 
 - New: **speed profiles.** Under Settings → Upstream resolvers, one switch picks

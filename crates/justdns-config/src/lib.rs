@@ -40,6 +40,36 @@ pub enum SpeedProfile {
     Speed,
 }
 
+/// How a user-defined upstream is reached. Mirrors the DNS core's transport
+/// kinds; kept here as its own type so the config crate stays a leaf.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomTransport {
+    /// Plain DNS over UDP/TCP.
+    #[default]
+    Plain,
+    /// DNS-over-TLS (needs a certificate name).
+    Dot,
+    /// DNS-over-HTTPS (needs a certificate name).
+    Doh,
+}
+
+/// A single resolver the user entered by hand. Stored as typed, so a
+/// half-finished entry survives editing; the binary validates each one when it
+/// builds the live pool and simply skips any that does not parse.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomUpstream {
+    /// The resolver's IP address, as typed.
+    pub address: String,
+    /// An explicit port, or `None` for the transport's default (53/853/443).
+    pub port: Option<u16>,
+    /// How to reach it.
+    pub transport: CustomTransport,
+    /// The TLS certificate name for DoT/DoH; ignored for plain.
+    pub server_name: Option<String>,
+}
+
 /// How the resolver picks between the configured upstreams. Mirrors the DNS
 /// core's `UpstreamMode`; kept here as its own type so the config crate stays a
 /// leaf that the core and the web layer can both depend on.
@@ -76,6 +106,12 @@ pub struct Settings {
     /// The speed/privacy profile: which resolvers are used and how eagerly
     /// answers are cached. Wired live — a change takes effect without a restart.
     pub speed_profile: SpeedProfile,
+    /// Use the user's own resolver list instead of the profile's resolvers.
+    /// When on (and at least one entry is valid), `custom_upstreams` replaces the
+    /// profile servers; the profile then only tunes the cache. Wired live.
+    pub custom_upstreams_enabled: bool,
+    /// The user's own resolvers, used when `custom_upstreams_enabled` is on.
+    pub custom_upstreams: Vec<CustomUpstream>,
     /// Answer AAAA queries instead of returning empty NODATA. Wired live.
     pub ipv6: bool,
     /// Record handled queries for the log view.
@@ -93,6 +129,8 @@ impl Default for Settings {
             upstream_mode: UpstreamMode::Racing,
             encrypt_upstream: true,
             speed_profile: SpeedProfile::Balanced,
+            custom_upstreams_enabled: false,
+            custom_upstreams: Vec::new(),
             ipv6: false,
             query_log: true,
             log_retention_days: 7,
@@ -394,6 +432,45 @@ mod tests {
             serde_json::from_str::<SpeedProfile>("\"privacy\"").unwrap(),
             SpeedProfile::Privacy
         );
+    }
+
+    #[test]
+    fn custom_upstreams_round_trip_through_json() {
+        let settings = Settings {
+            custom_upstreams_enabled: true,
+            custom_upstreams: vec![
+                CustomUpstream {
+                    address: "9.9.9.9".to_owned(),
+                    port: None,
+                    transport: CustomTransport::Dot,
+                    server_name: Some("dns.quad9.net".to_owned()),
+                },
+                CustomUpstream {
+                    address: "192.168.1.1".to_owned(),
+                    port: Some(5353),
+                    transport: CustomTransport::Plain,
+                    server_name: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        // camelCase field name and lowercase transport on the wire.
+        assert!(json.contains("\"customUpstreamsEnabled\":true"));
+        assert!(json.contains("\"transport\":\"dot\""));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn older_config_without_custom_upstreams_still_loads() {
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true,"speedProfile":"speed"}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let settings = store.get();
+        assert!(!settings.custom_upstreams_enabled, "defaults off");
+        assert!(settings.custom_upstreams.is_empty());
+        assert_eq!(settings.speed_profile, SpeedProfile::Speed);
     }
 
     #[test]

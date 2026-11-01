@@ -23,6 +23,18 @@ export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 /// eagerly answers are cached. Matches the Rust `SpeedProfile`.
 export type SpeedProfile = "privacy" | "balanced" | "speed";
 
+/// How a user-defined resolver is reached. Matches the Rust `CustomTransport`.
+export type CustomTransport = "plain" | "dot" | "doh";
+
+/// A resolver the user entered by hand. Matches the Rust `CustomUpstream`;
+/// stored as typed so a half-finished entry survives editing.
+export interface CustomUpstream {
+  address: string;
+  port: number | null;
+  transport: CustomTransport;
+  serverName: string | null;
+}
+
 /// The settings the server persists. Field names match the Rust `Settings`
 /// type (camelCase on the wire), so this is sent and received as-is.
 export interface ServerSettings {
@@ -32,6 +44,8 @@ export interface ServerSettings {
   upstreamMode: UpstreamMode;
   encryptUpstream: boolean;
   speedProfile: SpeedProfile;
+  customUpstreamsEnabled: boolean;
+  customUpstreams: CustomUpstream[];
   ipv6: boolean;
   queryLog: boolean;
   logRetentionDays: number;
