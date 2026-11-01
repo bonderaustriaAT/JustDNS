@@ -20,6 +20,8 @@ pub enum QuerySource {
     Upstream,
     /// Answered locally without a lookup (for example a suppressed AAAA).
     Local,
+    /// Answered from a user-defined local rewrite (name → fixed IPs).
+    Rewrite,
     /// Refused by the blocking engine without a lookup.
     Blocked,
 }
@@ -31,6 +33,7 @@ impl QuerySource {
             QuerySource::Cache => "cache",
             QuerySource::Upstream => "upstream",
             QuerySource::Local => "local",
+            QuerySource::Rewrite => "rewrite",
             QuerySource::Blocked => "blocked",
         }
     }
@@ -41,6 +44,7 @@ impl QuerySource {
             "cache" => Some(QuerySource::Cache),
             "upstream" => Some(QuerySource::Upstream),
             "local" => Some(QuerySource::Local),
+            "rewrite" => Some(QuerySource::Rewrite),
             "blocked" => Some(QuerySource::Blocked),
             _ => None,
         }
@@ -66,4 +70,8 @@ pub struct QueryEvent {
     pub duration_ms: u32,
     /// Number of answer records returned.
     pub answers: u16,
+    /// The IPv4/IPv6 addresses the query resolved to, in answer order. Empty for
+    /// a block, a NODATA answer, or a non-address record type.
+    #[serde(default)]
+    pub addresses: Vec<IpAddr>,
 }

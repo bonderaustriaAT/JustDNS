@@ -20,6 +20,9 @@
 
   --danger: #c2473f;
   --warn: #9a6a12;
+  /* A calm blue, set apart from the green "signal" family, to mark a local
+     rewrite in the log. */
+  --rewrite: #2f6fb0;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "Hanken Grotesk", system-ui, sans-serif;
@@ -60,6 +63,7 @@
     --focus: color-mix(in srgb, #37a97e 60%, transparent);
     --danger: #e0695f;
     --warn: #e6a532;
+    --rewrite: #6bb0ea;
   }
 }
 
@@ -77,4 +81,5 @@
   --focus: color-mix(in srgb, #37a97e 60%, transparent);
   --danger: #e0695f;
   --warn: #e6a532;
+  --rewrite: #6bb0ea;
 }

@@ -183,12 +183,35 @@
   white-space: nowrap;
 }
 
+/* The domain cell stacks the name over the IPs it resolved to. min-inline-size
+   keeps the ellipsis on both lines inside the grid column. */
+.domainCell {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  gap: 1px;
+}
+
 .domain {
   font-family: var(--font-mono);
   font-size: var(--step--1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The addresses the query resolved to, a quiet second line under the name. */
+.resolved {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resolvedArrow {
+  color: var(--signal);
 }
 
 .meta {
@@ -223,6 +246,14 @@
 .source[data-source="local"] {
   color: var(--warn);
   background: color-mix(in srgb, var(--amber) 18%, transparent);
+}
+
+/* A rewrite is user intent, not a quirk of the lookup — mark it in its own blue
+   so it stands out from the amber "Lokal" (a suppressed AAAA) at a glance. */
+.source[data-source="rewrite"] {
+  color: var(--rewrite);
+  background: color-mix(in srgb, var(--rewrite) 16%, transparent);
+  font-weight: 600;
 }
 
 /* Blocked is the signal worth seeing: a solid red pill, not a quiet tint. */
@@ -463,7 +494,7 @@
     padding-block: var(--space-3);
   }
 
-  .domain {
+  .domainCell {
     grid-area: domain;
   }
 

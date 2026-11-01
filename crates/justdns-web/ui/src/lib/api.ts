@@ -33,7 +33,7 @@ export interface ServerSettings {
   cacheServeStale: boolean;
 }
 
-export type QuerySource = "cache" | "upstream" | "local" | "blocked";
+export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
 
 export interface QueryRow {
   at_ms: number;
@@ -44,6 +44,9 @@ export interface QueryRow {
   source: QuerySource;
   duration_ms: number;
   answers: number;
+  /** The IPs the query resolved to, in answer order. Empty for a block, a
+   *  NODATA answer, or a non-address record type. */
+  addresses: string[];
 }
 
 /** Which list a name is on and the rule that matched, or null if on no list. */

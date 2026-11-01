@@ -34,6 +34,7 @@ const SOURCE_LABELS: Record<QuerySource, string> = {
   cache: "Cache",
   upstream: "Upstream",
   local: "Lokal",
+  rewrite: "Rewrite",
   blocked: "Geblockt",
 };
 

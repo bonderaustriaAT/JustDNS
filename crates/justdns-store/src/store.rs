@@ -149,6 +149,7 @@ mod tests {
             source: crate::QuerySource::Upstream,
             duration_ms: 3,
             answers: 1,
+            addresses: Vec::new(),
         }
     }
 
