@@ -48,3 +48,11 @@ release is v0.1.17 (setup wizard, protection strength, instance name).
 - [ ] **Two-server operation.** Run a second JustDNS that stays in sync — lists,
   configuration, rewrites and (optionally) statistics — with automatic failover,
   so DNS keeps working while one node is down or being updated.
+
+## Phase 6 — Apps
+
+- [ ] **Installable web app (PWA) first.** A mobile-friendly, installable version
+  of the dashboard — add it to your phone's home screen and manage JustDNS on the
+  go, before any native app exists.
+- [ ] **Native Android & iOS apps.** Dedicated apps on top of that, for a
+  first-class mobile experience and tighter operating-system integration.

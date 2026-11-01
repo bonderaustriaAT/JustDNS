@@ -54,3 +54,11 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   synchron hält — Listen, Konfiguration, Rewrites und (optional) Statistiken —
   mit automatischem Failover, damit DNS weiterläuft, während ein Knoten aus ist
   oder aktualisiert wird.
+
+## Phase 6 — Apps
+
+- [ ] **Zuerst eine installierbare Web-App (PWA).** Eine mobil-optimierte,
+  installierbare Version des Dashboards — zum Home-Bildschirm des Handys
+  hinzufügen und JustDNS unterwegs verwalten, bevor es eine native App gibt.
+- [ ] **Native Android- & iOS-Apps.** Darauf aufbauend eigene Apps für ein
+  erstklassiges mobiles Erlebnis und engere Betriebssystem-Integration.
