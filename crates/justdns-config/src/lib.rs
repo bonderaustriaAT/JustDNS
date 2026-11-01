@@ -105,6 +105,7 @@ struct Inner {
     ipv6: Arc<AtomicBool>,
     block_ads_trackers: Arc<AtomicBool>,
     block_malware: Arc<AtomicBool>,
+    safe_search: Arc<AtomicBool>,
 }
 
 /// A cheap, cloneable handle to the persistent configuration.
@@ -143,6 +144,7 @@ impl ConfigStore {
                 ipv6: Arc::new(AtomicBool::new(settings.ipv6)),
                 block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
                 block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
+                safe_search: Arc::new(AtomicBool::new(settings.safe_search)),
                 settings: RwLock::new(settings),
             }),
         })
@@ -169,6 +171,9 @@ impl ConfigStore {
         self.inner
             .block_malware
             .store(settings.block_malware, Ordering::Relaxed);
+        self.inner
+            .safe_search
+            .store(settings.safe_search, Ordering::Relaxed);
         *self.inner.settings.write().expect("config lock poisoned") = settings.clone();
         write_atomic(&self.inner.path, &settings)
     }
@@ -186,6 +191,11 @@ impl ConfigStore {
     /// The shared flag gating the malware/phishing blocker.
     pub fn block_malware_flag(&self) -> Arc<AtomicBool> {
         self.inner.block_malware.clone()
+    }
+
+    /// The shared flag gating safe search (the DNS pipeline reads it per query).
+    pub fn safe_search_flag(&self) -> Arc<AtomicBool> {
+        self.inner.safe_search.clone()
     }
 }
 
@@ -272,19 +282,26 @@ mod tests {
         let store = ConfigStore::load(&path, Settings::default()).unwrap();
         let ads = store.block_ads_trackers_flag();
         let malware = store.block_malware_flag();
-        // Both block categories default to on.
+        let safe_search = store.safe_search_flag();
+        // Both block categories default to on; safe search defaults off.
         assert!(ads.load(Ordering::Relaxed));
         assert!(malware.load(Ordering::Relaxed));
+        assert!(!safe_search.load(Ordering::Relaxed));
 
         let mut next = store.get();
         next.block_ads_trackers = false;
         next.block_malware = false;
+        next.safe_search = true;
         store.set(next).unwrap();
 
         assert!(!ads.load(Ordering::Relaxed), "ads flag follows the setting");
         assert!(
             !malware.load(Ordering::Relaxed),
             "malware flag follows the setting"
+        );
+        assert!(
+            safe_search.load(Ordering::Relaxed),
+            "safe search flag follows the setting"
         );
     }
 

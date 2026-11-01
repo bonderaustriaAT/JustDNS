@@ -8,5 +8,6 @@ pub mod client;
 pub mod observer;
 pub mod pipeline;
 pub mod router;
+pub mod safesearch;
 pub mod server;
 pub mod upstream;
