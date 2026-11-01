@@ -4,6 +4,24 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.18] - 2026-11-01
+
+- Neu: **Notizen zu deinen Allow- und Block-Einträgen.** Füge jeder Domain, die
+  du erlaubst oder sperrst, eine optionale Notiz hinzu — eine Erinnerung, warum
+  sie dort steht, etwa „mein eigenes NAS“ oder „Smart-TV-Telemetrie“. Die Notiz
+  erscheint unter dem Namen und lässt sich jederzeit ändern oder entfernen; sie
+  ist nie Pflicht und ändert nichts an der Auflösung.
+- Deine eigenen Allow- und Block-Einträge heben sich jetzt deutlicher vom Rest
+  der Karte ab, sodass ein von Hand hinzugefügter Name leicht zu erkennen ist.
+- Rewrites: Beim Löschen eines Rewrites fragt JustDNS jetzt zuerst nach, damit
+  nichts aus Versehen verschwindet.
+- Rewrites: Bearbeite einen Rewrite direkt in seiner Zeile, statt dass sich das
+  Formular oben wieder füllt.
+- Rewrites: Die Ziel-Adressen stehen jetzt sauber untereinander in Spalten, so
+  ist auch eine längere Liste gut zu lesen.
+- In der Übersicht pulsiert der Punkt neben „Schutz aktiv“ sanft, sodass du auf
+  einen Blick siehst, dass er aktiv ist.
+
 ## [0.1.17] - 2026-11-01
 
 - Neu: **Einrichtungs-Assistent.** Beim allerersten Start führt dich JustDNS

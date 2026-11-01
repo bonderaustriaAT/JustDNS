@@ -159,8 +159,14 @@ fn router(state: AppState) -> Router {
         .route("/api/settings/block-level", put(set_block_level))
         .route("/api/classify", get(classify))
         .route("/api/lists", get(get_lists))
-        .route("/api/lists/allow", post(add_allow).delete(remove_allow))
-        .route("/api/lists/block", post(add_block).delete(remove_block))
+        .route(
+            "/api/lists/allow",
+            post(add_allow).delete(remove_allow).put(set_allow_note),
+        )
+        .route(
+            "/api/lists/block",
+            post(add_block).delete(remove_block).put(set_block_note),
+        )
         .route("/api/lists/subscriptions", post(add_subscription))
         .route(
             "/api/lists/subscriptions/{id}",
@@ -356,10 +362,14 @@ async fn get_lists(State(lists): State<ListStore>) -> Json<ListsView> {
     Json(lists.view())
 }
 
-/// A single domain, as the allow/block editors and the log buttons send it.
+/// A single domain, as the allow/block editors and the log buttons send it. The
+/// optional note rides along on an add (POST) or a note edit (PUT); the log
+/// buttons and the delete path simply omit it.
 #[derive(Deserialize)]
 struct DomainBody {
     domain: String,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// Mutations return the fresh view so the UI can replace its state in one step.
@@ -367,7 +377,9 @@ async fn add_allow(
     State(lists): State<ListStore>,
     Json(body): Json<DomainBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
-    lists.add_allow(&body.domain).map_err(list_error)?;
+    lists
+        .add_allow(&body.domain, body.note.as_deref())
+        .map_err(list_error)?;
     Ok(Json(lists.view()))
 }
 
@@ -379,11 +391,24 @@ async fn remove_allow(
     Ok(Json(lists.view()))
 }
 
+/// Set or clear the note on an existing allow entry.
+async fn set_allow_note(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists
+        .set_allow_note(&body.domain, body.note.as_deref())
+        .map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
 async fn add_block(
     State(lists): State<ListStore>,
     Json(body): Json<DomainBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
-    lists.add_block(&body.domain).map_err(list_error)?;
+    lists
+        .add_block(&body.domain, body.note.as_deref())
+        .map_err(list_error)?;
     Ok(Json(lists.view()))
 }
 
@@ -392,6 +417,17 @@ async fn remove_block(
     Json(body): Json<DomainBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
     lists.remove_block(&body.domain).map_err(list_error)?;
+    Ok(Json(lists.view()))
+}
+
+/// Set or clear the note on an existing block entry.
+async fn set_block_note(
+    State(lists): State<ListStore>,
+    Json(body): Json<DomainBody>,
+) -> Result<Json<ListsView>, (StatusCode, String)> {
+    lists
+        .set_block_note(&body.domain, body.note.as_deref())
+        .map_err(list_error)?;
     Ok(Json(lists.view()))
 }
 
@@ -1177,6 +1213,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn a_note_rides_along_on_add_and_can_be_edited() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        // Add a block entry carrying a note.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/lists/block")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"domain":"tracker.test","note":"smart-TV phone-home"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("smart-TV phone-home"), "note echoed: {body}");
+
+        // Edit the note in place via PUT on the same path.
+        let res = app
+            .oneshot(
+                Request::put("/api/lists/block")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"domain":"tracker.test","note":"vendor telemetry"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(
+            body.contains("vendor telemetry") && !body.contains("smart-TV"),
+            "note replaced: {body}"
+        );
     }
 
     #[tokio::test]

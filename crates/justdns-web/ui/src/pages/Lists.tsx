@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import {
   ApiError,
   api,
+  type ListEntry,
   type ListKind,
   type ListsView,
   type Preset,
@@ -60,9 +61,66 @@ function RiskMeter({ level }: { level: number }) {
   );
 }
 
+/** Longest note we keep, matching the server's cap. */
+const NOTE_MAX = 200;
+
+/** The inline note form a row turns into when its note is edited, so editing
+ *  happens in place rather than in a separate panel. Seeded from the current
+ *  note; an empty value clears it. */
+function NoteEditor({
+  entry,
+  onSave,
+  onCancel,
+  busy,
+}: {
+  entry: ListEntry;
+  onSave: (note: string) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const { t } = useI18n();
+  const [note, setNote] = useState(entry.note ?? "");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    onSave(note.trim());
+  }
+
+  return (
+    <form className={styles.noteEdit} onSubmit={submit}>
+      <span className={styles.entryName}>{entry.domain}</span>
+      <input
+        ref={inputRef}
+        className={styles.noteInput}
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        onKeyDown={(event) => event.key === "Escape" && onCancel()}
+        placeholder={t("lists.notePlaceholder")}
+        aria-label={t("lists.editNoteAria", { name: entry.domain })}
+        maxLength={NOTE_MAX}
+        autoComplete="off"
+      />
+      <button type="submit" className={styles.noteSave} disabled={busy}>
+        {t("lists.noteSave")}
+      </button>
+      <button type="button" className={styles.noteCancel} onClick={onCancel} disabled={busy}>
+        {t("lists.noteCancel")}
+      </button>
+    </form>
+  );
+}
+
 /** An editor for one manual list: an add field over a list of removable rows.
  *  Deliberately not a free-text box — each entry is its own row with its own
- *  remove control, so the list stays legible and a single typo can't wipe it. */
+ *  remove control, so the list stays legible and a single typo can't wipe it.
+ *  Each entry can carry an optional note, shown under the name and edited in
+ *  place; the add field has its own optional note input beside the domain. */
 function EntryEditor({
   title,
   hint,
@@ -70,27 +128,34 @@ function EntryEditor({
   placeholder,
   entries,
   count,
+  busy,
   onAdd,
   onRemove,
+  onSetNote,
 }: {
   title: string;
   hint: string;
   accent: "allow" | "block";
   placeholder: string;
-  entries: string[];
+  entries: ListEntry[];
   count: number;
-  onAdd: (domain: string) => void;
+  busy: (domain: string) => boolean;
+  onAdd: (domain: string, note: string | undefined) => void;
   onRemove: (domain: string) => void;
+  onSetNote: (domain: string, note: string) => void;
 }) {
   const { t, locale } = useI18n();
   const [draft, setDraft] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const domain = draft.trim();
     if (!domain) return;
-    onAdd(domain);
+    onAdd(domain, noteDraft.trim() || undefined);
     setDraft("");
+    setNoteDraft("");
   }
 
   return (
@@ -118,6 +183,15 @@ function EntryEditor({
           autoComplete="off"
           spellCheck={false}
         />
+        <input
+          className={styles.noteField}
+          value={noteDraft}
+          onChange={(event) => setNoteDraft(event.target.value)}
+          placeholder={t("lists.notePlaceholder")}
+          aria-label={t("lists.noteFieldAria", { title })}
+          maxLength={NOTE_MAX}
+          autoComplete="off"
+        />
         <button type="submit" className={styles.addButton}>
           {t("common.add")}
         </button>
@@ -127,20 +201,49 @@ function EntryEditor({
         <p className={styles.empty}>{t("lists.noOwnEntries")}</p>
       ) : (
         <ul className={styles.entries}>
-          {entries.map((domain) => (
-            <li key={domain} className={styles.entry}>
-              <span className={styles.entryName}>{domain}</span>
-              <button
-                type="button"
-                className={styles.remove}
-                aria-label={t("lists.removeAria", { name: domain })}
-                title={t("common.remove")}
-                onClick={() => onRemove(domain)}
-              >
-                ✕
-              </button>
-            </li>
-          ))}
+          {entries.map((entry) =>
+            editing === entry.domain ? (
+              <li key={entry.domain} className={styles.entry}>
+                <NoteEditor
+                  entry={entry}
+                  busy={busy(entry.domain)}
+                  onCancel={() => setEditing(null)}
+                  onSave={(note) => {
+                    onSetNote(entry.domain, note);
+                    setEditing(null);
+                  }}
+                />
+              </li>
+            ) : (
+              <li key={entry.domain} className={styles.entry}>
+                <div className={styles.entryMain}>
+                  <span className={styles.entryName}>{entry.domain}</span>
+                  {entry.note ? <span className={styles.entryNote}>{entry.note}</span> : null}
+                </div>
+                <div className={styles.entryActions}>
+                  <button
+                    type="button"
+                    className={styles.noteButton}
+                    aria-label={t(entry.note ? "lists.editNoteAria" : "lists.addNoteAria", {
+                      name: entry.domain,
+                    })}
+                    onClick={() => setEditing(entry.domain)}
+                  >
+                    {t("lists.noteLabel")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.remove}
+                    aria-label={t("lists.removeAria", { name: entry.domain })}
+                    title={t("common.remove")}
+                    onClick={() => onRemove(entry.domain)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </li>
+            ),
+          )}
         </ul>
       )}
     </section>
@@ -338,8 +441,10 @@ export function Lists({ section }: { section: ListsSection }) {
           placeholder={t("lists.allowPlaceholder")}
           entries={view.allow}
           count={view.allowActive}
-          onAdd={(domain) => run(`allow:${domain}`, () => api.addAllow(domain))}
+          busy={(domain) => pending.has(`allow:${domain}`)}
+          onAdd={(domain, note) => run(`allow:${domain}`, () => api.addAllow(domain, note))}
           onRemove={(domain) => run(`allow:${domain}`, () => api.removeAllow(domain))}
+          onSetNote={(domain, note) => run(`allow:${domain}`, () => api.setAllowNote(domain, note))}
         />
         <EntryEditor
           title={t("lists.blockTitle")}
@@ -348,8 +453,10 @@ export function Lists({ section }: { section: ListsSection }) {
           placeholder={t("lists.blockPlaceholder")}
           entries={view.block}
           count={view.blockActive}
-          onAdd={(domain) => run(`block:${domain}`, () => api.addBlock(domain))}
+          busy={(domain) => pending.has(`block:${domain}`)}
+          onAdd={(domain, note) => run(`block:${domain}`, () => api.addBlock(domain, note))}
           onRemove={(domain) => run(`block:${domain}`, () => api.removeBlock(domain))}
+          onSetNote={(domain, note) => run(`block:${domain}`, () => api.setBlockNote(domain, note))}
         />
       </div>
       ) : null}

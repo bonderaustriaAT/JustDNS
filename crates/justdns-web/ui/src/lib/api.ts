@@ -133,10 +133,18 @@ export interface RewritesView {
   rewrites: Rewrite[];
 }
 
+/** One of the user's own allow/block entries: a domain, with an optional
+ *  free-text note explaining why it is on the list. The note is metadata only —
+ *  it never changes what is resolved. */
+export interface ListEntry {
+  domain: string;
+  note?: string;
+}
+
 /** Everything the "Listen" view shows in one payload. */
 export interface ListsView {
-  allow: string[];
-  block: string[];
+  allow: ListEntry[];
+  block: ListEntry[];
   subscriptions: Subscription[];
   presets: Preset[];
   allowActive: number;
@@ -263,10 +271,20 @@ export const api = {
     return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);
   },
   lists: (signal?: AbortSignal) => getJson<ListsView>("/api/lists", signal),
-  addAllow: (domain: string) => sendJson<ListsView>("POST", "/api/lists/allow", { domain }),
+  /** Add an allow entry, optionally with a note. Re-adding an existing domain
+   *  keeps it and only sets the note when one is given. */
+  addAllow: (domain: string, note?: string) =>
+    sendJson<ListsView>("POST", "/api/lists/allow", { domain, note }),
   removeAllow: (domain: string) => sendJson<ListsView>("DELETE", "/api/lists/allow", { domain }),
-  addBlock: (domain: string) => sendJson<ListsView>("POST", "/api/lists/block", { domain }),
+  /** Set (or, with an empty string, clear) the note on an existing allow entry. */
+  setAllowNote: (domain: string, note: string) =>
+    sendJson<ListsView>("PUT", "/api/lists/allow", { domain, note }),
+  addBlock: (domain: string, note?: string) =>
+    sendJson<ListsView>("POST", "/api/lists/block", { domain, note }),
   removeBlock: (domain: string) => sendJson<ListsView>("DELETE", "/api/lists/block", { domain }),
+  /** Set (or, with an empty string, clear) the note on an existing block entry. */
+  setBlockNote: (domain: string, note: string) =>
+    sendJson<ListsView>("PUT", "/api/lists/block", { domain, note }),
   addSubscription: (name: string, url: string, kind: ListKind) =>
     sendJson<ListsView>("POST", "/api/lists/subscriptions", { name, url, kind }),
   setSubscriptionEnabled: (id: string, enabled: boolean) =>
