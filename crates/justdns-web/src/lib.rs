@@ -24,6 +24,7 @@ use justdns_auth::{SessionStore, UserStore};
 use justdns_config::{ConfigStore, Settings};
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome};
+use justdns_rewrite::{RewriteError, RewriteStore, RewritesView};
 use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ struct AppState {
     config: ConfigStore,
     blocker: Arc<Blocker>,
     lists: ListStore,
+    rewrites: RewriteStore,
     users: UserStore,
     sessions: SessionStore,
 }
@@ -84,6 +86,12 @@ impl FromRef<AppState> for ListStore {
     }
 }
 
+impl FromRef<AppState> for RewriteStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.rewrites.clone()
+    }
+}
+
 impl FromRef<AppState> for UserStore {
     fn from_ref(state: &AppState) -> Self {
         state.users.clone()
@@ -97,12 +105,17 @@ impl FromRef<AppState> for SessionStore {
 }
 
 /// Bind `addr` and serve the API and embedded UI until the listener fails.
+///
+/// This is the web layer's composition root: it takes each shared store the
+/// handlers need as its own argument, so the list is long by nature.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve(
     addr: SocketAddr,
     store: Store,
     config: ConfigStore,
     blocker: Arc<Blocker>,
     lists: ListStore,
+    rewrites: RewriteStore,
     users: UserStore,
     sessions: SessionStore,
 ) -> std::io::Result<()> {
@@ -115,6 +128,7 @@ pub async fn serve(
             config,
             blocker,
             lists,
+            rewrites,
             users,
             sessions,
         }),
@@ -141,6 +155,10 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/lists/presets/{key}", put(set_preset))
         .route("/api/lists/refresh", post(refresh_lists))
+        .route(
+            "/api/rewrites",
+            get(get_rewrites).post(set_rewrite).delete(remove_rewrite),
+        )
         .layer(from_fn_with_state(state.clone(), require_auth));
 
     let public = Router::new()
@@ -439,6 +457,52 @@ async fn refresh_lists(
     }))
 }
 
+/// Translate a rewrite-store error into an HTTP status and message.
+fn rewrite_error(error: RewriteError) -> (StatusCode, String) {
+    let status = match &error {
+        RewriteError::InvalidName(_) | RewriteError::InvalidIp(_) | RewriteError::NoIps => {
+            StatusCode::BAD_REQUEST
+        }
+        RewriteError::Unknown(_) => StatusCode::NOT_FOUND,
+        RewriteError::Io { .. } | RewriteError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, error.to_string())
+}
+
+/// Every local DNS rewrite the dashboard shows.
+async fn get_rewrites(State(rewrites): State<RewriteStore>) -> Json<RewritesView> {
+    Json(rewrites.view())
+}
+
+/// Add a rewrite or replace the addresses of an existing one.
+#[derive(Deserialize)]
+struct RewriteBody {
+    name: String,
+    ips: Vec<String>,
+}
+
+async fn set_rewrite(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<RewriteBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites.set(&body.name, &body.ips).map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Remove a rewrite by name.
+#[derive(Deserialize)]
+struct RewriteNameBody {
+    name: String,
+}
+
+async fn remove_rewrite(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<RewriteNameBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites.remove(&body.name).map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
 /// Return the current settings so the dashboard can show them.
 async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
     Json(config.get())
@@ -605,12 +669,26 @@ mod tests {
         ListStore::load(base.join("lists.json"), base.join("cache"), blocker).unwrap()
     }
 
+    /// A throwaway rewrite store backed by a unique temp file, with its own
+    /// empty live table.
+    fn test_rewrites() -> RewriteStore {
+        use justdns_rewrite::Rewriter;
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "justdns-web-rewrites-{}-{}.json",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        RewriteStore::load(path, Arc::new(Rewriter::new())).unwrap()
+    }
+
     fn test_state(store: Store) -> AppState {
         let blocker = test_blocker();
         AppState {
             store,
             config: test_config(),
             lists: test_lists(blocker.clone()),
+            rewrites: test_rewrites(),
             blocker,
             users: test_users(),
             sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
@@ -882,6 +960,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn rewrites_round_trip_through_the_api() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        // Empty to start with.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/rewrites")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"rewrites\":[]"), "{body}");
+
+        // Add one; it comes back in the view.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"name":"NAS.home.","ips":["192.168.20.5"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"nas.home\""), "normalised + echoed: {body}");
+        assert!(body.contains("192.168.20.5"), "{body}");
+
+        // A bad IP is refused.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"name":"x.home","ips":["nope"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Delete it; the view is empty again.
+        let res = app
+            .oneshot(
+                Request::delete("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"name":"nas.home"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"rewrites\":[]"), "{body}");
     }
 
     /// The `Set-Cookie` value a response sends for the session cookie, if any.

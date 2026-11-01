@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 justdns-filter = { path = "../justdns-filter" }
+justdns-rewrite = { path = "../justdns-rewrite" }
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 hickory-proto = "0.25.2"
 hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }

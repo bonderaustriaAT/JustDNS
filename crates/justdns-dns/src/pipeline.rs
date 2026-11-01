@@ -13,8 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
-use hickory_proto::rr::RecordType;
+use hickory_proto::rr::rdata::{A, AAAA};
+use hickory_proto::rr::{RData, Record, RecordType};
 use justdns_filter::Blocker;
+use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheKey, CachedEntry, CachedResponse, DnsCache};
 use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
@@ -24,6 +26,9 @@ use crate::router::{Resolve, Router};
 const DEFAULT_NEGATIVE_TTL: u64 = 60;
 /// Upper bound on any negative-cache TTL (seconds).
 const MAX_NEGATIVE_TTL: u64 = 3600;
+/// TTL on a locally rewritten answer. Short, since a LAN mapping can change and
+/// the lookup is cheap enough to repeat; long enough to spare a flood of repeats.
+const REWRITE_TTL: u32 = 300;
 
 /// Options the pipeline reads while handling a query. `ipv6_enabled` is a
 /// shared flag rather than a plain bool so the config store can flip it at
@@ -56,6 +61,7 @@ pub struct Pipeline<R> {
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
     blocker: Option<Arc<Blocker>>,
+    rewriter: Option<Arc<Rewriter>>,
 }
 
 impl<R: Resolve + Sync> Pipeline<R> {
@@ -66,6 +72,7 @@ impl<R: Resolve + Sync> Pipeline<R> {
             options,
             observer: None,
             blocker: None,
+            rewriter: None,
         }
     }
 
@@ -82,6 +89,14 @@ impl<R: Resolve + Sync> Pipeline<R> {
     #[must_use]
     pub fn with_blocker(mut self, blocker: Arc<Blocker>) -> Self {
         self.blocker = Some(blocker);
+        self
+    }
+
+    /// Answer names with a local rewrite from `rewriter` instead of forwarding
+    /// them. Without one, nothing is rewritten.
+    #[must_use]
+    pub fn with_rewriter(mut self, rewriter: Arc<Rewriter>) -> Self {
+        self.rewriter = Some(rewriter);
         self
     }
 
@@ -122,6 +137,16 @@ impl<R: Resolve + Sync> Pipeline<R> {
 
     /// Fill `response` with the answer to `query` and report where it came from.
     async fn answer(&self, query: &Query, response: &mut Message) -> AnswerSource {
+        // A local rewrite is the strongest, most explicit intent the user can
+        // express, so it is answered first — before the block check and any
+        // lookup — and owns the name for every record type.
+        if let Some(rewriter) = &self.rewriter {
+            if let Some(ips) = rewriter.lookup(&query.name().to_string()) {
+                self.answer_rewrite(query, response, &ips);
+                return AnswerSource::Local;
+            }
+        }
+
         // Blocked names are refused with NXDOMAIN before any lookup, for every
         // record type, so a blocked host resolves to nothing on IPv4 and IPv6.
         if let Some(blocker) = &self.blocker {
@@ -183,6 +208,40 @@ impl<R: Resolve + Sync> Pipeline<R> {
         }
 
         AnswerSource::Upstream
+    }
+
+    /// Answer `query` from a rewrite's `ips`. An A query gets the IPv4 addresses
+    /// and an AAAA query the IPv6 ones (the latter only when IPv6 is enabled);
+    /// any other type, or a family with no address, is NODATA (NOERROR with no
+    /// answers). Either way the name is owned locally and never forwarded.
+    fn answer_rewrite(&self, query: &Query, response: &mut Message, ips: &[IpAddr]) {
+        response.set_response_code(ResponseCode::NoError);
+        let name = query.name().clone();
+        match query.query_type() {
+            RecordType::A => {
+                for ip in ips {
+                    if let IpAddr::V4(v4) = ip {
+                        response.add_answer(Record::from_rdata(
+                            name.clone(),
+                            REWRITE_TTL,
+                            RData::A(A(*v4)),
+                        ));
+                    }
+                }
+            }
+            RecordType::AAAA if self.options.ipv6_enabled.load(Ordering::Relaxed) => {
+                for ip in ips {
+                    if let IpAddr::V6(v6) = ip {
+                        response.add_answer(Record::from_rdata(
+                            name.clone(),
+                            REWRITE_TTL,
+                            RData::AAAA(AAAA(*v6)),
+                        ));
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -425,6 +484,49 @@ mod tests {
             .await;
         assert_eq!(allowed.response_code(), ResponseCode::NoError);
         assert_eq!(allowed.answers().len(), 1);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn rewrite_answers_locally_without_upstream() {
+        use justdns_rewrite::{Rewrite, Rewriter};
+
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Router::new(UpstreamMode::Racing, vec![mock]);
+        let rewriter = Arc::new(Rewriter::new());
+        rewriter.set(&[Rewrite {
+            name: "nas.home".to_owned(),
+            ips: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))],
+        }]);
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_rewriter(rewriter);
+
+        // The A query is answered from the rewrite, never forwarded.
+        let answered = pipe
+            .handle(&request("nas.home.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(answered.response_code(), ResponseCode::NoError);
+        assert_eq!(
+            answered.answers()[0].data().as_a(),
+            Some(&A(Ipv4Addr::new(192, 168, 20, 5)))
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0, "rewrite must not forward");
+
+        // AAAA for the same name is NODATA (no IPv6 address, IPv6 off), and still
+        // never forwarded.
+        let aaaa = pipe
+            .handle(&request("nas.home.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(aaaa.response_code(), ResponseCode::NoError);
+        assert!(aaaa.answers().is_empty());
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        // A name without a rewrite still forwards.
+        let other = pipe
+            .handle(&request("example.com.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(other.answers().len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 

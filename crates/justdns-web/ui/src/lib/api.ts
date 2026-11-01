@@ -89,6 +89,18 @@ export interface Preset {
   enabled: boolean;
 }
 
+/** A local DNS rewrite: an exact name the resolver answers itself from fixed
+ *  IP addresses (v4 → A record, v6 → AAAA) instead of forwarding it upstream. */
+export interface Rewrite {
+  name: string;
+  ips: string[];
+}
+
+/** Everything the rewrites view shows in one payload. */
+export interface RewritesView {
+  rewrites: Rewrite[];
+}
+
 /** Everything the "Listen" view shows in one payload. */
 export interface ListsView {
   allow: string[];
@@ -223,6 +235,11 @@ export const api = {
   setPreset: (key: string, on: boolean) =>
     sendJson<ListsView>("PUT", `/api/lists/presets/${encodeURIComponent(key)}`, { on }),
   refreshLists: () => sendJson<RefreshResponse>("POST", "/api/lists/refresh"),
+  rewrites: (signal?: AbortSignal) => getJson<RewritesView>("/api/rewrites", signal),
+  setRewrite: (name: string, ips: string[]) =>
+    sendJson<RewritesView>("POST", "/api/rewrites", { name, ips }),
+  removeRewrite: (name: string) =>
+    sendJson<RewritesView>("DELETE", "/api/rewrites", { name }),
   authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
   setup: (username: string, password: string) =>
     postJson<{ username: string }>("/api/auth/setup", { username, password }),

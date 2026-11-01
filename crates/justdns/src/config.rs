@@ -22,6 +22,7 @@ const DEFAULT_CONFIG_PATH: &str = "config.json";
 const DEFAULT_AUTH_PATH: &str = "auth.json";
 const DEFAULT_LISTS_PATH: &str = "lists.json";
 const DEFAULT_LISTS_CACHE: &str = "lists-cache";
+const DEFAULT_REWRITES_PATH: &str = "rewrites.json";
 
 #[derive(Debug)]
 pub struct Config {
@@ -39,6 +40,8 @@ pub struct Config {
     pub lists_path: PathBuf,
     /// Directory where fetched external feeds are cached.
     pub lists_cache_dir: PathBuf,
+    /// Where the local DNS rewrites (name → IP) are stored.
+    pub rewrites_path: PathBuf,
     pub upstreams: UpstreamConfig,
 }
 
@@ -110,6 +113,10 @@ impl Config {
             read_var("JUSTDNS_LISTS_CACHE")?.unwrap_or_else(|| DEFAULT_LISTS_CACHE.to_owned()),
         );
 
+        let rewrites_path = PathBuf::from(
+            read_var("JUSTDNS_REWRITES_PATH")?.unwrap_or_else(|| DEFAULT_REWRITES_PATH.to_owned()),
+        );
+
         let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => parse_upstreams(&raw)?,
             None => UpstreamConfig::eu_defaults(),
@@ -125,6 +132,7 @@ impl Config {
             auth_path,
             lists_path,
             lists_cache_dir,
+            rewrites_path,
             upstreams,
         })
     }

@@ -99,6 +99,12 @@ export function Shell({ children }: { children: ReactNode }) {
             </NavLink>
             <ListsMenu />
             <NavLink
+              to="/rewrites"
+              className={({ isActive }) => (isActive ? styles.active : styles.link)}
+            >
+              DNS-Rewrites
+            </NavLink>
+            <NavLink
               to="/einstellungen"
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >

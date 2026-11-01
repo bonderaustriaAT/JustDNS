@@ -19,6 +19,7 @@ use justdns_dns::router::Router;
 use justdns_dns::server::Server;
 use justdns_filter::Blocker;
 use justdns_lists::ListStore;
+use justdns_rewrite::{RewriteStore, Rewriter};
 use justdns_store::Store;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -133,6 +134,19 @@ async fn main() -> ExitCode {
     // on the blocking pool and never stalls the resolver or the web server.
     spawn_feed_refresh(lists.clone());
 
+    // Local DNS rewrites (name → IP) live on the data volume too. Loading them
+    // fills the shared rewriter the pipeline reads per query, so a mapping takes
+    // effect at once and survives a restart.
+    let rewriter = Arc::new(Rewriter::new());
+    let rewrites = match RewriteStore::load(&config.rewrites_path, rewriter.clone()) {
+        Ok(rewrites) => rewrites,
+        Err(error) => {
+            error!(%error, "cannot load the DNS rewrites");
+            return ExitCode::FAILURE;
+        }
+    };
+    info!(rewrites = rewriter.len(), "loaded DNS rewrites");
+
     let router = Router::from_config(&config.upstreams);
     let cache = DnsCache::new(config.cache_capacity);
     let pipeline = Pipeline::new(
@@ -143,7 +157,8 @@ async fn main() -> ExitCode {
         },
     )
     .with_observer(observer)
-    .with_blocker(blocker.clone());
+    .with_blocker(blocker.clone())
+    .with_rewriter(rewriter.clone());
     let server = Server::new(pipeline);
 
     tokio::select! {
@@ -153,7 +168,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), users.clone(), sessions.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), users.clone(), sessions.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
