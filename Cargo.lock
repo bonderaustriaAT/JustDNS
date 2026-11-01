@@ -1282,6 +1282,7 @@ dependencies = [
 name = "justdns-dns"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "futures-util",
  "hickory-proto",
  "hickory-resolver",

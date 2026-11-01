@@ -61,6 +61,25 @@ impl Upstream {
             },
         }
     }
+
+    /// The TLS certificate name this upstream presents, or `None` for plaintext.
+    pub fn server_name(&self) -> Option<&str> {
+        match &self.transport {
+            Transport::Plain => None,
+            Transport::Dot { server_name } | Transport::Doh { server_name } => Some(server_name),
+        }
+    }
+
+    /// The same resolver with encryption turned on or off: over DoT (keeping its
+    /// certificate name) when `encrypt` is set and a name is known, plaintext on
+    /// port 53 otherwise. A plaintext upstream with no certificate name cannot be
+    /// upgraded, so it stays plaintext.
+    pub fn with_encryption(&self, encrypt: bool) -> Upstream {
+        match (encrypt, self.server_name()) {
+            (true, Some(name)) => Upstream::dot(self.address, name),
+            _ => Upstream::plain(self.address),
+        }
+    }
 }
 
 /// How an upstream is picked from the configured pool.
@@ -226,6 +245,27 @@ mod tests {
         let config = rule_config();
 
         assert!(config.rule_for(&name("example.org.")).is_none());
+    }
+
+    #[test]
+    fn with_encryption_toggles_dot_and_plain() {
+        let dot = Upstream::dot(IpAddr::from([9, 9, 9, 9]), "dns.quad9.net");
+
+        // Encryption on leaves a DoT upstream exactly as it is.
+        assert_eq!(dot.with_encryption(true), dot);
+
+        // Encryption off drops it to plaintext on port 53, same address.
+        let plain = dot.with_encryption(false);
+        assert_eq!(plain.transport, Transport::Plain);
+        assert_eq!(plain.port, 53);
+        assert_eq!(plain.address, IpAddr::from([9, 9, 9, 9]));
+    }
+
+    #[test]
+    fn plaintext_without_a_name_cannot_be_encrypted() {
+        // A plain upstream has no certificate name, so it stays plaintext.
+        let plain = Upstream::plain(IpAddr::from([127, 0, 0, 1]));
+        assert_eq!(plain.with_encryption(true).transport, Transport::Plain);
     }
 
     #[test]

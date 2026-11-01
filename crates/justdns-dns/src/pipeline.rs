@@ -22,7 +22,7 @@ use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
 use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
-use crate::router::{Resolve, Router};
+use crate::router::Resolve;
 use crate::safesearch;
 
 /// Negative answers without an SOA are cached this long (seconds).
@@ -64,7 +64,10 @@ impl Default for PipelineOptions {
 
 pub struct Pipeline<R> {
     cache: DnsCache,
-    router: Arc<Router<R>>,
+    /// The resolver a cache miss is forwarded to. Held as `Arc<R>` rather than a
+    /// concrete router so it can be a `SharedRouter` (live-swappable) in the
+    /// binary and a plain `Router` in tests.
+    router: Arc<R>,
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
     blocker: Option<Arc<Blocker>>,
@@ -75,7 +78,7 @@ pub struct Pipeline<R> {
 }
 
 impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
-    pub fn new(cache: DnsCache, router: Arc<Router<R>>, options: PipelineOptions) -> Self {
+    pub fn new(cache: DnsCache, router: Arc<R>, options: PipelineOptions) -> Self {
         Self {
             cache,
             router,
@@ -385,6 +388,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
+    use crate::router::Router;
 
     const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
 
@@ -464,7 +468,10 @@ mod tests {
         }
     }
 
-    fn pipeline(reply: Reply, options: PipelineOptions) -> (Pipeline<Mock>, Arc<AtomicUsize>) {
+    fn pipeline(
+        reply: Reply,
+        options: PipelineOptions,
+    ) -> (Pipeline<Router<Mock>>, Arc<AtomicUsize>) {
         let mock = Mock::new(reply);
         let calls = mock.calls.clone();
         let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));

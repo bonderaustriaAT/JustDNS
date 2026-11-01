@@ -5,7 +5,7 @@ import { Toggle } from "../components/Toggle";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
-import { useSettings, type UpstreamMode } from "../state/settings";
+import { useSettings, type SpeedProfile, type UpstreamMode } from "../state/settings";
 import styles from "./Settings.module.css";
 
 /** The "clear DNS cache" action: a one-shot button that drops every cached
@@ -105,10 +105,27 @@ function Row({
  *  to a `settings.mode.<mode>` label key. */
 const UPSTREAM_MODES: UpstreamMode[] = ["racing", "fallback", "balanced", "rules"];
 
-const RESOLVERS = [
-  { ip: "86.54.11.1", host: "protective.joindns4.eu", name: "DNS4EU" },
-  { ip: "9.9.9.9", host: "dns.quad9.net", name: "Quad9" },
-];
+/** The speed profiles, in the order the switch lists them: most private first,
+ *  fastest last. Each maps to `settings.profile.<profile>` label and
+ *  `settings.profile.<profile>Desc` description keys. */
+const PROFILES: SpeedProfile[] = ["privacy", "balanced", "speed"];
+
+/** The resolvers each profile uses. Mirrors `profile_resolvers` in the Rust
+ *  binary, so the list shown here matches what actually answers queries. */
+const PROFILE_RESOLVERS: Record<SpeedProfile, { ip: string; host: string }[]> = {
+  privacy: [
+    { ip: "86.54.11.1", host: "protective.joindns4.eu" },
+    { ip: "9.9.9.9", host: "dns.quad9.net" },
+  ],
+  balanced: [
+    { ip: "86.54.11.1", host: "protective.joindns4.eu" },
+    { ip: "1.1.1.1", host: "cloudflare-dns.com" },
+  ],
+  speed: [
+    { ip: "1.1.1.1", host: "cloudflare-dns.com" },
+    { ip: "8.8.8.8", host: "dns.google" },
+  ],
+};
 
 export function Settings() {
   const { t } = useI18n();
@@ -116,10 +133,14 @@ export function Settings() {
   const [selected, setSelected] = useState("schutz");
 
   const categories = useMemo<CategoryMeta[]>(() => {
-    const base: CategoryMeta[] = [{ id: "schutz", titleKey: "settings.cat.schutz" }];
+    // "Upstream" now hosts the speed profile — the headline user-facing choice —
+    // so it stays visible even outside expert mode; the rest stay technical.
+    const base: CategoryMeta[] = [
+      { id: "schutz", titleKey: "settings.cat.schutz" },
+      { id: "upstream", titleKey: "settings.cat.upstream" },
+    ];
     if (settings.expertMode) {
       base.push(
-        { id: "upstream", titleKey: "settings.cat.upstream" },
         { id: "verschluesselung", titleKey: "settings.cat.verschluesselung" },
         { id: "netzwerk", titleKey: "settings.cat.netzwerk" },
         { id: "cache", titleKey: "settings.cat.cache" },
@@ -217,39 +238,71 @@ export function Settings() {
               title={t("settings.cat.upstream")}
               description={t("settings.upstreamDesc")}
             >
-              <Row
-                label={t("settings.modeLabel")}
-                description={t("settings.modeDesc")}
-                details={t("settings.modeDetails")}
-                control={
-                  <select
-                    className={styles.select}
-                    aria-label={t("settings.modeLabel")}
-                    value={settings.upstreamMode}
-                    onChange={(e) => update("upstreamMode", e.target.value as UpstreamMode)}
-                  >
-                    {UPSTREAM_MODES.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {t(`settings.mode.${mode}` as MessageKey)}
-                      </option>
-                    ))}
-                  </select>
-                }
-              />
-              <ul className={styles.resolvers}>
-                {RESOLVERS.map((resolver) => (
-                  <li key={resolver.ip} className={styles.resolver}>
-                    <span className={styles.resolverIp}>{resolver.ip}</span>
-                    <span className={styles.resolverHost}>{resolver.host}</span>
-                    <span
-                      className={styles.resolverTag}
-                      data-warn={!settings.encryptUpstream || undefined}
+              <div className={styles.profile}>
+                <span className={styles.labelLine}>
+                  <span className={styles.label}>{t("settings.profileLabel")}</span>
+                  <InfoHint label={t("settings.profileLabel")} text={t("settings.profileDetails")} />
+                </span>
+                <div
+                  className={styles.profileSwitch}
+                  role="group"
+                  aria-label={t("settings.profileLabel")}
+                >
+                  {PROFILES.map((profile) => (
+                    <button
+                      key={profile}
+                      type="button"
+                      className={styles.profileButton}
+                      data-active={settings.speedProfile === profile || undefined}
+                      aria-pressed={settings.speedProfile === profile}
+                      onClick={() => update("speedProfile", profile)}
                     >
-                      {settings.encryptUpstream ? t("settings.dot") : t("settings.plaintext")}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                      {t(`settings.profile.${profile}` as MessageKey)}
+                    </button>
+                  ))}
+                </div>
+                <p className={styles.profileDesc}>
+                  {t(`settings.profile.${settings.speedProfile}Desc` as MessageKey)}
+                </p>
+
+                <span className={styles.resolversTitle}>{t("settings.resolversTitle")}</span>
+                <ul className={styles.resolvers}>
+                  {PROFILE_RESOLVERS[settings.speedProfile].map((resolver) => (
+                    <li key={resolver.ip} className={styles.resolver}>
+                      <span className={styles.resolverIp}>{resolver.ip}</span>
+                      <span className={styles.resolverHost}>{resolver.host}</span>
+                      <span
+                        className={styles.resolverTag}
+                        data-warn={!settings.encryptUpstream || undefined}
+                      >
+                        {settings.encryptUpstream ? t("settings.dot") : t("settings.plaintext")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {settings.expertMode && (
+                <Row
+                  label={t("settings.modeLabel")}
+                  description={t("settings.modeDesc")}
+                  details={t("settings.modeDetails")}
+                  control={
+                    <select
+                      className={styles.select}
+                      aria-label={t("settings.modeLabel")}
+                      value={settings.upstreamMode}
+                      onChange={(e) => update("upstreamMode", e.target.value as UpstreamMode)}
+                    >
+                      {UPSTREAM_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {t(`settings.mode.${mode}` as MessageKey)}
+                        </option>
+                      ))}
+                    </select>
+                  }
+                />
+              )}
             </Category>
           )}
 
@@ -301,18 +354,6 @@ export function Settings() {
               title={t("settings.cat.cache")}
               description={t("settings.cacheDesc")}
             >
-              <Row
-                label={t("settings.serveStaleLabel")}
-                description={t("settings.serveStaleDesc")}
-                details={t("settings.serveStaleDetails")}
-                control={
-                  <Toggle
-                    label={t("settings.serveStaleLabel")}
-                    checked={settings.cacheServeStale}
-                    onChange={(v) => update("cacheServeStale", v)}
-                  />
-                }
-              />
               <Row
                 label={t("settings.clearCacheLabel")}
                 description={t("settings.clearCacheDesc")}

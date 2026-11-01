@@ -20,6 +20,26 @@ use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
+/// A ready-made speed/privacy profile. A single switch the user understands
+/// instead of a scatter of low-level knobs: each profile chooses which
+/// resolvers are used and how eagerly answers are cached and refreshed. The
+/// resolver set and cache windows a profile stands for are applied by the
+/// binary (which owns the DNS engine); this crate only carries the choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeedProfile {
+    /// Privacy first: privacy-focused resolvers, nothing served past its TTL,
+    /// minimal background traffic.
+    Privacy,
+    /// The balanced default: a mix of privacy and speed, with a short
+    /// serve-stale window and background refresh of popular names.
+    #[default]
+    Balanced,
+    /// Speed first: the fastest public resolvers and an aggressive cache that
+    /// keeps popular names warm the longest.
+    Speed,
+}
+
 /// How the resolver picks between the configured upstreams. Mirrors the DNS
 /// core's `UpstreamMode`; kept here as its own type so the config crate stays a
 /// leaf that the core and the web layer can both depend on.
@@ -53,14 +73,15 @@ pub struct Settings {
     pub upstream_mode: UpstreamMode,
     /// Talk to the upstreams over DNS-over-TLS rather than plaintext.
     pub encrypt_upstream: bool,
+    /// The speed/privacy profile: which resolvers are used and how eagerly
+    /// answers are cached. Wired live — a change takes effect without a restart.
+    pub speed_profile: SpeedProfile,
     /// Answer AAAA queries instead of returning empty NODATA. Wired live.
     pub ipv6: bool,
     /// Record handled queries for the log view.
     pub query_log: bool,
     /// How many days log entries are kept.
     pub log_retention_days: u32,
-    /// Serve expired cache entries while every upstream is unreachable.
-    pub cache_serve_stale: bool,
 }
 
 impl Default for Settings {
@@ -71,13 +92,18 @@ impl Default for Settings {
             block_malware: true,
             upstream_mode: UpstreamMode::Racing,
             encrypt_upstream: true,
+            speed_profile: SpeedProfile::Balanced,
             ipv6: false,
             query_log: true,
             log_retention_days: 7,
-            cache_serve_stale: false,
         }
     }
 }
+
+/// A callback run after every settings change, holding the live engine handles
+/// the config crate itself knows nothing about (the DNS router and cache). The
+/// binary registers one so a dashboard change reconfigures the engine at once.
+type OnChange = Arc<dyn Fn(&Settings) + Send + Sync>;
 
 /// Errors from loading or saving the configuration file.
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +132,9 @@ struct Inner {
     block_ads_trackers: Arc<AtomicBool>,
     block_malware: Arc<AtomicBool>,
     safe_search: Arc<AtomicBool>,
+    /// Run after each change to apply settings the engine owns (router, cache)
+    /// that cannot be expressed as a simple atomic flag here.
+    on_change: RwLock<Option<OnChange>>,
 }
 
 /// A cheap, cloneable handle to the persistent configuration.
@@ -145,9 +174,17 @@ impl ConfigStore {
                 block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
                 block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
                 safe_search: Arc::new(AtomicBool::new(settings.safe_search)),
+                on_change: RwLock::new(None),
                 settings: RwLock::new(settings),
             }),
         })
+    }
+
+    /// Register the callback run after every [`set`](Self::set), so the binary
+    /// can reconfigure the live DNS engine (router, cache tuning) from the new
+    /// settings. Replaces any previously registered callback.
+    pub fn on_change(&self, callback: impl Fn(&Settings) + Send + Sync + 'static) {
+        *self.inner.on_change.write().expect("config lock poisoned") = Some(Arc::new(callback));
     }
 
     /// A snapshot of the current settings.
@@ -175,6 +212,18 @@ impl ConfigStore {
             .safe_search
             .store(settings.safe_search, Ordering::Relaxed);
         *self.inner.settings.write().expect("config lock poisoned") = settings.clone();
+        // Apply engine-owned settings (router, cache tuning) live. Taken as a
+        // clone so the lock is not held across the callback. Done even if the
+        // disk write below fails, so the running instance reflects the request.
+        let callback = self
+            .inner
+            .on_change
+            .read()
+            .expect("config lock poisoned")
+            .clone();
+        if let Some(callback) = callback {
+            callback(&settings);
+        }
         write_atomic(&self.inner.path, &settings)
     }
 
@@ -332,5 +381,49 @@ mod tests {
     fn upstream_mode_serialises_lowercase() {
         let json = serde_json::to_string(&UpstreamMode::Balanced).unwrap();
         assert_eq!(json, "\"balanced\"");
+    }
+
+    #[test]
+    fn speed_profile_serialises_lowercase_and_defaults_to_balanced() {
+        assert_eq!(SpeedProfile::default(), SpeedProfile::Balanced);
+        assert_eq!(
+            serde_json::to_string(&SpeedProfile::Speed).unwrap(),
+            "\"speed\""
+        );
+        assert_eq!(
+            serde_json::from_str::<SpeedProfile>("\"privacy\"").unwrap(),
+            SpeedProfile::Privacy
+        );
+    }
+
+    #[test]
+    fn set_runs_the_on_change_callback_with_the_new_settings() {
+        use std::sync::atomic::AtomicU8;
+
+        let (_dir, path) = temp_path();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+
+        // The callback records the profile it was handed, so the test can see it
+        // ran with the just-set settings rather than the old ones.
+        let seen = Arc::new(AtomicU8::new(0));
+        let sink = seen.clone();
+        store.on_change(move |settings| {
+            let code = match settings.speed_profile {
+                SpeedProfile::Privacy => 1,
+                SpeedProfile::Balanced => 2,
+                SpeedProfile::Speed => 3,
+            };
+            sink.store(code, Ordering::Relaxed);
+        });
+
+        let mut next = store.get();
+        next.speed_profile = SpeedProfile::Speed;
+        store.set(next).unwrap();
+
+        assert_eq!(
+            seen.load(Ordering::Relaxed),
+            3,
+            "callback saw the new profile"
+        );
     }
 }

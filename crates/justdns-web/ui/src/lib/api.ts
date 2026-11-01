@@ -19,6 +19,10 @@ export interface ActivityBucket {
 
 export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 
+/// The speed/privacy profile: a single switch that picks the resolvers and how
+/// eagerly answers are cached. Matches the Rust `SpeedProfile`.
+export type SpeedProfile = "privacy" | "balanced" | "speed";
+
 /// The settings the server persists. Field names match the Rust `Settings`
 /// type (camelCase on the wire), so this is sent and received as-is.
 export interface ServerSettings {
@@ -27,10 +31,10 @@ export interface ServerSettings {
   blockMalware: boolean;
   upstreamMode: UpstreamMode;
   encryptUpstream: boolean;
+  speedProfile: SpeedProfile;
   ipv6: boolean;
   queryLog: boolean;
   logRetentionDays: number;
-  cacheServeStale: boolean;
 }
 
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
