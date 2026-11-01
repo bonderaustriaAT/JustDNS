@@ -1,0 +1,56 @@
+# Fahrplan
+
+Wohin sich JustDNS entwickelt, in einfacher Sprache. Eine englische Fassung
+dieser Datei liegt daneben: [ROADMAP.md](ROADMAP.md).
+
+JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
+(AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
+wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
+Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.17
+(Einrichtungs-Assistent, Schutz-Stärke, Instanzname).
+
+## Phase 1 — Einblick & schnelle Gewinne
+
+- [ ] **Statistik-Reiter.** Eine eigene Seite mit: einer Live-Rate der Anfragen
+  (pro Sekunde oder pro Minute, umschaltbar); Kennzahlen der letzten 24 Stunden
+  (Anfragen gesamt, von Filtern geblockt, durchschnittliche Antwortzeit); und den
+  Top-5-Client-IPs mit ihrem Anteil an den Anfragen.
+- [ ] **Konfigurierbare Block-Antwort.** Wähle, was ein gesperrter Name
+  zurückgibt — heute ist es NXDOMAIN; geplant sind `0.0.0.0` / `::` oder eine
+  kleine Sperrseite.
+- [ ] **Sichern & Wiederherstellen.** Die gesamte Konfiguration — Einstellungen,
+  Listen, Abos und Rewrites — in eine einzige Datei exportieren und wieder
+  einspielen. Das legt zugleich die Grundlage für den späteren Zwei-Server-Sync
+  (Phase 5).
+
+## Phase 2 — Geräte & Richtlinien
+
+- [ ] **Clients erkennen & benennen.** Eine Client-IP einem Gerätenamen zuordnen
+  und sehen, welche Geräte aktiv sind — damit Protokoll und Statistik in Namen
+  statt in Zahlen sprechen.
+- [ ] **Pro-Client-/Gruppen-Richtlinien.** Einem Gerät oder einer Gruppe eine
+  eigene Schutz-Stärke und eigene Listen geben, wie bei AdGuard Home — der größte
+  einzelne Schritt zu echter Haushaltskontrolle.
+- [ ] **Tiefere Statistik.** Durchschnittliche Antwortzeit je Resolver (welcher
+  Upstream geantwortet hat und wie schnell) und die Top-Domains je Client.
+
+## Phase 3 — Zeit & Zugang
+
+- [ ] **Zeitpläne.** Bestimmte Dienste oder Listen in Zeitfenstern sperren, je
+  Gerät oder Gruppe — Kinderzeiten, Fokuszeit, Schlafenszeit.
+- [ ] **Benutzer & Rollen.** Mehr als ein Administrator, Nur-Lese-Konten und eine
+  einfache Aufzeichnung, wer was geändert hat.
+
+## Phase 4 — Verschlüsselung & Reichweite
+
+- [ ] **Verschlüsseltes Client-DNS.** JustDNS selbst als DNS-over-TLS- und
+  DNS-over-HTTPS-Endpunkt betreiben, damit sich die eigenen Geräte verschlüsselt
+  verbinden — nicht nur die Upstream-Resolver.
+
+## Phase 5 — Hochverfügbarkeit
+
+- [ ] **Zwei-Server-Betrieb.** Eine zweite JustDNS-Instanz betreiben, die sich
+  synchron hält — Listen, Konfiguration, Rewrites und (optional) Statistiken —
+  mit automatischem Failover, damit DNS weiterläuft, während ein Knoten aus ist
+  oder aktualisiert wird.
