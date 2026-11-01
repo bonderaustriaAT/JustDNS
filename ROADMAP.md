@@ -19,6 +19,11 @@ release is v0.1.17 (setup wizard, protection strength, instance name).
 - [ ] **Backup & restore.** Export the whole configuration — settings, lists,
   subscriptions and rewrites — to a single file and import it back. This also lays
   the groundwork for syncing two servers later (Phase 5).
+- [ ] **Reusable address objects (aliases).** Define a named object — say
+  `reverse-proxy` — that stands for an IP address, and use it in DNS rewrites
+  instead of typing the address each time. Change the object's address once and
+  every rewrite that points at it is updated at once, so you never edit the same
+  IP in a dozen places.
 
 ## Phase 2 — Devices & policies
 

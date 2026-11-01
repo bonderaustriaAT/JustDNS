@@ -23,6 +23,11 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   Listen, Abos und Rewrites — in eine einzige Datei exportieren und wieder
   einspielen. Das legt zugleich die Grundlage für den späteren Zwei-Server-Sync
   (Phase 5).
+- [ ] **Wiederverwendbare Adress-Objekte (Aliase).** Lege ein benanntes Objekt
+  an — etwa `reverse-proxy` —, das für eine IP-Adresse steht, und verwende es in
+  DNS-Rewrites, statt die Adresse jedes Mal einzutippen. Änderst du die Adresse
+  des Objekts einmal, werden alle Rewrites, die darauf zeigen, sofort angepasst —
+  so musst du dieselbe IP nie an einem Dutzend Stellen ändern.
 
 ## Phase 2 — Geräte & Richtlinien
 
