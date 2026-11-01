@@ -338,7 +338,7 @@ export function Lists({ section }: { section: ListsSection }) {
       <div className={styles.editors}>
         <EntryEditor
           title="Immer erlauben"
-          hint="Domains auf dieser Liste werden nie geblockt — auch dann nicht, wenn sie auf einer aktiven Sperrliste stehen. Gut, um einen Fehlalarm (false positive) gezielt zu beheben."
+          hint="Domains auf dieser Liste werden nie geblockt — auch dann nicht, wenn sie auf einer aktiven Sperrliste stehen. Gut, um einen Fehlalarm (false positive) gezielt zu beheben. Ein Eintrag gilt automatisch auch für alle Subdomains (example.com = *.example.com); für nur einen Host trage genau diesen ein (z. B. login.example.com). Die Schreibweise *.example.com ist erlaubt (wird wie example.com behandelt), Teil-Wildcards wie ads.*.com nicht."
           accent="allow"
           placeholder="z. B. meine-bank.de"
           entries={view.allow}
@@ -349,7 +349,7 @@ export function Lists({ section }: { section: ListsSection }) {
         />
         <EntryEditor
           title="Immer blockieren"
-          hint="Deine eigene Sperrliste. Domains hier werden immer geblockt, zusätzlich zu den aktivierten fertigen Listen. Eine Freigabe sticht eine Sperre."
+          hint="Deine eigene Sperrliste. Domains hier werden immer geblockt, zusätzlich zu den aktivierten fertigen Listen. Eine Freigabe sticht eine Sperre. Ein Eintrag gilt automatisch auch für alle Subdomains (example.com blockt auch ad.example.com); die Schreibweise *.example.com ist erlaubt (wie example.com), Teil-Wildcards wie ads.*.com nicht."
           accent="block"
           placeholder="z. B. werbung.example.com"
           entries={view.block}
