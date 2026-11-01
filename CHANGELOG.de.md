@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.15] - 2026-11-01
+
+- Neu: **Geschwindigkeitsprofile.** Unter Einstellungen → Upstream-Resolver
+  wählst du mit einem Schalter zwischen „Privatsphäre“, „Ausgewogen“ und
+  „Tempo“. Jedes Profil nutzt passende Resolver — die dir gleich darunter
+  angezeigt werden — und legt fest, wie eifrig Antworten zwischengespeichert und
+  im Voraus erneuert werden: von datenschutzfreundlich bis besonders schnell.
+- Änderungen an Profil, Verschlüsselung und Auswahlmodus greifen jetzt sofort,
+  ganz ohne Neustart.
+
 ## [0.1.14] - 2026-11-01
 
 - Die obere Menüleiste bricht nicht mehr in eine zweite Zeile um und wirkt

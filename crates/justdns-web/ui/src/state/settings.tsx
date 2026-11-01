@@ -9,9 +9,9 @@ import {
   type ReactNode,
 } from "react";
 
-import { api, type ServerSettings, type UpstreamMode } from "../lib/api";
+import { api, type ServerSettings, type SpeedProfile, type UpstreamMode } from "../lib/api";
 
-export type { UpstreamMode };
+export type { SpeedProfile, UpstreamMode };
 
 /// The full settings the UI works with: the server-persisted fields plus
 /// `expertMode`, a per-browser preference about what the UI reveals that the
@@ -28,10 +28,10 @@ const SERVER_DEFAULTS: ServerSettings = {
   blockMalware: true,
   upstreamMode: "racing",
   encryptUpstream: true,
+  speedProfile: "balanced",
   ipv6: false,
   queryLog: true,
   logRetentionDays: 7,
-  cacheServeStale: false,
 };
 
 const EXPERT_KEY = "justdns.expertMode";
@@ -43,10 +43,10 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "blockMalware",
   "upstreamMode",
   "encryptUpstream",
+  "speedProfile",
   "ipv6",
   "queryLog",
   "logRetentionDays",
-  "cacheServeStale",
 ];
 
 function toServer(settings: Settings): ServerSettings {

@@ -206,7 +206,7 @@ mod tests {
         }
     }
 
-    fn pipeline(answers: usize) -> Pipeline<Mock> {
+    fn pipeline(answers: usize) -> Pipeline<Router<Mock>> {
         let router = Arc::new(Router::new(UpstreamMode::Racing, vec![Mock { answers }]));
         Pipeline::new(DnsCache::new(100), router, Default::default())
     }

@@ -43,6 +43,11 @@ pub struct Config {
     /// Where the local DNS rewrites (name → IP) are stored.
     pub rewrites_path: PathBuf,
     pub upstreams: UpstreamConfig,
+    /// Whether `JUSTDNS_UPSTREAMS` was set, pinning the resolver pool to those
+    /// addresses. When true the speed profile only tunes the cache and leaves
+    /// the explicitly configured upstreams alone (used by local/test setups);
+    /// when false the profile also chooses which resolvers are used.
+    pub upstreams_overridden: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -117,9 +122,9 @@ impl Config {
             read_var("JUSTDNS_REWRITES_PATH")?.unwrap_or_else(|| DEFAULT_REWRITES_PATH.to_owned()),
         );
 
-        let upstreams = match read_var("JUSTDNS_UPSTREAMS")? {
-            Some(raw) => parse_upstreams(&raw)?,
-            None => UpstreamConfig::eu_defaults(),
+        let (upstreams, upstreams_overridden) = match read_var("JUSTDNS_UPSTREAMS")? {
+            Some(raw) => (parse_upstreams(&raw)?, true),
+            None => (UpstreamConfig::eu_defaults(), false),
         };
 
         Ok(Self {
@@ -134,6 +139,7 @@ impl Config {
             lists_cache_dir,
             rewrites_path,
             upstreams,
+            upstreams_overridden,
         })
     }
 }

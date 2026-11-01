@@ -6,18 +6,19 @@
 mod config;
 mod observer;
 
+use std::net::IpAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
 use justdns_auth::{DEFAULT_SESSION_TTL, SessionStore, UserStore};
-use justdns_config::{ConfigStore, Settings};
-use justdns_dns::cache::DnsCache;
-use justdns_dns::client::UpstreamClient;
+use justdns_config::{ConfigStore, Settings, SpeedProfile};
+use justdns_dns::cache::{CacheTuning, DnsCache};
 use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
-use justdns_dns::router::Router;
+use justdns_dns::router::{Router, SharedRouter};
 use justdns_dns::server::Server;
+use justdns_dns::upstream::{Upstream, UpstreamConfig};
 use justdns_filter::Blocker;
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
@@ -152,16 +153,27 @@ async fn main() -> ExitCode {
     };
     info!(rewrites = rewriter.len(), "loaded DNS rewrites");
 
-    // The upstream pool, shared (Arc) so a background task can keep its
-    // connections warm while the pipeline forwards real queries through it.
-    let router = Arc::new(Router::from_config(&config.upstreams));
-    spawn_upstream_keepalive(router.clone());
-    // One cache, shared by the resolver pipeline and the web layer's "clear
-    // cache" action (the handle is cheap to clone — the store is behind an Arc).
-    let cache = DnsCache::new(config.cache_capacity);
+    // The upstream pool and the cache tuning both follow the live settings: the
+    // speed profile chooses which resolvers run and how eagerly answers are
+    // cached, the encryption toggle picks DoT vs plaintext, and the mode decides
+    // how the resolvers are combined. The router sits behind a swappable handle
+    // so a dashboard change takes effect without a restart; the keepalive task
+    // warms whichever router is current.
+    let settings = config_store.get();
+    let overridden = config.upstreams_overridden;
+    let pinned = config.upstreams.upstreams.clone();
+    let shared_router = SharedRouter::new(Router::from_config(&upstreams_for(
+        &settings, overridden, &pinned,
+    )));
+    spawn_upstream_keepalive(shared_router.clone());
+    // The cache's tuning is published behind a shared handle so the same profile
+    // change retunes it live. One cache, shared by the resolver pipeline and the
+    // web layer's "clear cache" action (the handle is cheap to clone).
+    let cache_tuning = justdns_dns::cache::shared_tuning(cache_tuning_for(settings.speed_profile));
+    let cache = DnsCache::with_tuning(config.cache_capacity, cache_tuning.clone());
     let pipeline = Pipeline::new(
         cache.clone(),
-        router,
+        Arc::new(shared_router.clone()),
         PipelineOptions {
             ipv6_enabled: config_store.ipv6_flag(),
             safe_search: config_store.safe_search_flag(),
@@ -171,6 +183,19 @@ async fn main() -> ExitCode {
     .with_blocker(blocker.clone())
     .with_rewriter(rewriter.clone());
     let server = Server::new(pipeline);
+
+    // Reconfigure the live engine on every settings change: rebuild the router
+    // from the new profile/mode/encryption and retune the cache. The config
+    // store runs this after each save, so the web layer needs no extra wiring.
+    {
+        let router = shared_router.clone();
+        let tuning = cache_tuning.clone();
+        config_store.on_change(move |settings| {
+            let upstreams = upstreams_for(settings, overridden, &pinned);
+            router.store(Router::from_config(&upstreams));
+            tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
+        });
+    }
 
     tokio::select! {
         result = server.run(config.listen) => {
@@ -227,17 +252,83 @@ fn spawn_feed_refresh(lists: ListStore) {
 
 /// Keep the upstream connections warm: prime them right away, then re-ping on an
 /// interval short enough to stay under typical DoT/DoH idle timeouts, so a cache
-/// miss rides an already-open session instead of paying a cold handshake.
-fn spawn_upstream_keepalive(router: Arc<Router<UpstreamClient>>) {
+/// miss rides an already-open session instead of paying a cold handshake. Each
+/// tick warms whichever router is current, so a reconfigured pool is primed too.
+fn spawn_upstream_keepalive(router: SharedRouter) {
     tokio::spawn(async move {
-        router.warm().await;
+        router.current().warm().await;
         let mut ticker = tokio::time::interval(UPSTREAM_KEEPALIVE_INTERVAL);
         ticker.tick().await; // the immediate first tick; we just warmed above
         loop {
             ticker.tick().await;
-            router.warm().await;
+            router.current().warm().await;
         }
     });
+}
+
+/// Map the dashboard's upstream-selection mode to the DNS core's own enum.
+fn to_dns_mode(mode: justdns_config::UpstreamMode) -> justdns_dns::upstream::UpstreamMode {
+    use justdns_config::UpstreamMode as Ui;
+    use justdns_dns::upstream::UpstreamMode as Dns;
+    match mode {
+        Ui::Racing => Dns::Racing,
+        Ui::Fallback => Dns::Fallback,
+        Ui::Balanced => Dns::LoadBalanced,
+        Ui::Rules => Dns::RuleBased,
+    }
+}
+
+/// The resolvers a speed profile uses, over DoT. The encryption toggle may
+/// switch these to plaintext and the mode decides how they are combined; here
+/// we only choose the servers: EU-first privacy, a balanced mix, or the fastest.
+fn profile_resolvers(profile: SpeedProfile) -> Vec<Upstream> {
+    match profile {
+        // Privacy first: DNS4EU Protective and Quad9, both no-log EU/CH resolvers.
+        SpeedProfile::Privacy => vec![
+            Upstream::dot(IpAddr::from([86, 54, 11, 1]), "protective.joindns4.eu"),
+            Upstream::dot(IpAddr::from([9, 9, 9, 9]), "dns.quad9.net"),
+        ],
+        // A balanced mix: DNS4EU Protective paired with Cloudflare.
+        SpeedProfile::Balanced => vec![
+            Upstream::dot(IpAddr::from([86, 54, 11, 1]), "protective.joindns4.eu"),
+            Upstream::dot(IpAddr::from([1, 1, 1, 1]), "cloudflare-dns.com"),
+        ],
+        // The fastest public resolvers: Cloudflare and Google.
+        SpeedProfile::Speed => vec![
+            Upstream::dot(IpAddr::from([1, 1, 1, 1]), "cloudflare-dns.com"),
+            Upstream::dot(IpAddr::from([8, 8, 8, 8]), "dns.google"),
+        ],
+    }
+}
+
+/// The cache tuning a speed profile stands for.
+fn cache_tuning_for(profile: SpeedProfile) -> CacheTuning {
+    match profile {
+        SpeedProfile::Privacy => CacheTuning::privacy(),
+        SpeedProfile::Balanced => CacheTuning::balanced(),
+        SpeedProfile::Speed => CacheTuning::speed(),
+    }
+}
+
+/// The upstream pool to run for `settings`: the profile's resolvers, or the
+/// explicitly configured ones when `JUSTDNS_UPSTREAMS` pinned them (`overridden`
+/// / `pinned`). Either way the encryption toggle chooses DoT vs plaintext and
+/// the mode chooses how the resolvers are combined.
+fn upstreams_for(settings: &Settings, overridden: bool, pinned: &[Upstream]) -> UpstreamConfig {
+    let base: Vec<Upstream> = if overridden {
+        pinned.to_vec()
+    } else {
+        profile_resolvers(settings.speed_profile)
+    };
+    let upstreams = base
+        .iter()
+        .map(|upstream| upstream.with_encryption(settings.encrypt_upstream))
+        .collect();
+    UpstreamConfig {
+        mode: to_dns_mode(settings.upstream_mode),
+        upstreams,
+        rules: Vec::new(),
+    }
 }
 
 /// Resolve when the process is asked to stop: SIGTERM from `docker stop`, or

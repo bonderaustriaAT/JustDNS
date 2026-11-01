@@ -11,8 +11,10 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use arc_swap::ArcSwap;
 use hickory_proto::ProtoError;
 use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::xfer::DnsResponse;
@@ -120,8 +122,12 @@ impl Router<UpstreamClient> {
     }
 }
 
-impl<R: Resolve + Sync> Router<R> {
-    pub async fn resolve(
+/// A router is itself a resolver: it answers a query by running its configured
+/// strategy over the pool. This lets a router be used wherever a single
+/// [`Resolve`] is expected — the pipeline holds one directly, and a
+/// [`SharedRouter`] wraps one for live reconfiguration.
+impl<R: Resolve + Sync> Resolve for Router<R> {
+    async fn resolve(
         &self,
         name: Name,
         record_type: RecordType,
@@ -136,7 +142,9 @@ impl<R: Resolve + Sync> Router<R> {
             },
         }
     }
+}
 
+impl<R: Resolve + Sync> Router<R> {
     /// Query every resolver at once and take the first success; the last error
     /// stands in once every resolver has failed.
     async fn race(
@@ -188,6 +196,48 @@ impl<R: Resolve + Sync> Router<R> {
 
         let index = self.next.fetch_add(1, Ordering::Relaxed) % self.pool.len();
         self.pool[index].resolve(name, record_type).await
+    }
+}
+
+/// A live-swappable handle to the upstream router.
+///
+/// The pipeline holds one of these (through `Arc`) and so always resolves
+/// against the current router; the config layer swaps in a freshly built one
+/// when the upstream settings change, so a profile, mode or encryption change
+/// takes effect on the next query without a restart. The keepalive task holds
+/// the same handle and warms whichever router is current.
+#[derive(Clone)]
+pub struct SharedRouter {
+    inner: Arc<ArcSwap<Router<UpstreamClient>>>,
+}
+
+impl SharedRouter {
+    pub fn new(router: Router<UpstreamClient>) -> Self {
+        Self {
+            inner: Arc::new(ArcSwap::from_pointee(router)),
+        }
+    }
+
+    /// Replace the live router, e.g. after the upstream settings changed. The
+    /// next query (and the next keepalive tick) sees the new one.
+    pub fn store(&self, router: Router<UpstreamClient>) {
+        self.inner.store(Arc::new(router));
+    }
+
+    /// The router currently in force — a cheap `Arc` clone, safe to hold across
+    /// an await point (unlike an `ArcSwap` guard).
+    pub fn current(&self) -> Arc<Router<UpstreamClient>> {
+        self.inner.load_full()
+    }
+}
+
+impl Resolve for SharedRouter {
+    async fn resolve(
+        &self,
+        name: Name,
+        record_type: RecordType,
+    ) -> Result<DnsResponse, ProtoError> {
+        self.current().resolve(name, record_type).await
     }
 }
 

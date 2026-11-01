@@ -160,6 +160,80 @@
   padding: var(--space-2) var(--space-3);
 }
 
+/* Speed-profile switch: three segments sharing one outline, the active one
+   filled so the current profile reads at a glance, with the chosen profile's
+   one-liner below and the resolvers it uses under that. */
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.profileSwitch {
+  display: inline-flex;
+  align-self: start;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.profileButton {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.profileButton + .profileButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.profileButton:hover {
+  color: var(--text);
+}
+
+.profileButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+.profileDesc {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: 60ch;
+}
+
+.resolversTitle {
+  margin-block-start: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profileButton {
+    transition: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .profileSwitch {
+    align-self: stretch;
+  }
+
+  .profileButton {
+    flex: 1;
+    text-align: center;
+  }
+}
+
 .resolvers {
   list-style: none;
   margin: 0;

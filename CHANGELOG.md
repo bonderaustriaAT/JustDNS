@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.15] - 2026-11-01
+
+- New: **speed profiles.** Under Settings → Upstream resolvers, one switch picks
+  between "Privacy", "Balanced" and "Speed". Each profile uses fitting resolvers
+  — shown to you right below the switch — and sets how eagerly answers are cached
+  and refreshed ahead of time, from privacy-friendly to extra fast.
+- Changes to the profile, encryption and selection mode now take effect
+  immediately, with no restart.
+
 ## [0.1.14] - 2026-11-01
 
 - The top menu bar no longer wraps onto a second line and sits more tidily —
