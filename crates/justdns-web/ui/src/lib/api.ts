@@ -81,6 +81,8 @@ export interface Preset {
   falsePositive: string;
   /** False-positive risk on a 1 (negligible) to 5 (high) scale. */
   fpLevel: number;
+  /** Coarse grouping for the catalogue filter. */
+  category: "ads" | "security" | "privacy" | "bypass" | "allow";
   active: boolean;
   enabled: boolean;
 }
