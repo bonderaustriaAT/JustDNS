@@ -3,8 +3,61 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "../state/auth";
 import { LANGS, useI18n } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import { useSettings } from "../state/settings";
+import { InstallBanner } from "./InstallBanner";
 import styles from "./Shell.module.css";
+
+/** Line icons for the mobile tab bar, drawn in the current text colour so the
+ *  active tab tints with it. Kept inline to avoid an icon dependency. */
+const ICONS: Record<string, ReactNode> = {
+  overview: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="9" rx="1.5" />
+      <rect x="14" y="3" width="7" height="5" rx="1.5" />
+      <rect x="14" y="12" width="7" height="9" rx="1.5" />
+      <rect x="3" y="16" width="7" height="5" rx="1.5" />
+    </svg>
+  ),
+  log: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M8 6h12M8 12h12M8 18h12" />
+      <circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  lists: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
+      <path d="M9 12l2 2 4-4" strokeLinecap="round" />
+    </svg>
+  ),
+  rewrites: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 7h11l-3-3M4 7l3 3" />
+      <path d="M20 17H9l3 3M20 17l-3-3" />
+    </svg>
+  ),
+  settings: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M6 5v14M12 5v14M18 5v14" />
+      <circle cx="6" cy="9" r="2.3" fill="var(--bg)" />
+      <circle cx="12" cy="15" r="2.3" fill="var(--bg)" />
+      <circle cx="18" cy="8" r="2.3" fill="var(--bg)" />
+    </svg>
+  ),
+};
+
+/** The destinations shown in the mobile tab bar, mirroring the header nav. The
+ *  Block/Allow tab lands on the first of its sub-pages; the rest map 1:1. */
+const TABS: { to: string; icon: string; labelKey: MessageKey; end?: boolean }[] = [
+  { to: "/", icon: "overview", labelKey: "nav.tab.overview", end: true },
+  { to: "/protokoll", icon: "log", labelKey: "nav.tab.log" },
+  { to: "/listen/url", icon: "lists", labelKey: "nav.tab.lists" },
+  { to: "/rewrites", icon: "rewrites", labelKey: "nav.tab.rewrites" },
+  { to: "/einstellungen", icon: "settings", labelKey: "nav.tab.settings" },
+];
 
 /** The sub-pages the "Block/Allow" area is split across, shown as a dropdown in
  *  the header so no single page runs long. The user's own entries (manual
@@ -102,6 +155,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const { username, logout } = useAuth();
   const { t } = useI18n();
   const { settings } = useSettings();
+  const location = useLocation();
 
   // Show the instance name next to the wordmark (and in the tab title) when the
   // user has set one that is not the default.
@@ -157,7 +211,28 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+      <InstallBanner />
       <main className={styles.main}>{children}</main>
+      <nav className={styles.tabbar} aria-label={t("nav.primary")}>
+        {TABS.map((tab) => {
+          // The Block/Allow tab covers both of its sub-pages, so it reads active
+          // across the whole /listen area, not just its landing page.
+          const forceActive = tab.to === "/listen/url" && location.pathname.startsWith("/listen");
+          return (
+            <NavLink
+              key={tab.to}
+              to={tab.to}
+              end={tab.end}
+              className={({ isActive }) =>
+                isActive || forceActive ? styles.tabActive : styles.tab
+              }
+            >
+              <span className={styles.tabIcon}>{ICONS[tab.icon]}</span>
+              <span className={styles.tabLabel}>{t(tab.labelKey)}</span>
+            </NavLink>
+          );
+        })}
+      </nav>
     </div>
   );
 }

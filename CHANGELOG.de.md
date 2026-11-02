@@ -4,6 +4,22 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.24] - 2026-11-02
+
+- Neu: **JustDNS als App installieren und ein neu gestaltetes Handy-Erlebnis.**
+  JustDNS lässt sich jetzt auf dem Handy oder am PC zum Startbildschirm
+  hinzufügen und öffnet sich wie eine normale App — im Vollbild und mit eigenem
+  Symbol; selbst bei kurz unterbrochener Verbindung zeigt es noch die zuletzt
+  geöffnete Seite. Wenn eine Installation möglich ist, bietet eine kleine Leiste
+  „JustDNS als App installieren“ auf Android und Chrome die Installation mit
+  einem Tipp an oder zeigt auf dem iPhone den Schritt „Teilen → Zum
+  Home-Bildschirm“.
+- Verbessert: **die gesamte Oberfläche ist jetzt fürs Handy gemacht.** Auf einem
+  kleinen Bildschirm wird das obere Menü zu einer unteren Leiste, die du mit dem
+  Daumen erreichst, und jede Seite — Übersicht, Protokoll, Block/Allow, Rewrites
+  und Einstellungen — passt sich an, sodass nichts abgeschnitten wird oder
+  seitlich übersteht. Am Computer bleibt die Ansicht unverändert.
+
 ## [0.1.23] - 2026-11-02
 
 - Neu: **beim Erst-Start aus einer Sicherung wiederherstellen.** Der

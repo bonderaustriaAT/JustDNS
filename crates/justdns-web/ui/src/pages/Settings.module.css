@@ -230,7 +230,12 @@
 
   .profileButton {
     flex: 1;
+    /* Let the segments shrink to share the row; the block-level switch has four
+       or five of them, which otherwise overflow and clip the last label. */
+    min-inline-size: 0;
     text-align: center;
+    font-size: var(--step--2);
+    padding-inline: var(--space-2);
   }
 }
 

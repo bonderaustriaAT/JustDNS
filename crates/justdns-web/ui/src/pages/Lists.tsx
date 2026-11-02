@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { NavLink } from "react-router-dom";
 
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
@@ -425,6 +426,23 @@ export function Lists({ section }: { section: ListsSection }) {
           {refreshing ? t("lists.refreshing") : t("lists.refreshAll")}
         </button>
       </div>
+
+      {/* On phones the header's Block/Allow menu is replaced by the bottom tab
+          bar, so the two sub-pages get an in-page switch of their own here. */}
+      <nav className={styles.subnav} aria-label={t("nav.blockAllow")}>
+        <NavLink
+          to="/listen/url"
+          className={({ isActive }) => (isActive ? styles.subnavActive : styles.subnavLink)}
+        >
+          {t("nav.listsUrl")}
+        </NavLink>
+        <NavLink
+          to="/listen/fertige"
+          className={({ isActive }) => (isActive ? styles.subnavActive : styles.subnavLink)}
+        >
+          {t("nav.listsPresets")}
+        </NavLink>
+      </nav>
 
       {error ? (
         <p className={styles.banner} role="alert">

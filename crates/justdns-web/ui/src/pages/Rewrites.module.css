@@ -13,6 +13,10 @@
 
 .title {
   font-size: var(--step-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .lead {
@@ -301,4 +305,49 @@
 .rowCancel:disabled {
   opacity: 0.55;
   cursor: progress;
+}
+
+/* On a phone the four-column row can't hold the name, addresses and actions side
+   by side without colliding, so it stacks: the switch keeps its own column at
+   the left, the name and the actions share the top row, and the addresses sit on
+   a line beneath them. The inline editor fills the whole area beside the switch. */
+@media (max-width: 540px) {
+  .title {
+    font-size: var(--step-2);
+  }
+
+  .entries {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .entry {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "toggle name  actions"
+      "toggle value value";
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .entryToggle {
+    grid-area: toggle;
+  }
+
+  .entryName {
+    grid-area: name;
+  }
+
+  .entryValue {
+    grid-area: value;
+  }
+
+  .entryActions {
+    grid-area: actions;
+  }
+
+  .rowEdit {
+    grid-column: 2 / -1;
+    grid-row: 1 / -1;
+  }
 }

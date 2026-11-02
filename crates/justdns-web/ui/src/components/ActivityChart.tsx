@@ -28,10 +28,15 @@ export function ActivityChart({ values }: ActivityChartProps) {
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width;
+    // Measure synchronously before the first paint: relying on the observer's
+    // first callback alone can leave the chart stuck at its seed width, which
+    // then overflows a narrow (phone) container and widens the whole page.
+    const measure = () => {
+      const w = el.getBoundingClientRect().width;
       if (w) setWidth(w);
-    });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);

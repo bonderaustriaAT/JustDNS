@@ -251,6 +251,82 @@
 
 @media (max-width: 540px) {
   .main {
-    padding-block: var(--space-5);
+    padding-block-start: var(--space-5);
+  }
+}
+
+/* Mobile tab bar: hidden on desktop. Under 720px the header's link row gives way
+   to a fixed bottom bar, leaving the top bar as just brand + language + logout. */
+.tabbar {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .nav {
+    display: none;
+  }
+
+  .tabbar {
+    display: flex;
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    z-index: 20;
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+    padding-block-start: var(--space-1);
+    padding-block-end: calc(var(--space-1) + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(12px);
+    border-block-start: 1px solid var(--line);
+  }
+
+  .tab,
+  .tabActive {
+    flex: 1 1 0;
+    /* Let the five tabs share the row evenly; without this the labels set each
+       tab's min width and the bar overflows the viewport. */
+    min-inline-size: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-block-size: 46px;
+    padding-block: var(--space-1);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.66rem;
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+
+  .tabLabel {
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tab:hover {
+    color: var(--text);
+  }
+
+  .tabActive {
+    color: var(--signal);
+  }
+
+  .tabIcon {
+    display: inline-flex;
+  }
+
+  .tab svg,
+  .tabActive svg {
+    inline-size: 22px;
+    block-size: 22px;
+  }
+
+  /* Leave room so page content is never hidden behind the fixed bar. */
+  .main {
+    padding-block-end: calc(var(--space-6) + env(safe-area-inset-bottom));
   }
 }
