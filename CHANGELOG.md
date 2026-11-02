@@ -3,6 +3,12 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.20] - 2026-11-02
+
+- The "Protection active" dot now shows a gentle sign of life for everyone. If
+  you have "reduce motion" turned on, you get a soft fade instead of the
+  expanding ring — so the dot still looks live without any large movement.
+
 ## [0.1.19] - 2026-11-01
 
 - Fix: **your DNS rewrites now survive updates and restarts.** They are kept with
