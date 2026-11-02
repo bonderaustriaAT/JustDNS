@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.23] - 2026-11-02
+
+- Neu: **beim Erst-Start aus einer Sicherung wiederherstellen.** Der
+  Einrichtungs-Assistent fragt jetzt auf dem allerersten Bildschirm, ob du
+  JustDNS neu aufsetzen oder eine Sicherung einspielen willst. Beim
+  Wiederherstellen legst du zuerst dein Login an (eine Sicherung enthält nie
+  eins) und spielst dann Einstellungen, Listen und Rewrites in einem Schritt aus
+  der Datei zurück — ideal für einen neuen Server, eine Neuinstallation oder
+  einen Umzug.
+
 ## [0.1.22] - 2026-11-02
 
 - Neu: **wähle, womit eine geblockte Domain beantwortet wird.** Unter
