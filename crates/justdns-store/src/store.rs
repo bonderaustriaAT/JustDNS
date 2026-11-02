@@ -16,7 +16,7 @@ use tracing::warn;
 
 use crate::duck::{DuckStore, StoreError};
 use crate::event::QueryEvent;
-use crate::recorder::{ActivityBucket, Recorder, Stats};
+use crate::recorder::{ActivityBucket, ClientCount, DayStats, Recorder, Stats};
 
 /// Force a flush to DuckDB once this many events have accumulated.
 const FLUSH_BATCH: usize = 128;
@@ -56,7 +56,7 @@ impl Store {
         // come from the whole log, the recent ring from the newest events. This
         // is why an update keeps the dashboard's running totals intact even
         // though only the recent window is held in memory.
-        recorder.rehydrate(duck.recent(capacity)?, duck.stats()?, duck.activity()?);
+        recorder.rehydrate(duck.recent(capacity)?, duck.stats()?, duck.day_buckets()?);
 
         let (writer, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let handle = tokio::spawn(writer_loop(duck, rx));
@@ -91,6 +91,17 @@ impl Store {
     /// Hourly activity, oldest hour first.
     pub fn activity(&self) -> Vec<ActivityBucket> {
         self.recorder.activity()
+    }
+
+    /// Totals over the last day: queries handled, how many were blocked, and the
+    /// mean handling time.
+    pub fn day_stats(&self) -> DayStats {
+        self.recorder.day_stats()
+    }
+
+    /// The busiest clients over the last day, most queries first, up to `n`.
+    pub fn top_clients(&self, n: usize) -> Vec<ClientCount> {
+        self.recorder.top_clients(n)
     }
 }
 

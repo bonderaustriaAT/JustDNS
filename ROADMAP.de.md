@@ -7,15 +7,15 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.25
-(konfigurierbare Block-Antwort).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.26
+(Live-Statistik auf der Übersicht).
 
 ## Phase 1 — Einblick & schnelle Gewinne
 
-- [ ] **Statistik-Reiter.** Eine eigene Seite mit: einer Live-Rate der Anfragen
-  (pro Sekunde oder pro Minute, umschaltbar); Kennzahlen der letzten 24 Stunden
-  (Anfragen gesamt, von Filtern geblockt, durchschnittliche Antwortzeit); und den
-  Top-5-Client-IPs mit ihrem Anteil an den Anfragen.
+- [x] **Live-Statistik.** Eine Live-Rate der Anfragen (pro Sekunde oder pro
+  Minute, umschaltbar), Kennzahlen der letzten 24 Stunden (Anfragen gesamt, von
+  Filtern geblockt, durchschnittliche Antwortzeit) und die Top-5-Client-IPs mit
+  ihrem Anteil an den Anfragen — auf der Übersicht statt auf einer eigenen Seite.
 - [x] **Konfigurierbare Block-Antwort.** Wähle, was ein gesperrter Name
   zurückgibt — eine Null-IP (`0.0.0.0` / `::`, jetzt Standard) oder NXDOMAIN. Eine
   kleine Sperrseite kann später noch folgen.
