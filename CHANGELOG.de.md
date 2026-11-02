@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.25] - 2026-11-02
+
+- Neu: **das Dashboard zeigt die laufende Version.** Eine kleine Zeile am unteren
+  Rand jeder Seite nennt jetzt z. B. „JustDNS v0.1.25“ — so siehst du auf einen
+  Blick, welcher Stand auf einer Box läuft.
+- Behoben: **die obere Leiste ist am Handy nicht mehr verdeckt.** Wenn JustDNS zum
+  Startbildschirm hinzugefügt war, konnte der Statusbalken über dem Kopfbereich
+  liegen und Sprachumschalter und Abmelden verdecken. Der Header lässt jetzt
+  Platz für Statusbalken und Notch.
+
 ## [0.1.24] - 2026-11-02
 
 - Neu: **JustDNS als App installieren und ein neu gestaltetes Handy-Erlebnis.**

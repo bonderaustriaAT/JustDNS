@@ -7,7 +7,7 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.24
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.25
 (konfigurierbare Block-Antwort).
 
 ## Phase 1 — Einblick & schnelle Gewinne

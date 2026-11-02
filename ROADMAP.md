@@ -7,7 +7,7 @@ JustDNS is built to be self-hosted by anyone (AGPL-3.0), so the direction favour
 features that are useful and robust for people running it on their own network.
 The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
-release is v0.1.24 (installable web app and a phone-ready interface).
+release is v0.1.25 (version shown in the dashboard; phone top-bar fix).
 
 ## Phase 1 — Insight & quick wins
 

@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.25] - 2026-11-02
+
+- New: **the dashboard shows which version is running.** A small line at the foot
+  of every page now says, for example, "JustDNS v0.1.25" — so you can tell at a
+  glance which build a box is on.
+- Fixed: **the top bar is no longer hidden on a phone.** When JustDNS was added to
+  the home screen, the status bar could sit on top of the header and hide the
+  language switch and sign-out. The header now clears the status bar and notch.
+
 ## [0.1.24] - 2026-11-02
 
 - New: **install JustDNS as an app, and a redesigned phone experience.** JustDNS

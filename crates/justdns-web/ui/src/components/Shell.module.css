@@ -3,7 +3,12 @@
 }
 
 .bar {
-  padding-block: var(--space-3);
+  /* Clear the device status bar / notch at the top: installed to the home
+     screen (iOS black-translucent, and edge-to-edge Android) the page runs under
+     the status bar, so without this inset the brand, language switch and logout
+     sit hidden behind it. In a normal browser the inset is 0. */
+  padding-block-start: calc(var(--space-3) + env(safe-area-inset-top));
+  padding-block-end: var(--space-3);
   border-block-end: 1px solid var(--line);
   position: sticky;
   inset-block-start: 0;
@@ -249,6 +254,22 @@
   margin-inline: auto;
 }
 
+/* Quiet version line at the foot of every page, so which build is running is
+   always visible without hunting for it. */
+.footer {
+  margin-block-start: var(--space-6);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  text-align: center;
+}
+
+.version {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
 @media (max-width: 540px) {
   .main {
     padding-block-start: var(--space-5);
@@ -325,8 +346,9 @@
     block-size: 22px;
   }
 
-  /* Leave room so page content is never hidden behind the fixed bar. */
+  /* Leave room so page content — including the version footer — is never hidden
+     behind the ~65px fixed tab bar. */
   .main {
-    padding-block-end: calc(var(--space-6) + env(safe-area-inset-bottom));
+    padding-block-end: calc(var(--space-6) + 1.75rem + env(safe-area-inset-bottom));
   }
 }
