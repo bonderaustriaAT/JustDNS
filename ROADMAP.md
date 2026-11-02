@@ -7,13 +7,14 @@ JustDNS is built to be self-hosted by anyone (AGPL-3.0), so the direction favour
 features that are useful and robust for people running it on their own network.
 The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
-release is v0.1.25 (version shown in the dashboard; phone top-bar fix).
+release is v0.1.26 (live statistics on the overview).
 
 ## Phase 1 — Insight & quick wins
 
-- [ ] **Statistics tab.** A page of its own with: a live query rate (per second or
-  per minute, switchable); last-24h figures (total queries, blocked by filters,
-  average response time); and the top 5 client IPs with their share of queries.
+- [x] **Live statistics.** A live query rate (per second or per minute,
+  switchable), last-24h figures (total queries, blocked by filters, average
+  response time) and the top 5 client IPs with their share of queries — shown on
+  the overview rather than a separate page.
 - [x] **Configurable block response.** Choose what a blocked name returns — a null
   IP (`0.0.0.0` / `::`, now the default) or NXDOMAIN. A small block page may still
   come later.

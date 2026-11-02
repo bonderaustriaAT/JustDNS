@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { api, type QueryRow } from "./api";
+import { api, type ClientCount, type QueryRow } from "./api";
 import { displayName, recordTypeLabel, sourceLabel } from "./dns";
 import { useI18n, type Lang } from "./i18n";
 
@@ -8,6 +8,9 @@ const HOUR_MS = 3_600_000;
 const ACTIVITY_HOURS = 24;
 const REFRESH_MS = 5_000;
 const RECENT_LIMIT = 8;
+/** Weight of the newest sample in the live-rate EMA (the rest carries the
+ *  previous value), so the figure steadies instead of jumping each poll. */
+const RATE_SMOOTHING = 0.5;
 
 export interface RecentQuery {
   name: string;
@@ -15,6 +18,12 @@ export interface RecentQuery {
   type: string;
   source: string;
   secondsAgo: number;
+}
+
+export interface DayFigures {
+  total: number;
+  blocked: number;
+  avgDurationMs: number;
 }
 
 export interface OverviewData {
@@ -25,6 +34,12 @@ export interface OverviewData {
   /** Queries per hour over the last 24 hours, oldest first. */
   activity: number[];
   recent: RecentQuery[];
+  /** Smoothed query rate per second, or null until two samples are in. */
+  liveRatePerSec: number | null;
+  /** Last-24h totals. */
+  day: DayFigures;
+  /** Busiest clients over the last 24h, most queries first. */
+  topClients: ClientCount[];
 }
 
 export interface OverviewState {
@@ -65,18 +80,44 @@ export function useOverview(): OverviewState {
     loading: true,
   });
 
+  // The live rate is the change in the cumulative total between two polls. The
+  // previous sample and the smoothed rate ride in refs so they survive re-renders
+  // but reset when the effect re-runs (e.g. on a language switch).
+  const sampleRef = useRef<{ total: number; at: number } | null>(null);
+  const rateRef = useRef<number | null>(null);
+
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    sampleRef.current = null;
+    rateRef.current = null;
 
     async function load() {
       try {
-        const [stats, activity, queries] = await Promise.all([
+        const [stats, statsDay, activity, queries] = await Promise.all([
           api.stats(controller.signal),
+          api.statsDay(controller.signal),
           api.activity(controller.signal),
           api.queries(RECENT_LIMIT, "", controller.signal),
         ]);
         if (!active) return;
+
+        // Derive the per-second rate from the delta since the last sample, then
+        // smooth it so the gauge does not jump; null until a second sample is in.
+        const now = Date.now();
+        const prev = sampleRef.current;
+        let liveRatePerSec: number | null = null;
+        if (prev && now > prev.at) {
+          const instant = Math.max(0, stats.total - prev.total) / ((now - prev.at) / 1000);
+          const smoothed =
+            rateRef.current == null
+              ? instant
+              : rateRef.current * (1 - RATE_SMOOTHING) + instant * RATE_SMOOTHING;
+          rateRef.current = smoothed;
+          liveRatePerSec = smoothed;
+        }
+        sampleRef.current = { total: stats.total, at: now };
+
         setState({
           data: {
             total: stats.total,
@@ -85,6 +126,13 @@ export function useOverview(): OverviewState {
             activeClients: stats.active_clients,
             activity: denseActivity(activity),
             recent: toRecent(queries, lang),
+            liveRatePerSec,
+            day: {
+              total: statsDay.total,
+              blocked: statsDay.blocked,
+              avgDurationMs: statsDay.avg_duration_ms,
+            },
+            topClients: statsDay.top_clients,
           },
           error: null,
           loading: false,

@@ -14,8 +14,10 @@ use std::path::Path;
 
 use duckdb::{Connection, params};
 
+use std::collections::HashMap;
+
 use crate::event::{QueryEvent, QuerySource};
-use crate::recorder::{ActivityBucket, Stats};
+use crate::recorder::{HourBucket, Stats};
 
 /// One hour in milliseconds, used to bucket activity in SQL.
 const HOUR_MS: i64 = 3_600_000;
@@ -140,21 +142,62 @@ impl DuckStore {
         Ok(stats)
     }
 
-    /// Per-hour activity for the most recent 24 hours, oldest hour first.
-    pub fn activity(&self) -> Result<Vec<ActivityBucket>, StoreError> {
+    /// The most recent 24 hours of activity, oldest hour first, with the extra
+    /// per-hour tallies the statistics view needs: blocked count, summed handling
+    /// time and per-client counts. Used to rehydrate the hot view on startup so a
+    /// restart continues the day's figures instead of counting from zero.
+    pub(crate) fn day_buckets(&self) -> Result<Vec<HourBucket>, StoreError> {
+        // Per-hour totals for the most recent 24 hours that saw traffic. SUM is
+        // cast back to BIGINT so it reads as an i64 (DuckDB widens a BIGINT sum
+        // to HUGEINT otherwise); per-hour handling time never approaches i64.
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, COUNT(*)
+            "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour,
+                    COUNT(*),
+                    COUNT(*) FILTER (WHERE source = 'blocked'),
+                    CAST(COALESCE(SUM(duration_ms), 0) AS BIGINT)
              FROM queries GROUP BY hour ORDER BY hour DESC LIMIT 24"
         ))?;
         let mut buckets = stmt
             .query_map([], |row| {
-                Ok(ActivityBucket {
-                    hour_ms: row.get(0)?,
-                    count: count(row, 1)?,
-                })
+                let mut bucket = HourBucket::new(row.get::<_, i64>(0)?);
+                bucket.count = count(row, 1)?;
+                bucket.blocked = count(row, 2)?;
+                bucket.duration_sum_ms = count(row, 3)?;
+                Ok(bucket)
             })?
             .collect::<Result<Vec<_>, _>>()?;
-        buckets.reverse();
+        buckets.reverse(); // oldest hour first, matching the hot view
+
+        // Seed per-client counts for exactly those hours. The oldest kept hour is
+        // the cutoff; ordering by count puts the busiest clients first so they win
+        // the per-hour cap when an hour has more distinct clients than it keeps.
+        if let Some(cutoff) = buckets.first().map(|bucket| bucket.hour_ms) {
+            let index: HashMap<i64, usize> = buckets
+                .iter()
+                .enumerate()
+                .map(|(i, bucket)| (bucket.hour_ms, i))
+                .collect();
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, client, COUNT(*)
+                 FROM queries WHERE at_ms >= ?
+                 GROUP BY hour, client ORDER BY hour, COUNT(*) DESC"
+            ))?;
+            let rows = stmt.query_map([cutoff], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    count(row, 2)?,
+                ))
+            })?;
+            for row in rows {
+                let (hour, client, count) = row?;
+                if let Some(&i) = index.get(&hour) {
+                    let client = client.parse().unwrap_or(UNKNOWN_CLIENT);
+                    buckets[i].add_client(client, count);
+                }
+            }
+        }
+
         Ok(buckets)
     }
 }
@@ -317,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_buckets_by_hour_oldest_first() {
+    fn day_buckets_by_hour_oldest_first() {
         let store = DuckStore::open_in_memory().unwrap();
         store
             .insert_batch(&[
@@ -327,20 +370,45 @@ mod tests {
             ])
             .unwrap();
 
-        let activity = store.activity().unwrap();
-        assert_eq!(
-            activity,
-            vec![
-                ActivityBucket {
-                    hour_ms: 0,
-                    count: 2,
-                },
-                ActivityBucket {
-                    hour_ms: HOUR_MS,
-                    count: 1,
-                },
-            ]
-        );
+        let buckets = store.day_buckets().unwrap();
+        let shape: Vec<(i64, u64)> = buckets.iter().map(|b| (b.hour_ms, b.count)).collect();
+        assert_eq!(shape, vec![(0, 2), (HOUR_MS, 1)]);
+    }
+
+    #[test]
+    fn day_buckets_carry_blocked_duration_and_clients() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let client_a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
+        let client_b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 20));
+        let mk = |at_ms, source, client, duration_ms| QueryEvent {
+            at_ms,
+            client,
+            name: "example.com.".to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source,
+            duration_ms,
+            answers: 1,
+            addresses: Vec::new(),
+        };
+        let store = DuckStore::open_in_memory().unwrap();
+        store
+            .insert_batch(&[
+                mk(5, QuerySource::Upstream, client_a, 10),
+                mk(6, QuerySource::Blocked, client_a, 2),
+                mk(7, QuerySource::Cache, client_b, 0),
+            ])
+            .unwrap();
+
+        let buckets = store.day_buckets().unwrap();
+        assert_eq!(buckets.len(), 1, "all three fall in hour 0");
+        let hour = &buckets[0];
+        assert_eq!(hour.count, 3);
+        assert_eq!(hour.blocked, 1, "one blocked query");
+        assert_eq!(hour.duration_sum_ms, 12, "10 + 2 + 0");
+        assert_eq!(hour.clients.get(&client_a), Some(&2));
+        assert_eq!(hour.clients.get(&client_b), Some(&1));
     }
 
     #[test]

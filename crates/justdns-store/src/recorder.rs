@@ -9,7 +9,9 @@
 //! happened", so it holds a bounded ring of recent events and the last day of
 //! hourly counts.
 
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -20,6 +22,10 @@ use crate::event::{QueryEvent, QuerySource};
 const HOUR_MS: i64 = 3_600_000;
 /// How many hours of activity to keep.
 const ACTIVITY_HOURS: usize = 24;
+/// Most distinct client addresses tracked per hour. A busy or open resolver can
+/// see many clients; past this cap an hour stops taking on new ones, so the
+/// per-hour tally stays bounded. On a home LAN the real count is far below it.
+const MAX_CLIENTS_PER_HOUR: usize = 1024;
 
 /// Response code for a server failure.
 const RCODE_SERVFAIL: u16 = 2;
@@ -54,10 +60,75 @@ pub struct ActivityBucket {
     pub count: u64,
 }
 
+/// Figures over the last day's worth of activity buckets, for the dashboard's
+/// statistics: how many queries were handled, how many of them were blocked,
+/// and the mean handling time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct DayStats {
+    /// Queries handled across the kept hours.
+    pub total: u64,
+    /// How many of them were refused by the blocking engine.
+    pub blocked: u64,
+    /// Mean handling time across those queries, in milliseconds. Zero when none.
+    pub avg_duration_ms: f64,
+}
+
+/// One client and how many queries it made over the kept hours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ClientCount {
+    /// The client's address.
+    pub client: IpAddr,
+    /// Queries it made across the kept hours.
+    pub count: u64,
+}
+
+/// One wall-clock hour of activity, with the extra tallies the statistics view
+/// needs on top of the plain per-hour count: blocked queries, the summed
+/// handling time (to average later), and a bounded per-client count. Lives only
+/// in the hot view; projected to [`ActivityBucket`] for the activity chart.
+#[derive(Clone, Debug)]
+pub(crate) struct HourBucket {
+    pub(crate) hour_ms: i64,
+    pub(crate) count: u64,
+    pub(crate) blocked: u64,
+    pub(crate) duration_sum_ms: u64,
+    pub(crate) clients: HashMap<IpAddr, u64>,
+}
+
+impl HourBucket {
+    /// A fresh, empty bucket for `hour_ms`.
+    pub(crate) fn new(hour_ms: i64) -> Self {
+        Self {
+            hour_ms,
+            count: 0,
+            blocked: 0,
+            duration_sum_ms: 0,
+            clients: HashMap::new(),
+        }
+    }
+
+    /// Count one client visit, respecting the per-hour cap: an address already
+    /// tracked keeps counting, a new one is dropped once the hour is full.
+    fn bump_client(&mut self, client: IpAddr) {
+        self.add_client(client, 1);
+    }
+
+    /// Add `count` visits for `client`, respecting the per-hour cap. Used both by
+    /// [`Self::bump_client`] (count 1, live) and by rehydration, which seeds
+    /// already-aggregated per-client counts from the durable log.
+    pub(crate) fn add_client(&mut self, client: IpAddr, count: u64) {
+        if let Some(existing) = self.clients.get_mut(&client) {
+            *existing += count;
+        } else if self.clients.len() < MAX_CLIENTS_PER_HOUR {
+            self.clients.insert(client, count);
+        }
+    }
+}
+
 struct State {
     recent: VecDeque<QueryEvent>,
     stats: Stats,
-    activity: VecDeque<ActivityBucket>,
+    activity: VecDeque<HourBucket>,
 }
 
 /// A bounded, lock-guarded view of recent query activity.
@@ -87,11 +158,11 @@ impl Recorder {
     /// stored oldest-at-front, the way [`Self::record`] builds it. The totals
     /// are taken as given rather than recomputed from the recent window, so they
     /// reflect the entire history even though only the window is kept in memory.
-    pub fn rehydrate(
+    pub(crate) fn rehydrate(
         &self,
         recent_newest_first: Vec<QueryEvent>,
         stats: Stats,
-        activity: Vec<ActivityBucket>,
+        activity: Vec<HourBucket>,
     ) {
         let mut state = self.state.lock().expect("recorder lock poisoned");
         state.stats = stats;
@@ -122,7 +193,14 @@ impl Recorder {
             _ => {}
         }
 
-        bump_activity(&mut state.activity, event.at_ms);
+        let blocked = event.source == QuerySource::Blocked;
+        bump_activity(
+            &mut state.activity,
+            event.at_ms,
+            blocked,
+            event.duration_ms,
+            event.client,
+        );
 
         state.recent.push_back(event);
         while state.recent.len() > self.capacity {
@@ -159,33 +237,102 @@ impl Recorder {
         self.state.lock().expect("recorder lock poisoned").stats
     }
 
-    /// Hourly activity, oldest hour first.
+    /// Hourly activity, oldest hour first — the plain per-hour counts the
+    /// activity chart draws, projected from the richer internal buckets.
     pub fn activity(&self) -> Vec<ActivityBucket> {
         let state = self.state.lock().expect("recorder lock poisoned");
-        state.activity.iter().copied().collect()
+        state
+            .activity
+            .iter()
+            .map(|bucket| ActivityBucket {
+                hour_ms: bucket.hour_ms,
+                count: bucket.count,
+            })
+            .collect()
+    }
+
+    /// Totals over the kept hours (the last day): queries handled, how many were
+    /// blocked, and the mean handling time.
+    pub fn day_stats(&self) -> DayStats {
+        let state = self.state.lock().expect("recorder lock poisoned");
+        let mut total = 0u64;
+        let mut blocked = 0u64;
+        let mut duration_sum = 0u64;
+        for bucket in &state.activity {
+            total += bucket.count;
+            blocked += bucket.blocked;
+            duration_sum += bucket.duration_sum_ms;
+        }
+        let avg_duration_ms = if total == 0 {
+            0.0
+        } else {
+            duration_sum as f64 / total as f64
+        };
+        DayStats {
+            total,
+            blocked,
+            avg_duration_ms,
+        }
+    }
+
+    /// The busiest clients over the kept hours, most queries first, up to `n`.
+    /// Counts are summed across the hourly buckets.
+    pub fn top_clients(&self, n: usize) -> Vec<ClientCount> {
+        let state = self.state.lock().expect("recorder lock poisoned");
+        let mut totals: HashMap<IpAddr, u64> = HashMap::new();
+        for bucket in &state.activity {
+            for (&client, &count) in &bucket.clients {
+                *totals.entry(client).or_insert(0) += count;
+            }
+        }
+        let mut ranked: Vec<ClientCount> = totals
+            .into_iter()
+            .map(|(client, count)| ClientCount { client, count })
+            .collect();
+        // Most queries first; ties broken by address so the order is stable.
+        ranked.sort_by(|a, b| b.count.cmp(&a.count).then(a.client.cmp(&b.client)));
+        ranked.truncate(n);
+        ranked
     }
 }
 
 /// Add one query to the hour its timestamp falls in, keeping the buckets sorted
-/// and trimmed to the most recent [`ACTIVITY_HOURS`].
-fn bump_activity(buckets: &mut VecDeque<ActivityBucket>, at_ms: i64) {
+/// and trimmed to the most recent [`ACTIVITY_HOURS`]. Updates the hour's count,
+/// its blocked tally, its summed handling time and its per-client count.
+fn bump_activity(
+    buckets: &mut VecDeque<HourBucket>,
+    at_ms: i64,
+    blocked: bool,
+    duration_ms: u32,
+    client: IpAddr,
+) {
     let hour = at_ms - at_ms.rem_euclid(HOUR_MS);
 
-    if let Some(bucket) = buckets.iter_mut().find(|bucket| bucket.hour_ms == hour) {
-        bucket.count += 1;
-        return;
-    }
+    let bucket = match buckets.iter_mut().find(|bucket| bucket.hour_ms == hour) {
+        Some(bucket) => bucket,
+        None => {
+            buckets.push_back(HourBucket::new(hour));
+            buckets
+                .make_contiguous()
+                .sort_by_key(|bucket| bucket.hour_ms);
+            while buckets.len() > ACTIVITY_HOURS {
+                buckets.pop_front();
+            }
+            // Re-find after the sort/trim: the new bucket may have moved, or even
+            // been trimmed away if it was older than every kept hour.
+            match buckets.iter_mut().find(|bucket| bucket.hour_ms == hour) {
+                Some(bucket) => bucket,
+                None => return,
+            }
+        }
+    };
 
-    buckets.push_back(ActivityBucket {
-        hour_ms: hour,
-        count: 1,
-    });
-    buckets
-        .make_contiguous()
-        .sort_by_key(|bucket| bucket.hour_ms);
-    while buckets.len() > ACTIVITY_HOURS {
-        buckets.pop_front();
+    bucket.count += 1;
+    if blocked {
+        bucket.blocked += 1;
     }
+    bucket.duration_sum_ms += u64::from(duration_ms);
+    bucket.bump_client(client);
 }
 
 #[cfg(test)]
@@ -334,5 +481,62 @@ mod tests {
         assert_eq!(activity.len(), ACTIVITY_HOURS);
         assert_eq!(activity.first().unwrap().hour_ms, 6 * HOUR_MS);
         assert_eq!(activity.last().unwrap().hour_ms, 29 * HOUR_MS);
+    }
+
+    /// A query event with a chosen client, source and handling time.
+    fn event_with(at_ms: i64, source: QuerySource, client: Ipv4Addr, duration_ms: u32) -> QueryEvent {
+        QueryEvent {
+            at_ms,
+            client: IpAddr::V4(client),
+            name: "example.com.".to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source,
+            duration_ms,
+            answers: 1,
+            addresses: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn day_stats_sum_count_blocked_and_average_duration() {
+        let recorder = Recorder::new(100);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        recorder.record(event_with(5, QuerySource::Upstream, a, 10));
+        recorder.record(event_with(6, QuerySource::Blocked, a, 2));
+        recorder.record(event_with(HOUR_MS + 1, QuerySource::Cache, a, 0));
+
+        let day = recorder.day_stats();
+        assert_eq!(day.total, 3);
+        assert_eq!(day.blocked, 1);
+        // (10 + 2 + 0) / 3 handled queries.
+        assert!((day.avg_duration_ms - 4.0).abs() < 1e-9, "{day:?}");
+    }
+
+    #[test]
+    fn day_stats_average_is_zero_without_queries() {
+        assert_eq!(Recorder::new(10).day_stats().avg_duration_ms, 0.0);
+    }
+
+    #[test]
+    fn top_clients_rank_by_count_across_hours_then_address() {
+        let recorder = Recorder::new(100);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        let b = Ipv4Addr::new(10, 0, 0, 2);
+        let c = Ipv4Addr::new(10, 0, 0, 3);
+        // a: 3 (spread across two hours), b: 2, c: 2 — c loses the tie by address.
+        recorder.record(event_with(1, QuerySource::Upstream, a, 1));
+        recorder.record(event_with(2, QuerySource::Upstream, a, 1));
+        recorder.record(event_with(HOUR_MS + 1, QuerySource::Upstream, a, 1));
+        recorder.record(event_with(3, QuerySource::Upstream, b, 1));
+        recorder.record(event_with(4, QuerySource::Upstream, b, 1));
+        recorder.record(event_with(5, QuerySource::Upstream, c, 1));
+        recorder.record(event_with(6, QuerySource::Upstream, c, 1));
+
+        let top = recorder.top_clients(2);
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0], ClientCount { client: IpAddr::V4(a), count: 3 });
+        // b and c both have 2; b (…0.2) sorts before c (…0.3).
+        assert_eq!(top[1], ClientCount { client: IpAddr::V4(b), count: 2 });
     }
 }

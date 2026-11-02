@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.26] - 2026-11-02
+
+- Neu: **Live-Statistik auf der Übersicht.** Die Übersicht zeigt jetzt eine
+  Live-Anfragerate — umschaltbar zwischen pro Sekunde und pro Minute — dazu
+  Kennzahlen der letzten 24 Stunden (Anfragen gesamt, davon geblockt und die
+  durchschnittliche Antwortzeit) sowie die fünf aktivsten Clients mit ihrem
+  Anteil an den Anfragen.
+
 ## [0.1.25] - 2026-11-02
 
 - Neu: **das Dashboard zeigt die laufende Version.** Eine kleine Zeile am unteren

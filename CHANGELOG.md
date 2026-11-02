@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.26] - 2026-11-02
+
+- New: **live statistics on the overview.** The overview now shows a live query
+  rate — switchable between per second and per minute — alongside last-24-hour
+  figures (queries handled, how many were blocked, and the average response time)
+  and the five busiest clients with their share of queries.
+
 ## [0.1.25] - 2026-11-02
 
 - New: **the dashboard shows which version is running.** A small line at the foot

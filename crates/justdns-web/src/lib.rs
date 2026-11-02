@@ -26,7 +26,7 @@ use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
 use justdns_rewrite::{Rewrite, RewriteError, RewriteStore, RewritesView};
-use justdns_store::{ActivityBucket, QueryEvent, Store};
+use justdns_store::{ActivityBucket, ClientCount, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -153,6 +153,7 @@ fn router(state: AppState) -> Router {
     // UI (so the login screen itself can load) stay public.
     let protected = Router::new()
         .route("/api/stats", get(stats))
+        .route("/api/stats/day", get(stats_day))
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
@@ -841,6 +842,31 @@ async fn stats(State(store): State<Store>) -> Json<StatsResponse> {
     })
 }
 
+/// How many top clients the statistics view asks for.
+const TOP_CLIENTS: usize = 5;
+
+/// The last-24h figures for the dashboard's statistics: queries handled, how
+/// many were blocked, the mean handling time, and the busiest clients. The
+/// live query rate is derived on the client from successive `/api/stats` polls,
+/// so it is not part of this payload.
+#[derive(Serialize)]
+struct DayStatsResponse {
+    total: u64,
+    blocked: u64,
+    avg_duration_ms: f64,
+    top_clients: Vec<ClientCount>,
+}
+
+async fn stats_day(State(store): State<Store>) -> Json<DayStatsResponse> {
+    let day = store.day_stats();
+    Json(DayStatsResponse {
+        total: day.total,
+        blocked: day.blocked,
+        avg_duration_ms: day.avg_duration_ms,
+        top_clients: store.top_clients(TOP_CLIENTS),
+    })
+}
+
 async fn activity(State(store): State<Store>) -> Json<Vec<ActivityBucket>> {
     Json(store.activity())
 }
@@ -1045,6 +1071,42 @@ mod tests {
         assert!(body.contains("\"cache_hits\":1"), "{body}");
         assert!(body.contains("\"active_clients\":2"), "{body}");
         assert!(body.contains("\"blocked\":0"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn stats_day_reports_window_blocked_average_and_top_clients() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        // Two queries from .1 (one of them blocked) and one from .2; every sample
+        // has a 5 ms handling time, so the mean is 5.
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "a.example",
+            QuerySource::Upstream,
+        ));
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "ad.doubleclick.net",
+            QuerySource::Blocked,
+        ));
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 2),
+            "b.example",
+            QuerySource::Cache,
+        ));
+
+        let body = body_of(get(store, "/api/stats/day").await).await;
+        assert!(body.contains("\"total\":3"), "{body}");
+        assert!(body.contains("\"blocked\":1"), "{body}");
+        assert!(body.contains("\"avg_duration_ms\":5"), "{body}");
+        // Busiest client first, with its count.
+        assert!(
+            body.contains("\"client\":\"10.0.0.1\",\"count\":2"),
+            "{body}"
+        );
+        assert!(
+            body.contains("\"client\":\"10.0.0.2\",\"count\":1"),
+            "{body}"
+        );
     }
 
     #[tokio::test]

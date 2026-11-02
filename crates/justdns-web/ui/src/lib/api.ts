@@ -17,6 +17,21 @@ export interface ActivityBucket {
   count: number;
 }
 
+/** One client and how many queries it made over the last 24 hours. */
+export interface ClientCount {
+  client: string;
+  count: number;
+}
+
+/** Last-24h figures for the overview's statistics. The live query rate is
+ *  derived on the client from successive `stats` polls, not part of this. */
+export interface DayStats {
+  total: number;
+  blocked: number;
+  avg_duration_ms: number;
+  top_clients: ClientCount[];
+}
+
 export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 
 /// The speed/privacy profile: a single switch that picks the resolvers and how
@@ -255,6 +270,7 @@ async function postJson<Res>(path: string, body: unknown): Promise<Res> {
 
 export const api = {
   stats: (signal?: AbortSignal) => getJson<Stats>("/api/stats", signal),
+  statsDay: (signal?: AbortSignal) => getJson<DayStats>("/api/stats/day", signal),
   activity: (signal?: AbortSignal) => getJson<ActivityBucket[]>("/api/activity", signal),
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });

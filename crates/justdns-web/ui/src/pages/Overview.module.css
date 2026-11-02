@@ -75,6 +75,162 @@
   font-size: var(--step-1);
 }
 
+/* Live query rate: the one figure that moves, with a quiet unit switch. */
+.liveRate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.liveRateHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.rateLabel {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* A compact segmented control, mirroring the header's language switch. */
+.rateSwitch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.rateButton {
+  font: inherit;
+  font-size: var(--step--2);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.rateButton + .rateButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.rateButton:hover {
+  color: var(--text);
+}
+
+.rateButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rateButton {
+    transition: none;
+  }
+}
+
+.rateValue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--step-hero);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.95;
+}
+
+.rateUnit {
+  font-size: var(--step-1);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.unit {
+  font-size: var(--step-1);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* A titled block (the last-24h figures, the busiest clients). */
+.day,
+.clients {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  font-size: var(--step-1);
+}
+
+/* The last-24h stat row sits inside its titled block, so it carries no border
+   of its own — the block's heading already sets it apart. */
+.day .stats {
+  border-block: none;
+  padding-block: 0;
+}
+
+/* Busiest clients: IP, a share bar, then the count and its percentage. */
+.clientList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.clientRow {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.clientIp {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientBar {
+  block-size: 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.clientBarFill {
+  display: block;
+  block-size: 100%;
+  border-radius: 999px;
+  background: var(--signal);
+}
+
+.clientMeta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.clientShare {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
 /* Secondary stats: spacing and hairlines carry the hierarchy, not cards. */
 .stats {
   display: flex;
