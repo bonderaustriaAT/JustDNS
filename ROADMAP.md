@@ -7,7 +7,7 @@ JustDNS is built to be self-hosted by anyone (AGPL-3.0), so the direction favour
 features that are useful and robust for people running it on their own network.
 The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
-release is v0.1.17 (setup wizard, protection strength, instance name).
+release is v0.1.21 (backup & restore).
 
 ## Phase 1 — Insight & quick wins
 
@@ -16,7 +16,7 @@ release is v0.1.17 (setup wizard, protection strength, instance name).
   average response time); and the top 5 client IPs with their share of queries.
 - [ ] **Configurable block response.** Choose what a blocked name returns — today
   it is NXDOMAIN; options to come are `0.0.0.0` / `::` or a small block page.
-- [ ] **Backup & restore.** Export the whole configuration — settings, lists,
+- [x] **Backup & restore.** Export the whole configuration — settings, lists,
   subscriptions and rewrites — to a single file and import it back. This also lays
   the groundwork for syncing two servers later (Phase 5).
 - [ ] **Reusable address objects (aliases).** Define a named object — say
@@ -24,6 +24,10 @@ release is v0.1.17 (setup wizard, protection strength, instance name).
   instead of typing the address each time. Change the object's address once and
   every rewrite that points at it is updated at once, so you never edit the same
   IP in a dozen places.
+- [ ] **Installable web app (PWA).** A mobile-friendly, installable version of
+  the dashboard — add it to your phone's home screen and manage JustDNS on the
+  go. Pulled forward as an early win; it wraps the dashboard you already have, so
+  full native apps can stay later (Phase 6).
 
 ## Phase 2 — Devices & policies
 
@@ -56,8 +60,6 @@ release is v0.1.17 (setup wizard, protection strength, instance name).
 
 ## Phase 6 — Apps
 
-- [ ] **Installable web app (PWA) first.** A mobile-friendly, installable version
-  of the dashboard — add it to your phone's home screen and manage JustDNS on the
-  go, before any native app exists.
-- [ ] **Native Android & iOS apps.** Dedicated apps on top of that, for a
-  first-class mobile experience and tighter operating-system integration.
+- [ ] **Native Android & iOS apps.** Dedicated apps on top of the web app, for a
+  first-class mobile experience and tighter operating-system integration. The
+  installable web app (Phase 1) comes first and covers mobile use until then.
