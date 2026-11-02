@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.20] - 2026-11-02
+
+- Der Punkt neben „Schutz aktiv" zeigt jetzt für alle ein sanftes Lebenszeichen.
+  Mit aktivierter „Reduzierter Bewegung" siehst du statt des expandierenden Rings
+  ein weiches Auf- und Abblenden — der Punkt wirkt lebendig, ganz ohne große
+  Bewegung.
+
 ## [0.1.19] - 2026-11-01
 
 - Behoben: **Deine DNS-Rewrites überstehen jetzt Updates und Neustarts.** Sie

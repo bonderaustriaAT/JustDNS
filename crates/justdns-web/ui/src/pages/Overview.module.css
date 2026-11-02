@@ -41,10 +41,24 @@
   }
 }
 
+/* Reduced-motion: drop the expanding ring (the part that can bother motion-
+   sensitive viewers) but keep a sign of life — a static halo that gently fades
+   in and out. Opacity breathing carries no positional motion, so everyone still
+   sees the dot is live. */
 @media (prefers-reduced-motion: reduce) {
   .dot {
-    animation: none;
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 20%, transparent);
+    animation: dotBreathe 2.8s ease-in-out infinite;
+  }
+}
+
+@keyframes dotBreathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
   }
 }
 
