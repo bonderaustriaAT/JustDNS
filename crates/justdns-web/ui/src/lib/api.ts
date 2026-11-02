@@ -30,6 +30,11 @@ export type BlockLevel = "off" | "minimal" | "standard" | "extreme" | "custom";
 /// How a user-defined resolver is reached. Matches the Rust `CustomTransport`.
 export type CustomTransport = "plain" | "dot" | "doh";
 
+/// What a blocked name is answered with. Matches the Rust `BlockResponse`.
+/// "null-ip" hands back 0.0.0.0 / :: (default); "nx-domain" says the name does
+/// not exist.
+export type BlockResponse = "null-ip" | "nx-domain";
+
 /// A resolver the user entered by hand. Matches the Rust `CustomUpstream`;
 /// stored as typed so a half-finished entry survives editing.
 export interface CustomUpstream {
@@ -58,6 +63,8 @@ export interface ServerSettings {
   blockLevel: BlockLevel;
   /// A display name for this instance, shown in the header.
   instanceName: string;
+  /// What a blocked name is answered with: the null IP (default) or NXDOMAIN.
+  blockResponse: BlockResponse;
 }
 
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";

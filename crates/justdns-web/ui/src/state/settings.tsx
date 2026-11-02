@@ -12,6 +12,7 @@ import {
 import {
   api,
   type BlockLevel,
+  type BlockResponse,
   type CustomTransport,
   type CustomUpstream,
   type ServerSettings,
@@ -19,7 +20,7 @@ import {
   type UpstreamMode,
 } from "../lib/api";
 
-export type { BlockLevel, CustomTransport, CustomUpstream, SpeedProfile, UpstreamMode };
+export type { BlockLevel, BlockResponse, CustomTransport, CustomUpstream, SpeedProfile, UpstreamMode };
 
 /// The full settings the UI works with: the server-persisted fields plus
 /// `expertMode`, a per-browser preference about what the UI reveals that the
@@ -44,6 +45,7 @@ const SERVER_DEFAULTS: ServerSettings = {
   logRetentionDays: 7,
   blockLevel: "custom",
   instanceName: "JustDNS",
+  blockResponse: "null-ip",
 };
 
 const EXPERT_KEY = "justdns.expertMode";
@@ -63,6 +65,7 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "logRetentionDays",
   "blockLevel",
   "instanceName",
+  "blockResponse",
 ];
 
 function toServer(settings: Settings): ServerSettings {

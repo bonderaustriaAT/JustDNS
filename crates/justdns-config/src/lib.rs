@@ -63,6 +63,23 @@ pub enum BlockLevel {
     Custom,
 }
 
+/// What JustDNS answers when a name is blocked. `NullIp` hands back the
+/// unroutable null address (`0.0.0.0` for A, `::` for AAAA), so a client's
+/// connection to a blocked host fails at once and apps move on — this is the
+/// default, and what AdGuard Home and Pi-hole do out of the box. `NxDomain`
+/// says the name does not exist: tidier in a log, but some clients (notably
+/// smart-TV and mobile video players) retry a failed lookup with backoff, which
+/// can make playback stall.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BlockResponse {
+    /// Answer a blocked name with the null IP (`0.0.0.0` / `::`).
+    #[default]
+    NullIp,
+    /// Answer that the blocked name does not exist (NXDOMAIN).
+    NxDomain,
+}
+
 /// How a user-defined upstream is reached. Mirrors the DNS core's transport
 /// kinds; kept here as its own type so the config crate stays a leaf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +165,9 @@ pub struct Settings {
     /// A display name for this instance, shown in the header. Free text the user
     /// sets in the setup wizard; defaults to "JustDNS".
     pub instance_name: String,
+    /// What a blocked name is answered with: the null IP (the default) or
+    /// NXDOMAIN. Wired live — a change takes effect on the next query.
+    pub block_response: BlockResponse,
 }
 
 impl Default for Settings {
@@ -166,6 +186,7 @@ impl Default for Settings {
             log_retention_days: 7,
             block_level: BlockLevel::Custom,
             instance_name: "JustDNS".to_owned(),
+            block_response: BlockResponse::NullIp,
         }
     }
 }
@@ -202,6 +223,9 @@ struct Inner {
     block_ads_trackers: Arc<AtomicBool>,
     block_malware: Arc<AtomicBool>,
     safe_search: Arc<AtomicBool>,
+    /// True when a blocked name is answered with the null IP, false for NXDOMAIN.
+    /// The DNS pipeline reads it per query, so the mode flips without a restart.
+    block_null_ip: Arc<AtomicBool>,
     /// Run after each change to apply settings the engine owns (router, cache)
     /// that cannot be expressed as a simple atomic flag here.
     on_change: RwLock<Option<OnChange>>,
@@ -244,6 +268,10 @@ impl ConfigStore {
                 block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
                 block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
                 safe_search: Arc::new(AtomicBool::new(settings.safe_search)),
+                block_null_ip: Arc::new(AtomicBool::new(matches!(
+                    settings.block_response,
+                    BlockResponse::NullIp
+                ))),
                 on_change: RwLock::new(None),
                 settings: RwLock::new(settings),
             }),
@@ -281,6 +309,10 @@ impl ConfigStore {
         self.inner
             .safe_search
             .store(settings.safe_search, Ordering::Relaxed);
+        self.inner.block_null_ip.store(
+            matches!(settings.block_response, BlockResponse::NullIp),
+            Ordering::Relaxed,
+        );
         *self.inner.settings.write().expect("config lock poisoned") = settings.clone();
         // Apply engine-owned settings (router, cache tuning) live. Taken as a
         // clone so the lock is not held across the callback. Done even if the
@@ -315,6 +347,12 @@ impl ConfigStore {
     /// The shared flag gating safe search (the DNS pipeline reads it per query).
     pub fn safe_search_flag(&self) -> Arc<AtomicBool> {
         self.inner.safe_search.clone()
+    }
+
+    /// The shared flag for the block response: true answers a blocked name with
+    /// the null IP, false with NXDOMAIN. The DNS pipeline reads it per query.
+    pub fn block_null_ip_flag(&self) -> Arc<AtomicBool> {
+        self.inner.block_null_ip.clone()
     }
 }
 
@@ -520,6 +558,47 @@ mod tests {
         assert!(json.contains("\"instanceName\":\"Heimnetz\""));
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn block_response_round_trips_and_defaults_to_null_ip() {
+        assert_eq!(Settings::default().block_response, BlockResponse::NullIp);
+        let settings = Settings {
+            block_response: BlockResponse::NxDomain,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"blockResponse\":\"nx-domain\""), "{json}");
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+        // The default serialises as the kebab-case null-ip.
+        assert!(
+            serde_json::to_string(&Settings::default())
+                .unwrap()
+                .contains("\"blockResponse\":\"null-ip\"")
+        );
+    }
+
+    #[test]
+    fn older_config_without_block_response_defaults_to_null_ip() {
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        assert_eq!(store.get().block_response, BlockResponse::NullIp);
+    }
+
+    #[test]
+    fn set_publishes_the_block_null_ip_flag_live() {
+        let (_dir, path) = temp_path();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let flag = store.block_null_ip_flag();
+        // Default is null-ip, so the flag starts true.
+        assert!(flag.load(Ordering::Relaxed));
+
+        let mut next = store.get();
+        next.block_response = BlockResponse::NxDomain;
+        store.set(next).unwrap();
+        assert!(!flag.load(Ordering::Relaxed), "flag follows the setting");
     }
 
     #[test]

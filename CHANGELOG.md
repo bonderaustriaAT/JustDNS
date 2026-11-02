@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.22] - 2026-11-02
+
+- New: **choose what a blocked name answers with.** Under Settings → Protection,
+  "Answer for blocked domains" now lets you pick between a null IP (`0.0.0.0` /
+  `::`) and NXDOMAIN. **The new default is the null IP** — the same as AdGuard —
+  so a blocked ad or telemetry host fails to connect instantly and apps move on.
+  This fixes stalls some video players (for example YouTube) had with NXDOMAIN,
+  where the player would retry the failed lookup. You can switch back to NXDOMAIN
+  at any time.
+
 ## [0.1.21] - 2026-11-02
 
 - New: **back up and restore your setup.** Under Settings → Backup & restore you
