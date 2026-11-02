@@ -415,6 +415,12 @@
   gap: var(--space-3);
 }
 
+/* The restore file picker is driven by its own button, so the native input is
+   hidden but kept in the DOM (and reachable) rather than removed. */
+.fileInput {
+  display: none;
+}
+
 .actionButton {
   font: inherit;
   font-size: var(--step--1);

@@ -308,6 +308,18 @@ export const api = {
     sendJson<RewritesView>("DELETE", "/api/rewrites", { name }),
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
+  /** Download the full configuration backup (settings, lists and rewrites) as a
+   *  Blob the caller saves to a file. */
+  downloadBackup: async (): Promise<Blob> => {
+    const response = await fetch("/api/backup");
+    if (!response.ok) {
+      throw failed("/api/backup", response.status);
+    }
+    return response.blob();
+  },
+  /** Restore a backup file's parsed JSON, replacing the current settings, lists
+   *  and rewrites. The server refuses a file that is not a JustDNS backup. */
+  restoreBackup: (backup: unknown) => sendJson<void>("POST", "/api/backup/restore", backup),
   authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
   setup: (username: string, password: string) =>
     postJson<{ username: string }>("/api/auth/setup", { username, password }),

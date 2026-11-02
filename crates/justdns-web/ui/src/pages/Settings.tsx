@@ -1,8 +1,9 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
-import { api } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import {
@@ -53,6 +54,141 @@ function ClearCacheButton() {
         <span className={styles.actionError}>{t("settings.clearCacheError")}</span>
       ) : null}
     </div>
+  );
+}
+
+/** Export the whole configuration to a file, and restore one. Export downloads
+ *  a JSON backup; restore reads a chosen file, confirms, applies it on the
+ *  server and reloads so every view reflects the restored data. */
+function BackupSection() {
+  const { t } = useI18n();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [exportState, setExportState] = useState<"idle" | "busy" | "error">("idle");
+  const [importState, setImportState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [importError, setImportError] = useState<string | null>(null);
+  // The parsed backup awaiting the confirm step, or null when none is pending.
+  const [pending, setPending] = useState<unknown>(null);
+
+  async function download() {
+    setExportState("busy");
+    try {
+      const blob = await api.downloadBackup();
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `justdns-backup-${stamp}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setExportState("idle");
+    } catch {
+      setExportState("error");
+    }
+  }
+
+  async function onFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    // Clear the input so the same file can be picked again after a cancel.
+    event.target.value = "";
+    if (!file) return;
+    setImportState("idle");
+    setImportError(null);
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      setPending(parsed);
+    } catch {
+      setImportState("error");
+      setImportError(t("settings.backupImportInvalid"));
+    }
+  }
+
+  async function confirmRestore() {
+    setImportState("busy");
+    try {
+      await api.restoreBackup(pending);
+      setPending(null);
+      setImportState("done");
+      // Reload so settings, lists and rewrites views all show the restored data.
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error) {
+      setPending(null);
+      setImportState("error");
+      setImportError(error instanceof ApiError ? error.message : t("settings.backupImportError"));
+    }
+  }
+
+  return (
+    <>
+      <Row
+        label={t("settings.backupExportLabel")}
+        description={t("settings.backupExportDesc")}
+        details={t("settings.backupExportDetails")}
+        control={
+          <div className={styles.action}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={download}
+              disabled={exportState === "busy"}
+            >
+              {exportState === "busy"
+                ? t("settings.backupExportBusy")
+                : t("settings.backupExportButton")}
+            </button>
+            {exportState === "error" ? (
+              <span className={styles.actionError}>{t("settings.backupExportError")}</span>
+            ) : null}
+          </div>
+        }
+      />
+      <Row
+        label={t("settings.backupImportLabel")}
+        description={t("settings.backupImportDesc")}
+        details={t("settings.backupImportDetails")}
+        control={
+          <div className={styles.action}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/json,.json"
+              className={styles.fileInput}
+              onChange={onFile}
+            />
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={() => fileRef.current?.click()}
+              disabled={importState === "busy"}
+            >
+              {importState === "busy"
+                ? t("settings.backupImportBusy")
+                : t("settings.backupImportButton")}
+            </button>
+            {importState === "done" ? (
+              <span className={styles.actionDone}>{t("settings.backupImportDone")}</span>
+            ) : null}
+            {importState === "error" ? (
+              <span className={styles.actionError}>
+                {importError ?? t("settings.backupImportError")}
+              </span>
+            ) : null}
+          </div>
+        }
+      />
+      {pending !== null ? (
+        <ConfirmDialog
+          title={t("settings.backupRestoreConfirmTitle")}
+          body={t("settings.backupRestoreConfirmBody")}
+          confirmLabel={t("settings.backupRestoreConfirm")}
+          cancelLabel={t("settings.backupRestoreCancel")}
+          busy={importState === "busy"}
+          onConfirm={confirmRestore}
+          onCancel={() => setPending(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -313,6 +449,9 @@ export function Settings() {
     const base: CategoryMeta[] = [
       { id: "schutz", titleKey: "settings.cat.schutz" },
       { id: "upstream", titleKey: "settings.cat.upstream" },
+      // Backup & restore stays visible even outside expert mode: making a
+      // safety copy is a headline user-facing action, not a technical knob.
+      { id: "sicherung", titleKey: "settings.cat.sicherung" },
     ];
     if (settings.expertMode) {
       base.push(
@@ -568,6 +707,16 @@ export function Settings() {
                 details={t("settings.clearCacheDetails")}
                 control={<ClearCacheButton />}
               />
+            </Category>
+          )}
+
+          {active === "sicherung" && (
+            <Category
+              id="sicherung"
+              title={t("settings.cat.sicherung")}
+              description={t("settings.backupDesc")}
+            >
+              <BackupSection />
             </Category>
           )}
 

@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.21] - 2026-11-02
+
+- New: **back up and restore your setup.** Under Settings → Backup & restore you
+  can now download your whole configuration as a single file — your settings,
+  your allow/block entries with their notes, your subscribed lists and your
+  rewrites — and restore it later, or onto a new server. Restoring replaces your
+  current setup and takes effect at once. The query log and your login are not
+  part of the file.
+
 ## [0.1.20] - 2026-11-02
 
 - The "Protection active" dot now shows a gentle sign of life for everyone. If

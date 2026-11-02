@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.21] - 2026-11-02
+
+- Neu: **Einrichtung sichern und wiederherstellen.** Unter Einstellungen →
+  Sichern & Wiederherstellen lädst du jetzt deine gesamte Konfiguration als eine
+  Datei herunter — deine Einstellungen, deine Allow-/Block-Einträge samt
+  Notizen, deine abonnierten Listen und deine Rewrites — und stellst sie später
+  oder auf einem neuen Server wieder her. Das Wiederherstellen ersetzt deine
+  aktuelle Einrichtung und greift sofort. Das Anfrage-Protokoll und dein Login
+  sind nicht Teil der Datei.
+
 ## [0.1.20] - 2026-11-02
 
 - Der Punkt neben „Schutz aktiv" zeigt jetzt für alle ein sanftes Lebenszeichen.

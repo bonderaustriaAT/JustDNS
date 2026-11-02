@@ -117,6 +117,37 @@ impl RewriteStore {
         }
     }
 
+    /// A snapshot of every stored rewrite, for a backup export.
+    pub fn snapshot(&self) -> Vec<Rewrite> {
+        self.read().clone()
+    }
+
+    /// Replace every rewrite from a restored backup. Each entry's name is
+    /// validated and normalised and its addresses de-duplicated, so a
+    /// hand-edited import cannot store junk; one invalid entry rejects the whole
+    /// set and nothing is written. Each entry keeps its `enabled` flag. Persists
+    /// and swaps the live table in one step.
+    pub fn replace(&self, rewrites: Vec<Rewrite>) -> Result<(), RewriteError> {
+        let mut clean: Vec<Rewrite> = Vec::with_capacity(rewrites.len());
+        for rewrite in rewrites {
+            let name = validate_name(&rewrite.name)?;
+            if rewrite.ips.is_empty() {
+                return Err(RewriteError::NoIps);
+            }
+            let mut ips = Vec::with_capacity(rewrite.ips.len());
+            for ip in rewrite.ips {
+                if !ips.contains(&ip) {
+                    ips.push(ip);
+                }
+            }
+            upsert(&mut clean, name, ips, rewrite.enabled);
+        }
+        clean.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut guard = self.inner.rewrites.write().expect("rewrites lock poisoned");
+        *guard = clean;
+        self.persist_and_publish(&guard)
+    }
+
     /// Add a rewrite, or replace the addresses of one that already exists. The
     /// name is validated and normalised, and every address is parsed; an entry
     /// with no usable address is refused. Returns the stored rewrite. A replaced
@@ -461,6 +492,36 @@ mod tests {
             store.set_enabled("missing.home", false),
             Err(RewriteError::Unknown(_))
         ));
+    }
+
+    #[test]
+    fn snapshot_and_replace_round_trip_and_reject_junk() {
+        let (_dir, store, rewriter) = store();
+        store.set("nas.home", &["192.168.20.5".to_owned()]).unwrap();
+        store.set_enabled("nas.home", false).unwrap();
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert!(!snapshot[0].enabled, "snapshot keeps the disabled state");
+
+        // Wipe, then restore: the entry (and its disabled state) comes back, and
+        // because it is disabled it is not answered live.
+        store.replace(Vec::new()).unwrap();
+        assert!(store.view().rewrites.is_empty());
+        store.replace(snapshot).unwrap();
+        let view = store.view();
+        assert_eq!(view.rewrites[0].name, "nas.home");
+        assert!(!view.rewrites[0].enabled);
+        assert!(rewriter.lookup("nas.home").is_none(), "stays disabled");
+
+        // A restored entry with no addresses is refused, leaving the store as it
+        // was.
+        let bad = vec![Rewrite {
+            name: "x.home".to_owned(),
+            ips: Vec::new(),
+            enabled: true,
+        }];
+        assert!(matches!(store.replace(bad), Err(RewriteError::NoIps)));
+        assert_eq!(store.view().rewrites.len(), 1, "unchanged after a reject");
     }
 
     #[test]
