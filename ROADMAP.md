@@ -7,7 +7,7 @@ JustDNS is built to be self-hosted by anyone (AGPL-3.0), so the direction favour
 features that are useful and robust for people running it on their own network.
 The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
-release is v0.1.27 (reusable address objects for rewrites).
+release is v0.1.28 (recognise and name your devices).
 
 ## Phase 1 — Insight & quick wins
 
@@ -34,8 +34,9 @@ release is v0.1.27 (reusable address objects for rewrites).
 
 ## Phase 2 — Devices & policies
 
-- [ ] **Recognise & name clients.** Map a client IP to a friendly device name and
-  see which devices are active, so logs and stats read in names, not numbers.
+- [x] **Recognise & name clients.** Map a client IP (or a CIDR range) to a
+  friendly device name and see which devices are active, so logs and stats read in
+  names, not numbers. Managed on the "Devices" page.
 - [ ] **Per-client / per-group policies.** Give a device or a group its own
   protection level and lists, the way AdGuard Home does — the biggest single step
   toward real household control.

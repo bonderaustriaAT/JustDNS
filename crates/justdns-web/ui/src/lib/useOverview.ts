@@ -14,7 +14,10 @@ const RATE_SMOOTHING = 0.5;
 
 export interface RecentQuery {
   name: string;
+  /** What to show for the client: its device name if set, else the address. */
   client: string;
+  /** The raw address, as a tooltip when a device name is shown instead. */
+  clientTitle?: string;
   type: string;
   source: string;
   secondsAgo: number;
@@ -65,7 +68,8 @@ function toRecent(rows: QueryRow[], lang: Lang): RecentQuery[] {
   const now = Date.now();
   return rows.slice(0, RECENT_LIMIT).map((row) => ({
     name: displayName(row.name),
-    client: row.client,
+    client: row.device_name ?? row.client,
+    clientTitle: row.device_name ? row.client : undefined,
     type: recordTypeLabel(row.record_type),
     source: sourceLabel(row.source, lang),
     secondsAgo: Math.max(0, Math.round((now - row.at_ms) / 1000)),

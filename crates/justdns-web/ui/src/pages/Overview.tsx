@@ -150,7 +150,12 @@ export function Overview() {
               const share = data.day.total === 0 ? 0 : entry.count / data.day.total;
               return (
                 <li key={entry.client} className={styles.clientRow}>
-                  <span className={styles.clientIp}>{entry.client}</span>
+                  <span
+                    className={styles.clientIp}
+                    title={entry.name ? entry.client : undefined}
+                  >
+                    {entry.name ?? entry.client}
+                  </span>
                   <span className={styles.clientBar} aria-hidden="true">
                     <span
                       className={styles.clientBarFill}
@@ -177,7 +182,9 @@ export function Overview() {
             {data.recent.map((entry, index) => (
               <li key={`${entry.name}-${index}`} className={styles.row}>
                 <span className={styles.domain}>{entry.name}</span>
-                <span className={styles.client}>{entry.client}</span>
+                <span className={styles.client} title={entry.clientTitle}>
+                  {entry.client}
+                </span>
                 <span className={styles.tag}>{entry.type}&thinsp;·&thinsp;{entry.source}</span>
                 <span className={styles.ago}>{timeAgo(entry.secondsAgo, t)}</span>
               </li>

@@ -803,6 +803,26 @@ export function Settings() {
                   </label>
                 }
               />
+              <Row
+                label={t("settings.activeWindowLabel")}
+                description={t("settings.activeWindowDesc")}
+                details={t("settings.activeWindowDetails")}
+                control={
+                  <label className={styles.number}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={Math.max(1, Math.round(settings.activeWindowSecs / 60))}
+                      onChange={(e) =>
+                        update("activeWindowSecs", Math.max(1, Number(e.target.value)) * 60)
+                      }
+                      aria-label={t("settings.activeWindowAria")}
+                    />
+                    <span>{t("settings.activeWindowUnit")}</span>
+                  </label>
+                }
+              />
             </Category>
           )}
         </div>

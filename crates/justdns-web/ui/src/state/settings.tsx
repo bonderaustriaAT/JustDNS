@@ -46,6 +46,7 @@ const SERVER_DEFAULTS: ServerSettings = {
   blockLevel: "custom",
   instanceName: "JustDNS",
   blockResponse: "null-ip",
+  activeWindowSecs: 300,
 };
 
 const EXPERT_KEY = "justdns.expertMode";
@@ -66,6 +67,7 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "blockLevel",
   "instanceName",
   "blockResponse",
+  "activeWindowSecs",
 ];
 
 function toServer(settings: Settings): ServerSettings {

@@ -48,6 +48,8 @@ export interface LogRow {
   /** Full date and time for the detail view. */
   fullTime: string;
   client: string;
+  /** The device name of the client, when one is set. */
+  deviceName?: string;
   name: string;
   type: string;
   typeDesc?: string;
@@ -84,6 +86,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     time: fmt.time.format(row.at_ms),
     fullTime: fmt.dateTime.format(row.at_ms),
     client: row.client,
+    deviceName: row.device_name,
     name: displayName(row.name),
     type: recordTypeLabel(row.record_type),
     typeDesc: recordTypeDescription(row.record_type, lang),

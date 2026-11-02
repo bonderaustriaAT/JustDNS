@@ -27,6 +27,12 @@ const ICONS: Record<string, ReactNode> = {
       <circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none" />
     </svg>
   ),
+  devices: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="12" rx="1.5" />
+      <path d="M8 20h8M12 16v4" strokeLinecap="round" />
+    </svg>
+  ),
   lists: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
@@ -54,6 +60,7 @@ const ICONS: Record<string, ReactNode> = {
 const TABS: { to: string; icon: string; labelKey: MessageKey; end?: boolean }[] = [
   { to: "/", icon: "overview", labelKey: "nav.tab.overview", end: true },
   { to: "/protokoll", icon: "log", labelKey: "nav.tab.log" },
+  { to: "/geraete", icon: "devices", labelKey: "nav.tab.devices" },
   { to: "/listen/url", icon: "lists", labelKey: "nav.tab.lists" },
   { to: "/rewrites", icon: "rewrites", labelKey: "nav.tab.rewrites" },
   { to: "/einstellungen", icon: "settings", labelKey: "nav.tab.settings" },
@@ -187,6 +194,12 @@ export function Shell({ children }: { children: ReactNode }) {
               className={({ isActive }) => (isActive ? styles.active : styles.link)}
             >
               {t("nav.log")}
+            </NavLink>
+            <NavLink
+              to="/geraete"
+              className={({ isActive }) => (isActive ? styles.active : styles.link)}
+            >
+              {t("nav.devices")}
             </NavLink>
             <ListsMenu />
             <NavLink

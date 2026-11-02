@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.28] - 2026-11-02
+
+- Neu: **Geräte erkennen und benennen.** Auf der neuen Seite „Geräte“ gibst du
+  den Clients in deinem Netzwerk Namen — einer einzelnen Adresse (z. B.
+  `192.168.20.10` = „Wohnzimmer-TV“) oder einem ganzen Bereich in CIDR-Form (z. B.
+  `192.168.30.0/24` = „Gäste-WLAN“). Protokoll und Übersicht sprechen dann in
+  Namen statt in IP-Adressen, und die Suche im Protokoll findet Geräte auch über
+  ihren Namen. Die Liste zeigt alle benannten Geräte und alle zuletzt gesehenen,
+  noch unbenannten Clients mit „zuletzt gesehen“, Anzahl der Anfragen und einem
+  Punkt für „gerade aktiv“. Pro Gerät sind ein Name, eine optionale Notiz und eine
+  Geräte-Art wählbar. Wie lange ein Gerät nach seiner letzten Anfrage als „aktiv“
+  gilt, stellst du in den Einstellungen ein (Standard 5 Minuten). Die Namen sind
+  in Backups enthalten.
+
 ## [0.1.27] - 2026-11-02
 
 - Neu: **wiederverwendbare Adressobjekte für Rewrites.** Gib einer Adresse einen

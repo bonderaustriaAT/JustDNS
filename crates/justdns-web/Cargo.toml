@@ -10,6 +10,7 @@ justdns-rewrite = { path = "../justdns-rewrite" }
 axum = "0.8.4"
 axum-extra = { version = "0.10.1", features = ["cookie"] }
 justdns-auth = { path = "../justdns-auth" }
+justdns-clients = { path = "../justdns-clients" }
 justdns-config = { path = "../justdns-config" }
 justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }

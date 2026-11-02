@@ -168,6 +168,10 @@ pub struct Settings {
     /// What a blocked name is answered with: the null IP (the default) or
     /// NXDOMAIN. Wired live — a change takes effect on the next query.
     pub block_response: BlockResponse,
+    /// How many seconds since a client's last query still counts it as "active"
+    /// on the devices view. Read when that view is rendered, so a change takes
+    /// effect at once; defaults to five minutes.
+    pub active_window_secs: u32,
 }
 
 impl Default for Settings {
@@ -187,6 +191,7 @@ impl Default for Settings {
             block_level: BlockLevel::Custom,
             instance_name: "JustDNS".to_owned(),
             block_response: BlockResponse::NullIp,
+            active_window_secs: 300,
         }
     }
 }
@@ -585,6 +590,28 @@ mod tests {
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
         let store = ConfigStore::load(&path, Settings::default()).unwrap();
         assert_eq!(store.get().block_response, BlockResponse::NullIp);
+    }
+
+    #[test]
+    fn active_window_defaults_and_round_trips() {
+        assert_eq!(Settings::default().active_window_secs, 300);
+        // A file written before this field existed loads with the default.
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        assert_eq!(store.get().active_window_secs, 300);
+
+        let settings = Settings {
+            active_window_secs: 600,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"activeWindowSecs\":600"), "{json}");
+        assert_eq!(
+            serde_json::from_str::<Settings>(&json).unwrap(),
+            settings,
+            "round-trips through JSON"
+        );
     }
 
     #[test]

@@ -82,6 +82,21 @@ pub struct ClientCount {
     pub count: u64,
 }
 
+/// One client's recent footprint, for the devices view: how many queries it made
+/// over the kept hours and when it was last seen. The last-seen time is precise
+/// for a client still in the recent ring; for one seen earlier in the day it
+/// falls back to the start of the most recent hour it appears in, which is enough
+/// to tell "active now" from "seen earlier today".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ClientActivity {
+    /// The client's address.
+    pub client: IpAddr,
+    /// Queries it made across the kept hours.
+    pub count: u64,
+    /// When it was last seen, in milliseconds since the Unix epoch.
+    pub last_seen_ms: i64,
+}
+
 /// One wall-clock hour of activity, with the extra tallies the statistics view
 /// needs on top of the plain per-hour count: blocked queries, the summed
 /// handling time (to average later), and a bounded per-client count. Lives only
@@ -293,6 +308,52 @@ impl Recorder {
         ranked.sort_by(|a, b| b.count.cmp(&a.count).then(a.client.cmp(&b.client)));
         ranked.truncate(n);
         ranked
+    }
+
+    /// Every client seen over the kept hours, with its query count and when it
+    /// was last seen. The count is summed across the hourly buckets (the same
+    /// source as [`Self::top_clients`]); the last-seen time is the exact newest
+    /// timestamp from the recent ring where the client still appears, falling
+    /// back to the most recent hour bucket it is in. Used by the devices view to
+    /// list and age clients.
+    pub fn client_activity(&self) -> Vec<ClientActivity> {
+        let state = self.state.lock().expect("recorder lock poisoned");
+
+        // Query counts and a coarse last-seen (the hour start) from the buckets,
+        // which span the whole kept day.
+        let mut totals: HashMap<IpAddr, u64> = HashMap::new();
+        let mut last_seen: HashMap<IpAddr, i64> = HashMap::new();
+        for bucket in &state.activity {
+            for (&client, &count) in &bucket.clients {
+                *totals.entry(client).or_insert(0) += count;
+                let seen = last_seen.entry(client).or_insert(bucket.hour_ms);
+                *seen = (*seen).max(bucket.hour_ms);
+            }
+        }
+        // Refine last-seen with the exact timestamps still in the recent ring.
+        for event in &state.recent {
+            let seen = last_seen.entry(event.client).or_insert(event.at_ms);
+            *seen = (*seen).max(event.at_ms);
+            // A client only in the ring (not yet in a bucket, e.g. right at an
+            // hour edge) still gets counted so the list never misses it.
+            totals.entry(event.client).or_insert(0);
+        }
+
+        let mut out: Vec<ClientActivity> = totals
+            .into_iter()
+            .map(|(client, count)| ClientActivity {
+                client,
+                count,
+                last_seen_ms: last_seen.get(&client).copied().unwrap_or_default(),
+            })
+            .collect();
+        // Most recently seen first; ties broken by address for a stable order.
+        out.sort_by(|a, b| {
+            b.last_seen_ms
+                .cmp(&a.last_seen_ms)
+                .then(a.client.cmp(&b.client))
+        });
+        out
     }
 }
 
@@ -555,5 +616,26 @@ mod tests {
                 count: 2
             }
         );
+    }
+
+    #[test]
+    fn client_activity_reports_count_and_newest_last_seen() {
+        let recorder = Recorder::new(100);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        let b = Ipv4Addr::new(10, 0, 0, 2);
+        // a: two queries, newest at t=50; b: one at t=30.
+        recorder.record(event_with(10, QuerySource::Upstream, a, 1));
+        recorder.record(event_with(50, QuerySource::Upstream, a, 1));
+        recorder.record(event_with(30, QuerySource::Upstream, b, 1));
+
+        let activity = recorder.client_activity();
+        assert_eq!(activity.len(), 2);
+        // Most recently seen first: a (last seen 50) before b (30).
+        assert_eq!(activity[0].client, IpAddr::V4(a));
+        assert_eq!(activity[0].count, 2);
+        assert_eq!(activity[0].last_seen_ms, 50, "exact newest timestamp");
+        assert_eq!(activity[1].client, IpAddr::V4(b));
+        assert_eq!(activity[1].count, 1);
+        assert_eq!(activity[1].last_seen_ms, 30);
     }
 }
