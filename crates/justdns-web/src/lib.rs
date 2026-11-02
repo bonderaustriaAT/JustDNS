@@ -24,8 +24,8 @@ use justdns_auth::{SessionStore, UserStore};
 use justdns_config::{BlockLevel, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
-use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome};
-use justdns_rewrite::{RewriteError, RewriteStore, RewritesView};
+use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
+use justdns_rewrite::{Rewrite, RewriteError, RewriteStore, RewritesView};
 use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -183,6 +183,8 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/rewrites/enabled", put(set_rewrite_enabled))
         .route("/api/cache/clear", post(clear_cache))
+        .route("/api/backup", get(export_backup))
+        .route("/api/backup/restore", post(restore_backup))
         .layer(from_fn_with_state(state.clone(), require_auth));
 
     let public = Router::new()
@@ -678,6 +680,109 @@ async fn remove_rewrite(
 async fn clear_cache(State(cache): State<DnsCache>) -> StatusCode {
     cache.clear();
     StatusCode::NO_CONTENT
+}
+
+/// The marker a backup file carries so a restore can tell it is ours.
+const BACKUP_APP: &str = "justdns";
+/// The file kind, in case JustDNS ever exports something else one day.
+const BACKUP_KIND: &str = "backup";
+/// The backup format version. Bumped only on a breaking shape change, so a
+/// restore can refuse a file it does not understand.
+const BACKUP_VERSION: u32 = 1;
+
+/// A full configuration backup: everything the user sets in the UI that lives
+/// on the data volume — their settings, lists and rewrites — in one versioned
+/// envelope. The query log and the feed caches are left out: they are history
+/// and regenerable, not setup. The admin account is left out too, so the file
+/// carries no credentials. `app`/`kind`/`version` let a restore reject a foreign
+/// or future-format file before it touches anything.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Backup {
+    app: String,
+    kind: String,
+    version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_at_ms: Option<u64>,
+    settings: Settings,
+    lists: UserLists,
+    rewrites: Vec<Rewrite>,
+}
+
+/// Export the whole UI-set configuration as one downloadable JSON file. The
+/// `Content-Disposition` header makes the browser save it; the dashboard also
+/// names the download itself.
+async fn export_backup(
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+    State(rewrites): State<RewriteStore>,
+) -> Result<Response, (StatusCode, String)> {
+    let backup = Backup {
+        app: BACKUP_APP.to_owned(),
+        kind: BACKUP_KIND.to_owned(),
+        version: BACKUP_VERSION,
+        created_at_ms: Some(now_ms()),
+        settings: config.get(),
+        lists: lists.snapshot(),
+        rewrites: rewrites.snapshot(),
+    };
+    let json = serde_json::to_vec_pretty(&backup)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/json".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"justdns-backup.json\"".to_owned(),
+            ),
+        ],
+        json,
+    )
+        .into_response())
+}
+
+/// Restore a backup produced by [`export_backup`]. The envelope is checked
+/// first, so a foreign or future-format file is refused with 400 before
+/// anything is written. The rewrites are applied first because they are
+/// validated as they are stored — an invalid entry rejects the restore before
+/// the lists or settings are touched. Each piece takes effect live, without a
+/// restart; the admin account and the query log are left untouched.
+async fn restore_backup(
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+    State(rewrites): State<RewriteStore>,
+    Json(backup): Json<Backup>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if backup.app != BACKUP_APP || backup.kind != BACKUP_KIND {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "this is not a JustDNS backup file".to_owned(),
+        ));
+    }
+    if backup.version != BACKUP_VERSION {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsupported backup version {}", backup.version),
+        ));
+    }
+
+    rewrites.replace(backup.rewrites).map_err(rewrite_error)?;
+    lists.replace(backup.lists).map_err(list_error)?;
+    config
+        .set(backup.settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    // The restored lists and the ads/malware switches should agree on a block
+    // level; re-derive it so the stored level matches what came back.
+    sync_block_level(&lists, &config)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Milliseconds since the Unix epoch, for a backup's `createdAtMs` stamp.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Return the current settings so the dashboard can show them.
@@ -1379,6 +1484,163 @@ mod tests {
         )
         .await;
         assert!(body.contains("\"rewrites\":[]"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn backup_exports_and_restores_into_a_fresh_instance() {
+        // Instance A: set a custom block entry (with a note), a rewrite and a
+        // couple of settings, then export a backup.
+        let (store_a, _writer_a) = Store::in_memory(100).unwrap();
+        let (app_a, cookie_a) = app_and_cookie(store_a);
+
+        let res = app_a
+            .clone()
+            .oneshot(
+                Request::post("/api/lists/block")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_a)
+                    .body(Body::from(r#"{"domain":"tracker.test","note":"smart-TV"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app_a
+            .clone()
+            .oneshot(
+                Request::post("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_a)
+                    .body(Body::from(
+                        r#"{"names":["nas.home"],"ips":["192.168.20.5"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app_a
+            .clone()
+            .oneshot(
+                Request::put("/api/settings")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_a)
+                    .body(Body::from(r#"{"ipv6":true,"logRetentionDays":21}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let backup = body_of(
+            app_a
+                .oneshot(
+                    Request::get("/api/backup")
+                        .header("cookie", &cookie_a)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(backup.contains("justdns"), "envelope marker: {backup}");
+        assert!(backup.contains("tracker.test"), "lists in file: {backup}");
+
+        // Instance B: a fresh box. Restoring the backup brings everything back.
+        let (store_b, _writer_b) = Store::in_memory(100).unwrap();
+        let (app_b, cookie_b) = app_and_cookie(store_b);
+
+        let res = app_b
+            .clone()
+            .oneshot(
+                Request::post("/api/backup/restore")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_b)
+                    .body(Body::from(backup))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let lists = body_of(
+            app_b
+                .clone()
+                .oneshot(
+                    Request::get("/api/lists")
+                        .header("cookie", &cookie_b)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(lists.contains("tracker.test"), "block restored: {lists}");
+        assert!(lists.contains("smart-TV"), "note restored: {lists}");
+
+        let rewrites = body_of(
+            app_b
+                .clone()
+                .oneshot(
+                    Request::get("/api/rewrites")
+                        .header("cookie", &cookie_b)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            rewrites.contains("nas.home"),
+            "rewrite restored: {rewrites}"
+        );
+
+        let settings = body_of(
+            app_b
+                .oneshot(
+                    Request::get("/api/settings")
+                        .header("cookie", &cookie_b)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            settings.contains("\"ipv6\":true"),
+            "settings restored: {settings}"
+        );
+        assert!(
+            settings.contains("\"logRetentionDays\":21"),
+            "settings restored: {settings}"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_a_file_that_is_not_ours() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+        // Well-formed JSON, right shape, but a foreign `app` marker: refused
+        // before anything is written.
+        let res = app
+            .oneshot(
+                Request::post("/api/backup/restore")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"app":"evil","kind":"backup","version":1,"settings":{},"lists":{},"rewrites":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -314,6 +314,24 @@ impl ListStore {
         }
     }
 
+    /// A snapshot of the user's stored lists — their allow/block entries and
+    /// their subscriptions — for a backup export.
+    pub fn snapshot(&self) -> UserLists {
+        self.read().clone()
+    }
+
+    /// Replace the whole stored list set from a restored backup, then persist
+    /// and rebuild the live blocker. The feed caches on disk are left as they
+    /// are: a restored subscription contributes to the blocker again only once
+    /// its feed is next fetched (the periodic refresh, or a manual one).
+    pub fn replace(&self, lists: UserLists) -> Result<(), ListError> {
+        let mut guard = self.write();
+        *guard = lists;
+        self.persist(&guard)?;
+        self.rebuild(&guard);
+        Ok(())
+    }
+
     /// Add a domain to the user's allow list, with an optional note. Validated
     /// and normalised; adding a name already present keeps it, and only sets the
     /// note when one is given (so a plain re-add never wipes an existing note).
@@ -930,6 +948,29 @@ mod tests {
         assert_eq!(view.allow[0].domain, "nas.home");
         assert_eq!(view.allow[0].note, None);
         assert_eq!(view.block[0].domain, "ads.test");
+    }
+
+    #[test]
+    fn snapshot_and_replace_round_trip_and_rebuild_live() {
+        let (_dir, store, blocker) = store();
+        store.add_block("tracker.test", Some("telemetry")).unwrap();
+        store.add_allow("nas.home", None).unwrap();
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.block.len(), 1);
+        assert_eq!(snapshot.allow.len(), 1);
+
+        // Wipe the store, then restore the snapshot: the entries and their note
+        // come back, and the block takes effect on the live blocker again.
+        store.replace(UserLists::default()).unwrap();
+        assert!(store.view().block.is_empty());
+        assert!(!blocker.blocks("tracker.test"), "cleared live");
+
+        store.replace(snapshot).unwrap();
+        let view = store.view();
+        assert_eq!(view.block[0].domain, "tracker.test");
+        assert_eq!(view.block[0].note.as_deref(), Some("telemetry"));
+        assert_eq!(view.allow[0].domain, "nas.home");
+        assert!(blocker.blocks("tracker.test"), "restored live");
     }
 
     #[test]
