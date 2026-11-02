@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.23] - 2026-11-02
+
+- New: **restore from a backup during first-time setup.** The very first screen of
+  the setup wizard now asks whether you want to set JustDNS up fresh or restore a
+  backup. Restoring still creates your login first (a backup never contains one),
+  then brings back your settings, lists and rewrites from the file in one step —
+  ideal for a new server, a reinstall or a move.
+
 ## [0.1.22] - 2026-11-02
 
 - New: **choose what a blocked name answers with.** Under Settings → Protection,

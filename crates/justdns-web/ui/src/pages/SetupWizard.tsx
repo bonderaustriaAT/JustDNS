@@ -28,15 +28,24 @@ const LEVEL_RISK: Record<string, "low" | "medium" | "high"> = {
   extreme: "high",
 };
 
-/// The wizard's four steps, in order.
-const STEPS = ["account", "protection", "upstream", "finish"] as const;
-type Step = number;
+/// Which way the user starts: a fresh guided setup, or restoring a backup file.
+type Mode = "fresh" | "restore";
+
+/// The wizard's steps depend on the chosen mode. The first screen is always the
+/// mode choice; both modes then create the admin account (a backup carries no
+/// login). A fresh setup walks the protection/upstream/finish steps; a restore
+/// only needs the backup file.
+const STEPS_BY_MODE: Record<Mode, readonly string[]> = {
+  fresh: ["mode", "account", "protection", "upstream", "finish"],
+  restore: ["mode", "account", "restore"],
+};
 
 export function SetupWizard() {
   const { t, lang, setLang } = useI18n();
   const { completeSetup } = useAuth();
 
-  const [step, setStep] = useState<Step>(0);
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [step, setStep] = useState(0);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -44,6 +53,7 @@ export function SetupWizard() {
   const [blockLevel, setBlockLevel] = useState<Exclude<BlockLevel, "custom">>("standard");
   const [speedProfile, setSpeedProfile] = useState<SpeedProfile>("balanced");
   const [retention, setRetention] = useState(7);
+  const [backupFile, setBackupFile] = useState<File | null>(null);
 
   // Once the admin exists its credentials cannot change, so the fields lock and
   // a second setup call is skipped if the user steps back and forward again.
@@ -51,7 +61,17 @@ export function SetupWizard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const isLast = step === STEPS.length - 1;
+  // Before a mode is picked only the first screen exists; afterwards the steps
+  // follow the chosen branch.
+  const steps = mode ? STEPS_BY_MODE[mode] : (["mode"] as const);
+  const stepName = steps[step];
+  const isLast = step === steps.length - 1;
+
+  function chooseMode(next: Mode) {
+    setMode(next);
+    setError(null);
+    setStep(1);
+  }
 
   async function createAccount(): Promise<boolean> {
     if (password.length < MIN_PASSWORD) {
@@ -94,18 +114,45 @@ export function SetupWizard() {
     }
   }
 
+  async function restoreBackup(): Promise<boolean> {
+    if (!backupFile) {
+      setError(t("wizard.restore.invalid"));
+      return false;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await backupFile.text());
+    } catch {
+      setError(t("wizard.restore.invalid"));
+      return false;
+    }
+    try {
+      // The admin account was created on the previous step, so this call is
+      // authenticated. The server validates the envelope and rejects anything
+      // that is not a JustDNS backup with a 400.
+      await api.restoreBackup(parsed);
+      return true;
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 400) {
+        setError(t("wizard.restore.invalid"));
+      } else {
+        setError(t("auth.setupFailed"));
+      }
+      return false;
+    }
+  }
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      if (step === 0 && !accountCreated) {
+      if (stepName === "account" && !accountCreated) {
         if (!(await createAccount())) return;
       }
       if (isLast) {
-        if (await applyConfig()) {
-          completeSetup(username); // Flips the gate → dashboard.
-        }
+        const done = stepName === "restore" ? await restoreBackup() : await applyConfig();
+        if (done) completeSetup(username); // Flips the gate → dashboard.
         return;
       }
       setStep((s) => s + 1);
@@ -114,8 +161,8 @@ export function SetupWizard() {
     }
   }
 
-  const titleKey = `wizard.${STEPS[step]}.title` as MessageKey;
-  const ledeKey = `wizard.${STEPS[step]}.lede` as MessageKey;
+  const titleKey = `wizard.${stepName}.title` as MessageKey;
+  const ledeKey = `wizard.${stepName}.lede` as MessageKey;
 
   return (
     <div className={authStyles.screen}>
@@ -141,18 +188,20 @@ export function SetupWizard() {
           </div>
         </div>
 
-        <div className={styles.steps} aria-hidden="true">
-          {STEPS.map((name, i) => (
-            <span
-              key={name}
-              className={styles.step}
-              data-state={i === step ? "current" : i < step ? "done" : "todo"}
-            />
-          ))}
-          <span className={styles.stepName}>
-            {t("wizard.stepCounter", { n: step + 1, total: STEPS.length })}
-          </span>
-        </div>
+        {stepName !== "mode" && (
+          <div className={styles.steps} aria-hidden="true">
+            {steps.map((name, i) => (
+              <span
+                key={name}
+                className={styles.step}
+                data-state={i === step ? "current" : i < step ? "done" : "todo"}
+              />
+            ))}
+            <span className={styles.stepName}>
+              {t("wizard.stepCounter", { n: step + 1, total: steps.length })}
+            </span>
+          </div>
+        )}
 
         <div className={authStyles.head}>
           <h1 className={authStyles.title}>{t(titleKey)}</h1>
@@ -166,19 +215,40 @@ export function SetupWizard() {
             </p>
           )}
 
-          {step === 0 && (
+          {stepName === "mode" && (
+            <div className={styles.choices} role="group" aria-label={t("wizard.mode.title")}>
+              {(["fresh", "restore"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  className={styles.choice}
+                  data-active={mode === option || undefined}
+                  onClick={() => chooseMode(option)}
+                >
+                  <span className={styles.choiceTitle}>{t(`wizard.mode.${option}` as MessageKey)}</span>
+                  <span className={styles.choiceText}>
+                    {t(`wizard.mode.${option}Desc` as MessageKey)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {stepName === "account" && (
             <>
-              <label className={authStyles.field}>
-                <span className={authStyles.label}>{t("wizard.instanceName")}</span>
-                <input
-                  className={authStyles.input}
-                  type="text"
-                  value={instanceName}
-                  placeholder="JustDNS"
-                  onChange={(e) => setInstanceName(e.target.value)}
-                />
-                <span className={authStyles.hint}>{t("wizard.instanceNameHint")}</span>
-              </label>
+              {mode === "fresh" && (
+                <label className={authStyles.field}>
+                  <span className={authStyles.label}>{t("wizard.instanceName")}</span>
+                  <input
+                    className={authStyles.input}
+                    type="text"
+                    value={instanceName}
+                    placeholder="JustDNS"
+                    onChange={(e) => setInstanceName(e.target.value)}
+                  />
+                  <span className={authStyles.hint}>{t("wizard.instanceNameHint")}</span>
+                </label>
+              )}
               <label className={authStyles.field}>
                 <span className={authStyles.label}>{t("auth.username")}</span>
                 <input
@@ -220,7 +290,20 @@ export function SetupWizard() {
             </>
           )}
 
-          {step === 1 && (
+          {stepName === "restore" && (
+            <label className={authStyles.field}>
+              <span className={authStyles.label}>{t("wizard.restore.fileLabel")}</span>
+              <input
+                className={styles.file}
+                type="file"
+                accept="application/json,.json"
+                onChange={(e) => setBackupFile(e.target.files?.[0] ?? null)}
+              />
+              <span className={authStyles.hint}>{t("wizard.restore.fileHint")}</span>
+            </label>
+          )}
+
+          {stepName === "protection" && (
             <>
               <div className={styles.segmented} role="group" aria-label={t("wizard.protection.title")}>
                 {LEVELS.map((level) => (
@@ -247,7 +330,7 @@ export function SetupWizard() {
             </>
           )}
 
-          {step === 2 && (
+          {stepName === "upstream" && (
             <>
               <div className={styles.segmented} role="group" aria-label={t("wizard.upstream.title")}>
                 {PROFILES.map((profile) => (
@@ -269,7 +352,7 @@ export function SetupWizard() {
             </>
           )}
 
-          {step === 3 && (
+          {stepName === "finish" && (
             <>
               <label className={authStyles.field}>
                 <span className={authStyles.label}>{t("wizard.retentionLabel")}</span>
@@ -310,8 +393,8 @@ export function SetupWizard() {
             </>
           )}
 
-          <div className={styles.nav}>
-            {step > 0 && (
+          {stepName !== "mode" && (
+            <div className={styles.nav}>
               <button
                 type="button"
                 className={styles.back}
@@ -320,15 +403,21 @@ export function SetupWizard() {
               >
                 {t("wizard.back")}
               </button>
-            )}
-            <button className={styles.next} type="submit" disabled={busy}>
-              {busy
-                ? t("wizard.working")
-                : isLast
-                  ? t("wizard.finishButton")
-                  : t("wizard.next")}
-            </button>
-          </div>
+              <button
+                className={styles.next}
+                type="submit"
+                disabled={busy || (stepName === "restore" && !backupFile)}
+              >
+                {busy
+                  ? t("wizard.working")
+                  : isLast
+                    ? stepName === "restore"
+                      ? t("wizard.restore.finishButton")
+                      : t("wizard.finishButton")
+                    : t("wizard.next")}
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

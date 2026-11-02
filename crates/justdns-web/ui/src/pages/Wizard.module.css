@@ -125,6 +125,59 @@
   background: var(--signal-strong);
 }
 
+/* The first screen's two big choices (fresh setup vs. restore): stacked cards,
+   each a title over a plain-language description, the picked one marked with the
+   signal spine the app uses for an active row. */
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: start;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.choice:hover {
+  border-color: var(--text-muted);
+}
+
+.choice[data-active] {
+  border-color: var(--signal-strong);
+  box-shadow: inset 3px 0 0 var(--signal-strong);
+}
+
+.choiceTitle {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--step-1);
+  letter-spacing: -0.01em;
+}
+
+.choiceText {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+/* The backup file picker on the restore step: the browser's own control, only
+   sized to sit tidily with the field's label and hint. */
+.file {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
 /* The description that explains the currently chosen option, with its own
    false-positive note underneath. */
 .choiceDesc {
@@ -244,6 +297,7 @@
 @media (prefers-reduced-motion: reduce) {
   .step,
   .segment,
+  .choice,
   .next {
     transition: none;
   }

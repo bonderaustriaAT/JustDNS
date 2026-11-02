@@ -7,8 +7,8 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.21
-(Sichern & Wiederherstellen).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.22
+(konfigurierbare Block-Antwort).
 
 ## Phase 1 — Einblick & schnelle Gewinne
 
@@ -16,9 +16,9 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   (pro Sekunde oder pro Minute, umschaltbar); Kennzahlen der letzten 24 Stunden
   (Anfragen gesamt, von Filtern geblockt, durchschnittliche Antwortzeit); und den
   Top-5-Client-IPs mit ihrem Anteil an den Anfragen.
-- [ ] **Konfigurierbare Block-Antwort.** Wähle, was ein gesperrter Name
-  zurückgibt — heute ist es NXDOMAIN; geplant sind `0.0.0.0` / `::` oder eine
-  kleine Sperrseite.
+- [x] **Konfigurierbare Block-Antwort.** Wähle, was ein gesperrter Name
+  zurückgibt — eine Null-IP (`0.0.0.0` / `::`, jetzt Standard) oder NXDOMAIN. Eine
+  kleine Sperrseite kann später noch folgen.
 - [x] **Sichern & Wiederherstellen.** Die gesamte Konfiguration — Einstellungen,
   Listen, Abos und Rewrites — in eine einzige Datei exportieren und wieder
   einspielen. Das legt zugleich die Grundlage für den späteren Zwei-Server-Sync
