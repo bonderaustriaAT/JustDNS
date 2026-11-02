@@ -3,6 +3,12 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.19] - 2026-11-01
+
+- Fix: **your DNS rewrites now survive updates and restarts.** They are kept with
+  the rest of your settings on the data volume, instead of inside the app image
+  where a container update could drop them. Rewrites you add from now on are safe.
+
 ## [0.1.18] - 2026-11-01
 
 - New: **notes on your allow and block entries.** Add an optional note to any

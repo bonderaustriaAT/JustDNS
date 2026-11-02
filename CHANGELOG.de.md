@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.19] - 2026-11-01
+
+- Behoben: **Deine DNS-Rewrites überstehen jetzt Updates und Neustarts.** Sie
+  werden zusammen mit deinen übrigen Einstellungen auf dem Daten-Volume
+  gespeichert, statt im App-Image, wo ein Update sie verlieren konnte. Ab jetzt
+  angelegte Rewrites bleiben sicher erhalten.
+
 ## [0.1.18] - 2026-11-01
 
 - Neu: **Notizen zu deinen Allow- und Block-Einträgen.** Füge jeder Domain, die
