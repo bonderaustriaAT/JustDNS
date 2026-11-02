@@ -6,6 +6,9 @@
 
 .svg {
   display: block;
+  /* Never let the measured-width SVG exceed its container (e.g. before the width
+     settles on a phone), which would otherwise widen the whole page. */
+  max-inline-size: 100%;
 }
 
 .area {
