@@ -484,7 +484,12 @@ mod tests {
     }
 
     /// A query event with a chosen client, source and handling time.
-    fn event_with(at_ms: i64, source: QuerySource, client: Ipv4Addr, duration_ms: u32) -> QueryEvent {
+    fn event_with(
+        at_ms: i64,
+        source: QuerySource,
+        client: Ipv4Addr,
+        duration_ms: u32,
+    ) -> QueryEvent {
         QueryEvent {
             at_ms,
             client: IpAddr::V4(client),
@@ -535,8 +540,20 @@ mod tests {
 
         let top = recorder.top_clients(2);
         assert_eq!(top.len(), 2);
-        assert_eq!(top[0], ClientCount { client: IpAddr::V4(a), count: 3 });
+        assert_eq!(
+            top[0],
+            ClientCount {
+                client: IpAddr::V4(a),
+                count: 3
+            }
+        );
         // b and c both have 2; b (…0.2) sorts before c (…0.3).
-        assert_eq!(top[1], ClientCount { client: IpAddr::V4(b), count: 2 });
+        assert_eq!(
+            top[1],
+            ClientCount {
+                client: IpAddr::V4(b),
+                count: 2
+            }
+        );
     }
 }
