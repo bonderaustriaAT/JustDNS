@@ -212,7 +212,12 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <InstallBanner />
-      <main className={styles.main}>{children}</main>
+      <main className={styles.main}>
+        {children}
+        <footer className={styles.footer}>
+          JustDNS <span className={styles.version}>{__APP_VERSION__}</span>
+        </footer>
+      </main>
       <nav className={styles.tabbar} aria-label={t("nav.primary")}>
         {TABS.map((tab) => {
           // The Block/Allow tab covers both of its sub-pages, so it reads active

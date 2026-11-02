@@ -5,6 +5,10 @@
 # Build the web UI so its bundle can be embedded into the binary.
 FROM node:20-slim AS ui
 WORKDIR /ui
+# The release version (git tag) is baked into the bundle so the UI can show it.
+# Defaults to "dev" for a plain `docker build`; the image workflow passes the tag.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 COPY crates/justdns-web/ui/package.json crates/justdns-web/ui/package-lock.json ./
 RUN npm ci
 COPY crates/justdns-web/ui/ ./

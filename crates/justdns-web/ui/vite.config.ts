@@ -5,8 +5,18 @@ import { VitePWA } from "vite-plugin-pwa";
 // The Rust web crate embeds the built assets and serves them under /. Absolute
 // asset paths keep working on client-routed pages like /einstellungen, which
 // are all served the same index.html.
+// The release version is the git tag, passed in by the image build as the
+// APP_VERSION env var and baked into the bundle. Local builds show "dev".
+// Read via globalThis so no @types/node dependency is needed just for this.
+const appVersion =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.APP_VERSION ?? "dev";
+
 export default defineConfig({
   base: "/",
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     react(),
     // Installable PWA: generate the manifest and a Workbox service worker that
