@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.24] - 2026-11-02
+
+- New: **install JustDNS as an app, and a redesigned phone experience.** JustDNS
+  can now be added to your home screen on a phone or desktop and opens like a
+  normal app, full-screen and with its own icon — it even opens the last page
+  while your connection is briefly down. When it can be installed, a small
+  "Install JustDNS as an app" bar offers a one-tap install on Android and
+  Chrome, or shows the "Share → Add to Home Screen" step on an iPhone.
+- Improved: **the whole interface is now built for phones.** On a small screen
+  the top menu becomes a bottom bar you can reach with your thumb, and every
+  page — overview, log, block/allow, rewrites and settings — reflows to fit so
+  nothing is cut off or spills sideways. On a computer the layout is unchanged.
+
 ## [0.1.23] - 2026-11-02
 
 - New: **restore from a backup during first-time setup.** The very first screen of

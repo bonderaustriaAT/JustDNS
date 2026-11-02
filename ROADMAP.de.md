@@ -7,7 +7,7 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.22
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.24
 (konfigurierbare Block-Antwort).
 
 ## Phase 1 — Einblick & schnelle Gewinne
@@ -28,7 +28,7 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   DNS-Rewrites, statt die Adresse jedes Mal einzutippen. Änderst du die Adresse
   des Objekts einmal, werden alle Rewrites, die darauf zeigen, sofort angepasst —
   so musst du dieselbe IP nie an einem Dutzend Stellen ändern.
-- [ ] **Installierbare Web-App (PWA).** Eine mobil-optimierte, installierbare
+- [x] **Installierbare Web-App (PWA).** Eine mobil-optimierte, installierbare
   Version des Dashboards — zum Home-Bildschirm des Handys hinzufügen und JustDNS
   unterwegs verwalten. Vorgezogen als früher Gewinn; sie baut auf dem schon
   vorhandenen Dashboard auf, sodass vollwertige native Apps später bleiben können
