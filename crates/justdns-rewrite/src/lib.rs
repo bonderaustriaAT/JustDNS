@@ -36,6 +36,13 @@ pub struct Rewrite {
     /// The addresses the name resolves to. IPv4 addresses answer A queries,
     /// IPv6 addresses answer AAAA queries.
     pub ips: Vec<IpAddr>,
+    /// Names of the reusable address objects (aliases) this rewrite points at.
+    /// Each is resolved to the object's current addresses when the live table is
+    /// built, so changing one object updates every rewrite that references it at
+    /// once. Alongside `ips`: a rewrite answers with its own addresses plus every
+    /// referenced object's. Defaults to empty so entries from an older build load.
+    #[serde(default)]
+    pub aliases: Vec<String>,
     /// Whether the rewrite is active. A disabled entry stays in the list and the
     /// file but is left out of the live table, so the name falls through to the
     /// normal upstream path until it is switched on again. Defaults to `true` so
@@ -49,24 +56,27 @@ fn enabled_default() -> bool {
     true
 }
 
-/// The compiled lookup table: normalised name → addresses. Built fresh on every
-/// change and swapped into the live [`Rewriter`] in one step.
+/// A reusable address object: a short name that stands for one or more IP
+/// addresses. A rewrite can point at an object by name instead of repeating the
+/// address, and changing the object's addresses updates every rewrite that
+/// references it. Serialised in camelCase to match the dashboard's JSON.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alias {
+    /// The object's name, already normalised (lowercase), used by rewrites to
+    /// reference it.
+    pub name: String,
+    /// The addresses the object stands for. A referencing rewrite answers A
+    /// queries from the IPv4 ones and AAAA queries from the IPv6 ones.
+    pub ips: Vec<IpAddr>,
+}
+
+/// The compiled lookup table: normalised name → resolved addresses. Built fresh
+/// on every change (alias references already resolved to concrete IPs) and
+/// swapped into the live [`Rewriter`] in one step.
 #[derive(Debug, Default)]
 struct RewriteTable {
     by_name: HashMap<String, Vec<IpAddr>>,
-}
-
-impl RewriteTable {
-    /// Build the live table from the stored rewrites, skipping disabled ones so
-    /// they are never answered locally while switched off.
-    fn from_rewrites(rewrites: &[Rewrite]) -> Self {
-        let by_name = rewrites
-            .iter()
-            .filter(|rewrite| rewrite.enabled)
-            .map(|rewrite| (rewrite.name.clone(), rewrite.ips.clone()))
-            .collect();
-        Self { by_name }
-    }
 }
 
 /// The live rewrite table the DNS pipeline reads on every query. Lock-free: an
@@ -92,11 +102,28 @@ impl Rewriter {
         self.table.load().by_name.get(&normalised).cloned()
     }
 
-    /// Replace the whole table from `rewrites`. Called by the store after every
-    /// edit, so the next query sees the change without a restart.
+    /// Replace the whole table from already-resolved `(name, ips)` pairs. The
+    /// store resolves each rewrite's own addresses and its alias references to
+    /// concrete IPs before calling this, so the live table only ever holds plain
+    /// addresses and a lookup stays a single map hit.
+    pub fn set_resolved<I>(&self, entries: I)
+    where
+        I: IntoIterator<Item = (String, Vec<IpAddr>)>,
+    {
+        let by_name: HashMap<String, Vec<IpAddr>> = entries.into_iter().collect();
+        self.table.store(Arc::new(RewriteTable { by_name }));
+    }
+
+    /// Replace the whole table from `rewrites`, skipping disabled ones. A
+    /// convenience for callers with no address objects to resolve (tests and the
+    /// pipeline); it ignores the `aliases` field.
     pub fn set(&self, rewrites: &[Rewrite]) {
-        self.table
-            .store(Arc::new(RewriteTable::from_rewrites(rewrites)));
+        self.set_resolved(
+            rewrites
+                .iter()
+                .filter(|rewrite| rewrite.enabled)
+                .map(|rewrite| (rewrite.name.clone(), rewrite.ips.clone())),
+        );
     }
 
     /// How many names currently have a rewrite.
@@ -141,6 +168,14 @@ fn valid_label(label: &str) -> bool {
         .all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
+/// Whether `name` is a usable address-object (alias) name: a single label of
+/// 1–63 ASCII letters, digits or hyphen, with no leading or trailing hyphen and
+/// no dots. Kept to one label (unlike a host name) so an object name such as
+/// `reverse-proxy` never reads like a domain.
+pub fn valid_alias_name(name: &str) -> bool {
+    valid_label(&normalise(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +207,7 @@ mod tests {
                 IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5)),
                 IpAddr::V6(Ipv6Addr::LOCALHOST),
             ],
+            aliases: Vec::new(),
             enabled: true,
         }]);
 
@@ -189,11 +225,13 @@ mod tests {
             Rewrite {
                 name: "on.home".to_owned(),
                 ips: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+                aliases: Vec::new(),
                 enabled: true,
             },
             Rewrite {
                 name: "off.home".to_owned(),
                 ips: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+                aliases: Vec::new(),
                 enabled: false,
             },
         ]);

@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.27] - 2026-11-02
+
+- New: **reusable address objects for rewrites.** Give an address a name — say
+  `reverse-proxy` for `192.168.20.9` — under the new "Address objects" section on
+  the Rewrites page, then point as many rewrites at that object as you like
+  instead of typing the address each time. Change the object's address once and
+  every rewrite that points at it follows at once. An object can hold several
+  addresses (IPv4 and IPv6), and an object that is still in use cannot be deleted
+  by mistake — the message tells you which rewrites still reference it. Objects
+  are included in backups.
+
 ## [0.1.26] - 2026-11-02
 
 - New: **live statistics on the overview.** The overview now shows a live query

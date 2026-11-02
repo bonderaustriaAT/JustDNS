@@ -141,18 +141,30 @@ export interface Preset {
   enabled: boolean;
 }
 
+/** A reusable address object: a short name standing for one or more IP
+ *  addresses. A rewrite can point at it instead of repeating the address, and
+ *  changing the object updates every rewrite that references it. */
+export interface Alias {
+  name: string;
+  ips: string[];
+}
+
 /** A local DNS rewrite: an exact name the resolver answers itself from fixed
- *  IP addresses (v4 → A record, v6 → AAAA) instead of forwarding it upstream.
- *  A disabled rewrite stays in the list but is not answered locally. */
+ *  IP addresses (v4 → A record, v6 → AAAA) and/or the addresses of the address
+ *  objects it references, instead of forwarding it upstream. A disabled rewrite
+ *  stays in the list but is not answered locally. */
 export interface Rewrite {
   name: string;
   ips: string[];
+  /** Names of the address objects this rewrite points at. */
+  aliases: string[];
   enabled: boolean;
 }
 
 /** Everything the rewrites view shows in one payload. */
 export interface RewritesView {
   rewrites: Rewrite[];
+  aliases: Alias[];
 }
 
 /** One of the user's own allow/block entries: a domain, with an optional
@@ -318,17 +330,27 @@ export const api = {
     sendJson<ListsView>("PUT", `/api/lists/presets/${encodeURIComponent(key)}`, { on }),
   refreshLists: () => sendJson<RefreshResponse>("POST", "/api/lists/refresh"),
   rewrites: (signal?: AbortSignal) => getJson<RewritesView>("/api/rewrites", signal),
-  /** Add one or more names that share the same addresses. */
-  setRewrites: (names: string[], ips: string[]) =>
-    sendJson<RewritesView>("POST", "/api/rewrites", { names, ips }),
-  /** Rename a rewrite and replace its addresses, keeping its enabled state. */
-  editRewrite: (oldName: string, name: string, ips: string[]) =>
-    sendJson<RewritesView>("PUT", "/api/rewrites", { oldName, name, ips }),
+  /** Add one or more names that share the same addresses and/or objects. */
+  setRewrites: (names: string[], ips: string[], aliases: string[]) =>
+    sendJson<RewritesView>("POST", "/api/rewrites", { names, ips, aliases }),
+  /** Rename a rewrite and replace its addresses and object references, keeping
+   *  its enabled state. */
+  editRewrite: (oldName: string, name: string, ips: string[], aliases: string[]) =>
+    sendJson<RewritesView>("PUT", "/api/rewrites", { oldName, name, ips, aliases }),
   /** Switch a rewrite on or off. */
   setRewriteEnabled: (name: string, enabled: boolean) =>
     sendJson<RewritesView>("PUT", "/api/rewrites/enabled", { name, enabled }),
   removeRewrite: (name: string) =>
     sendJson<RewritesView>("DELETE", "/api/rewrites", { name }),
+  /** Add an address object, or replace the addresses of one that exists. */
+  setAlias: (name: string, ips: string[]) =>
+    sendJson<RewritesView>("POST", "/api/aliases", { name, ips }),
+  /** Rename an address object and replace its addresses; references follow. */
+  editAlias: (oldName: string, name: string, ips: string[]) =>
+    sendJson<RewritesView>("PUT", "/api/aliases", { oldName, name, ips }),
+  /** Remove an address object (refused while a rewrite still references it). */
+  removeAlias: (name: string) =>
+    sendJson<RewritesView>("DELETE", "/api/aliases", { name }),
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
   /** Download the full configuration backup (settings, lists and rewrites) as a

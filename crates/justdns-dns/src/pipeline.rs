@@ -747,6 +747,7 @@ mod tests {
         rewriter.set(&[Rewrite {
             name: "nas.home".to_owned(),
             ips: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))],
+            aliases: Vec::new(),
             enabled: true,
         }]);
         let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
@@ -883,6 +884,7 @@ mod tests {
         rewriter.set(&[Rewrite {
             name: "nas.home".to_owned(),
             ips: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))],
+            aliases: Vec::new(),
             enabled: true,
         }]);
         let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())

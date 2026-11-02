@@ -25,7 +25,7 @@ use justdns_config::{BlockLevel, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
-use justdns_rewrite::{Rewrite, RewriteError, RewriteStore, RewritesView};
+use justdns_rewrite::{Alias, Rewrite, RewriteError, RewriteStore, RewritesView};
 use justdns_store::{ActivityBucket, ClientCount, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
@@ -183,6 +183,10 @@ fn router(state: AppState) -> Router {
                 .delete(remove_rewrite),
         )
         .route("/api/rewrites/enabled", put(set_rewrite_enabled))
+        .route(
+            "/api/aliases",
+            post(set_alias).put(edit_alias).delete(remove_alias),
+        )
         .route("/api/cache/clear", post(clear_cache))
         .route("/api/backup", get(export_backup))
         .route("/api/backup/restore", post(restore_backup))
@@ -594,10 +598,15 @@ async fn refresh_lists(
 /// Translate a rewrite-store error into an HTTP status and message.
 fn rewrite_error(error: RewriteError) -> (StatusCode, String) {
     let status = match &error {
-        RewriteError::InvalidName(_) | RewriteError::InvalidIp(_) | RewriteError::NoIps => {
-            StatusCode::BAD_REQUEST
-        }
+        RewriteError::InvalidName(_)
+        | RewriteError::InvalidIp(_)
+        | RewriteError::NoIps
+        | RewriteError::InvalidAliasName(_)
+        | RewriteError::UnknownAlias(_) => StatusCode::BAD_REQUEST,
         RewriteError::Unknown(_) => StatusCode::NOT_FOUND,
+        // The object is still referenced, so the delete conflicts with live state;
+        // the message names every rewrite that still points at it.
+        RewriteError::AliasInUse { .. } => StatusCode::CONFLICT,
         RewriteError::Io { .. } | RewriteError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, error.to_string())
@@ -614,7 +623,12 @@ async fn get_rewrites(State(rewrites): State<RewriteStore>) -> Json<RewritesView
 #[derive(Deserialize)]
 struct RewriteBody {
     names: Vec<String>,
+    #[serde(default)]
     ips: Vec<String>,
+    /// Names of the address objects the rewrite points at. Optional, so an
+    /// address-only rewrite posts just `ips`.
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 async fn set_rewrite(
@@ -622,18 +636,22 @@ async fn set_rewrite(
     Json(body): Json<RewriteBody>,
 ) -> Result<Json<RewritesView>, (StatusCode, String)> {
     rewrites
-        .set_many(&body.names, &body.ips)
+        .set_many(&body.names, &body.ips, &body.aliases)
         .map_err(rewrite_error)?;
     Ok(Json(rewrites.view()))
 }
 
-/// Rename a rewrite and replace its addresses, keeping its enabled state.
+/// Rename a rewrite and replace its addresses and object references, keeping its
+/// enabled state.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RewriteEditBody {
     old_name: String,
     name: String,
+    #[serde(default)]
     ips: Vec<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
 }
 
 async fn edit_rewrite(
@@ -641,8 +659,60 @@ async fn edit_rewrite(
     Json(body): Json<RewriteEditBody>,
 ) -> Result<Json<RewritesView>, (StatusCode, String)> {
     rewrites
-        .edit(&body.old_name, &body.name, &body.ips)
+        .edit(&body.old_name, &body.name, &body.ips, &body.aliases)
         .map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Add an address object, or replace the addresses of one that already exists.
+#[derive(Deserialize)]
+struct AliasBody {
+    name: String,
+    ips: Vec<String>,
+}
+
+async fn set_alias(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<AliasBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites
+        .set_alias(&body.name, &body.ips)
+        .map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Rename an address object and replace its addresses; references on every
+/// rewrite that points at it follow to the new name.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AliasEditBody {
+    old_name: String,
+    name: String,
+    ips: Vec<String>,
+}
+
+async fn edit_alias(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<AliasEditBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites
+        .edit_alias(&body.old_name, &body.name, &body.ips)
+        .map_err(rewrite_error)?;
+    Ok(Json(rewrites.view()))
+}
+
+/// Remove an address object by name. Refused with 409 while a rewrite still
+/// points at it.
+#[derive(Deserialize)]
+struct AliasNameBody {
+    name: String,
+}
+
+async fn remove_alias(
+    State(rewrites): State<RewriteStore>,
+    Json(body): Json<AliasNameBody>,
+) -> Result<Json<RewritesView>, (StatusCode, String)> {
+    rewrites.remove_alias(&body.name).map_err(rewrite_error)?;
     Ok(Json(rewrites.view()))
 }
 
@@ -708,6 +778,11 @@ struct Backup {
     settings: Settings,
     lists: UserLists,
     rewrites: Vec<Rewrite>,
+    /// Reusable address objects the rewrites can reference. Defaults to empty so
+    /// a backup written by an older build (version 1 without this field) still
+    /// restores.
+    #[serde(default)]
+    aliases: Vec<Alias>,
 }
 
 /// Export the whole UI-set configuration as one downloadable JSON file. The
@@ -726,6 +801,7 @@ async fn export_backup(
         settings: config.get(),
         lists: lists.snapshot(),
         rewrites: rewrites.snapshot(),
+        aliases: rewrites.alias_snapshot(),
     };
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -767,7 +843,9 @@ async fn restore_backup(
         ));
     }
 
-    rewrites.replace(backup.rewrites).map_err(rewrite_error)?;
+    rewrites
+        .replace_all(backup.rewrites, backup.aliases)
+        .map_err(rewrite_error)?;
     lists.replace(backup.lists).map_err(list_error)?;
     config
         .set(backup.settings)
@@ -1546,6 +1624,104 @@ mod tests {
         )
         .await;
         assert!(body.contains("\"rewrites\":[]"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn address_objects_round_trip_and_guard_their_deletion() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        // Create an address object.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/aliases")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"name":"reverse-proxy","ips":["192.168.20.9"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"reverse-proxy\""), "object listed: {body}");
+
+        // Point a rewrite at it with no address of its own.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"names":["blog.home"],"aliases":["reverse-proxy"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"blog.home\""), "{body}");
+        assert!(body.contains("\"aliases\":[\"reverse-proxy\"]"), "{body}");
+
+        // A reference to an object that does not exist is refused.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/rewrites")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"names":["x.home"],"aliases":["ghost"]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Deleting an object that is still in use is refused with 409, and the
+        // message names the rewrite that still points at it.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::delete("/api/aliases")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"name":"reverse-proxy"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        let body = body_of(res).await;
+        assert!(
+            body.contains("blog.home"),
+            "names the referencing rewrite: {body}"
+        );
+
+        // Changing the object's address updates what the rewrite resolves to.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/aliases")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"oldName":"reverse-proxy","name":"reverse-proxy","ips":["192.168.20.50"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(
+            body.contains("192.168.20.50"),
+            "object address changed: {body}"
+        );
     }
 
     #[tokio::test]

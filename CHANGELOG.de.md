@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.27] - 2026-11-02
+
+- Neu: **wiederverwendbare Adressobjekte für Rewrites.** Gib einer Adresse einen
+  Namen — etwa `reverse-proxy` für `192.168.20.9` — im neuen Abschnitt
+  „Adressobjekte“ auf der Rewrites-Seite und zeige dann beliebig viele Rewrites
+  auf dieses Objekt, statt die Adresse jedes Mal zu tippen. Änderst du die
+  Adresse des Objekts einmal, folgen alle Rewrites, die darauf zeigen, auf einen
+  Schlag. Ein Objekt kann mehrere Adressen halten (IPv4 und IPv6), und ein Objekt,
+  das noch benutzt wird, lässt sich nicht versehentlich löschen — die Meldung
+  nennt die Rewrites, die es noch verwenden. Objekte sind in Backups enthalten.
+
 ## [0.1.26] - 2026-11-02
 
 - Neu: **Live-Statistik auf der Übersicht.** Die Übersicht zeigt jetzt eine

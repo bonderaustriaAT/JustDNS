@@ -37,6 +37,12 @@
 
 .addForm {
   display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.addRow {
+  display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
 }
@@ -215,6 +221,140 @@
   padding: 2px var(--space-2);
 }
 
+/* An address-object reference on a rewrite row: a chip set apart from a plain
+   address with the signal accent and a small leading mark, so you can see at a
+   glance that this target is an object, not a literal IP. */
+.aliasRef {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+.aliasRef::before {
+  content: "⇢ ";
+  opacity: 0.7;
+}
+
+/* The object picker in a rewrite form: a label and a row of toggle chips. */
+.aliasPick {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.aliasPickLabel {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+.aliasPickEmpty {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  font-style: italic;
+}
+
+.aliasPickChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.aliasPickChip {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+
+.aliasPickChip:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.aliasPickChip[data-on] {
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+  border-color: var(--signal);
+}
+
+.aliasPickChip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.aliasPickChip:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* The "Address objects" section below the rewrites, with its own heading. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
+}
+
+.sectionHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sectionTitle {
+  font-size: var(--step-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sectionLead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}
+
+/* Address-object rows: like the rewrite rows but with no on/off toggle, so three
+   columns — name, addresses, actions. */
+.aliasEntries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr auto;
+  column-gap: var(--space-3);
+}
+
+.aliasEntry {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.aliasEntry[data-editing] {
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+.aliasEntryName {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
 .remove {
   flex: none;
   inline-size: 1.75rem;
@@ -240,9 +380,24 @@
 }
 
 /* Inline edit: the name/addresses area of a row turns into this little form, so
-   editing happens in place instead of jumping back to the top add form. */
+   editing happens in place instead of jumping back to the top add form. A
+   rewrite editor stacks its inputs row above the object picker; an object editor
+   has only the inputs row. */
 .rowEdit {
   grid-column: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+/* An object row has no toggle column, so its inline editor spans from the first
+   column rather than the second. */
+.aliasEntry .rowEdit {
+  grid-column: 1 / -1;
+}
+
+.rowEditInputs {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -348,6 +503,37 @@
 
   .rowEdit {
     grid-column: 2 / -1;
+    grid-row: 1 / -1;
+  }
+
+  .aliasEntries {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .aliasEntry {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name  actions"
+      "value value";
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .aliasEntryName {
+    grid-area: name;
+  }
+
+  .aliasEntry .entryValue {
+    grid-area: value;
+  }
+
+  .aliasEntry .entryActions {
+    grid-area: actions;
+  }
+
+  .aliasEntry .rowEdit {
+    grid-column: 1 / -1;
     grid-row: 1 / -1;
   }
 }
