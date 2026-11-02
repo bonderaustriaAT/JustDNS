@@ -177,6 +177,7 @@ async fn main() -> ExitCode {
         PipelineOptions {
             ipv6_enabled: config_store.ipv6_flag(),
             safe_search: config_store.safe_search_flag(),
+            block_null_ip: config_store.block_null_ip_flag(),
         },
     )
     .with_observer(observer)

@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.22] - 2026-11-02
+
+- Neu: **wähle, womit eine geblockte Domain beantwortet wird.** Unter
+  Einstellungen → Schutz gibt es jetzt „Antwort auf geblockte Domains“ mit der
+  Wahl zwischen einer Null-IP (`0.0.0.0` / `::`) und NXDOMAIN. **Neuer Standard
+  ist die Null-IP** — wie bei AdGuard —, sodass eine geblockte Werbe- oder
+  Telemetrie-Adresse sofort ins Leere läuft und Apps weitermachen. Das behebt
+  Hänger, die manche Video-Player (zum Beispiel YouTube) mit NXDOMAIN hatten, wo
+  der Player die gescheiterte Anfrage wiederholte. Du kannst jederzeit auf
+  NXDOMAIN zurückstellen.
+
 ## [0.1.21] - 2026-11-02
 
 - Neu: **Einrichtung sichern und wiederherstellen.** Unter Einstellungen →

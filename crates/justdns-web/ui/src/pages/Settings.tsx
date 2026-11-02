@@ -9,6 +9,7 @@ import type { MessageKey } from "../lib/messages";
 import {
   useSettings,
   type BlockLevel,
+  type BlockResponse,
   type CustomTransport,
   type CustomUpstream,
   type SpeedProfile,
@@ -438,6 +439,49 @@ function BlockLevelControl() {
   );
 }
 
+/** The block-response control: a segmented switch between answering a blocked
+ *  name with the null IP (0.0.0.0 / ::) and with NXDOMAIN. */
+const BLOCK_RESPONSES: BlockResponse[] = ["null-ip", "nx-domain"];
+
+function BlockResponseControl() {
+  const { t } = useI18n();
+  const { settings, update } = useSettings();
+  const current = settings.blockResponse;
+
+  return (
+    <div className={styles.profile}>
+      <span className={styles.labelLine}>
+        <span className={styles.label}>{t("settings.blockResponseLabel")}</span>
+        <InfoHint
+          label={t("settings.blockResponseLabel")}
+          text={t("settings.blockResponseDetails")}
+        />
+      </span>
+      <div
+        className={styles.profileSwitch}
+        role="group"
+        aria-label={t("settings.blockResponseLabel")}
+      >
+        {BLOCK_RESPONSES.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            className={styles.profileButton}
+            data-active={current === opt || undefined}
+            aria-pressed={current === opt}
+            onClick={() => update("blockResponse", opt)}
+          >
+            {t(`settings.blockResponse.${opt}` as MessageKey)}
+          </button>
+        ))}
+      </div>
+      <p className={styles.profileDesc}>
+        {t(`settings.blockResponse.${current}Desc` as MessageKey)}
+      </p>
+    </div>
+  );
+}
+
 export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -559,6 +603,7 @@ export function Settings() {
                   />
                 }
               />
+              <BlockResponseControl />
             </Category>
           )}
 

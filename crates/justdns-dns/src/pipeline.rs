@@ -8,7 +8,7 @@
 //! cached before it is returned. IPv6 answers are suppressed unless enabled.
 
 use std::collections::HashSet;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -32,6 +32,9 @@ const MAX_NEGATIVE_TTL: u64 = 3600;
 /// TTL on a locally rewritten answer. Short, since a LAN mapping can change and
 /// the lookup is cheap enough to repeat; long enough to spare a flood of repeats.
 const REWRITE_TTL: u32 = 300;
+/// TTL on a null-IP answer for a blocked name. Short, so switching a block off
+/// (or allowing the name) takes effect almost at once.
+const BLOCK_TTL: u32 = 10;
 
 /// Options the pipeline reads while handling a query. `ipv6_enabled` is a
 /// shared flag rather than a plain bool so the config store can flip it at
@@ -44,14 +47,21 @@ pub struct PipelineOptions {
     /// Whether to force the big search engines to their safe-search endpoints.
     /// A shared flag so the config store can flip it live, like `ipv6_enabled`.
     pub safe_search: Arc<AtomicBool>,
+    /// How a blocked name is answered: `true` hands back the null IP
+    /// (`0.0.0.0` / `::`), `false` answers NXDOMAIN. A shared flag so the config
+    /// store flips it live. Defaults to `false` here (NXDOMAIN); the product
+    /// default of null-IP is set by the config layer and wired in by the binary.
+    pub block_null_ip: Arc<AtomicBool>,
 }
 
 impl PipelineOptions {
-    /// Build options with a fresh IPv6 flag set to `enabled` and safe search off.
+    /// Build options with a fresh IPv6 flag set to `enabled`, safe search off,
+    /// and blocked names answered with NXDOMAIN.
     pub fn with_ipv6(enabled: bool) -> Self {
         Self {
             ipv6_enabled: Arc::new(AtomicBool::new(enabled)),
             safe_search: Arc::new(AtomicBool::new(false)),
+            block_null_ip: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -162,11 +172,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             }
         }
 
-        // Blocked names are refused with NXDOMAIN before any lookup, for every
-        // record type, so a blocked host resolves to nothing on IPv4 and IPv6.
+        // Blocked names are refused before any lookup. How depends on the block
+        // response: the null IP (so a connection to the blocked host fails at
+        // once) or NXDOMAIN (the name simply does not exist).
         if let Some(blocker) = &self.blocker {
             if blocker.blocks(&query.name().to_string()) {
-                response.set_response_code(ResponseCode::NXDomain);
+                if self.options.block_null_ip.load(Ordering::Relaxed) {
+                    self.answer_blocked_null_ip(query, response);
+                } else {
+                    response.set_response_code(ResponseCode::NXDomain);
+                }
                 return AnswerSource::Blocked;
             }
         }
@@ -253,6 +268,32 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 .expect("refresh set is not poisoned")
                 .remove(&key);
         });
+    }
+
+    /// Answer a blocked `query` with the null IP: `0.0.0.0` for an A query, `::`
+    /// for an AAAA query, and NODATA (NOERROR with no answer) for any other type.
+    /// The client then fails to connect to the blocked host at once, which apps
+    /// and video players handle more gracefully than a retried NXDOMAIN.
+    fn answer_blocked_null_ip(&self, query: &Query, response: &mut Message) {
+        response.set_response_code(ResponseCode::NoError);
+        let name = query.name().clone();
+        match query.query_type() {
+            RecordType::A => {
+                response.add_answer(Record::from_rdata(
+                    name,
+                    BLOCK_TTL,
+                    RData::A(A(Ipv4Addr::UNSPECIFIED)),
+                ));
+            }
+            RecordType::AAAA => {
+                response.add_answer(Record::from_rdata(
+                    name,
+                    BLOCK_TTL,
+                    RData::AAAA(AAAA(Ipv6Addr::UNSPECIFIED)),
+                ));
+            }
+            _ => {}
+        }
     }
 
     /// Answer `query` from a rewrite's `ips`. An A query gets the IPv4 addresses
@@ -644,6 +685,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocked_name_is_null_ip_when_configured() {
+        use justdns_filter::{Blocker, DomainSet};
+
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let blocker = Arc::new(Blocker::new(
+            DomainSet::from_rules("ads.example\n"),
+            Arc::new(AtomicBool::new(true)),
+            DomainSet::new(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        let options = PipelineOptions {
+            ipv6_enabled: Arc::new(AtomicBool::new(false)),
+            safe_search: Arc::new(AtomicBool::new(false)),
+            block_null_ip: Arc::new(AtomicBool::new(true)),
+        };
+        let pipe = Pipeline::new(DnsCache::new(100), router, options).with_blocker(blocker);
+
+        // A blocked A query is answered with 0.0.0.0, not NXDOMAIN, and never
+        // reaches upstream.
+        let blocked = pipe
+            .handle(&request("sub.ads.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(blocked.response_code(), ResponseCode::NoError);
+        assert_eq!(blocked.answers().len(), 1);
+        assert_eq!(
+            answer_addresses(&blocked),
+            vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
+            "A block answers 0.0.0.0"
+        );
+
+        // A blocked AAAA query is answered with :: — even with IPv6 off, since a
+        // block is an explicit null answer, not a real address.
+        let blocked_v6 = pipe
+            .handle(&request("ads.example.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(blocked_v6.response_code(), ResponseCode::NoError);
+        assert_eq!(
+            answer_addresses(&blocked_v6),
+            vec![IpAddr::V6(Ipv6Addr::UNSPECIFIED)],
+            "AAAA block answers ::"
+        );
+
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "a blocked name never reaches upstream"
+        );
+    }
+
+    #[tokio::test]
     async fn rewrite_answers_locally_without_upstream() {
         use justdns_rewrite::{Rewrite, Rewriter};
 
@@ -695,6 +788,7 @@ mod tests {
         let options = PipelineOptions {
             ipv6_enabled: Arc::new(AtomicBool::new(false)),
             safe_search: Arc::new(AtomicBool::new(true)),
+            block_null_ip: Arc::new(AtomicBool::new(false)),
         };
         let pipe = Pipeline::new(DnsCache::new(100), router, options);
 
