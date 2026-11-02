@@ -11,5 +11,5 @@ mod store;
 
 pub use duck::{DuckStore, StoreError};
 pub use event::{QueryEvent, QuerySource};
-pub use recorder::{ActivityBucket, ClientCount, DayStats, Recorder, Stats};
+pub use recorder::{ActivityBucket, ClientActivity, ClientCount, DayStats, Recorder, Stats};
 pub use store::Store;

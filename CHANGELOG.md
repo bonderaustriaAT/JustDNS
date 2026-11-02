@@ -3,6 +3,18 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.28] - 2026-11-02
+
+- New: **recognise and name your devices.** On the new "Devices" page you can give
+  the clients on your network names — a single address (e.g. `192.168.20.10` =
+  "Living room TV") or a whole range in CIDR form (e.g. `192.168.30.0/24` = "Guest
+  Wi-Fi"). The log and the overview then speak in names instead of IP addresses,
+  and the log search finds devices by their name too. The list shows every named
+  device plus every recently seen, still-unnamed client, with "last seen", a query
+  count and a dot for "active now". Each device can have a name, an optional note
+  and a device kind. How long a device still counts as "active" after its last
+  query is set in Settings (default 5 minutes). The names are included in backups.
+
 ## [0.1.27] - 2026-11-02
 
 - New: **reusable address objects for rewrites.** Give an address a name — say

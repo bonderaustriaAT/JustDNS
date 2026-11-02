@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use justdns_auth::{DEFAULT_SESSION_TTL, SessionStore, UserStore};
+use justdns_clients::ClientStore;
 use justdns_config::{ConfigStore, CustomTransport, CustomUpstream, Settings, SpeedProfile};
 use justdns_dns::cache::{CacheTuning, DnsCache};
 use justdns_dns::observer::QueryObserver;
@@ -153,6 +154,18 @@ async fn main() -> ExitCode {
     };
     info!(rewrites = rewriter.len(), "loaded DNS rewrites");
 
+    // Named clients (devices) live on the data volume too. They are a read-time
+    // label for the log and statistics, so loading them just makes the store
+    // available to the web layer — nothing is pushed into the DNS path.
+    let clients = match ClientStore::load(&config.clients_path) {
+        Ok(clients) => clients,
+        Err(error) => {
+            error!(%error, "cannot load the named clients");
+            return ExitCode::FAILURE;
+        }
+    };
+    info!(clients = clients.view().len(), "loaded named clients");
+
     // The upstream pool and the cache tuning both follow the live settings: the
     // speed profile chooses which resolvers run and how eagerly answers are
     // cached, the encryption toggle picks DoT vs plaintext, and the mode decides
@@ -205,7 +218,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), cache.clone(), users.clone(), sessions.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), cache.clone(), users.clone(), sessions.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

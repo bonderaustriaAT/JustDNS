@@ -91,7 +91,9 @@ export function Logs() {
                     onClick={() => setOpenKey(open ? null : key)}
                   >
                     <span className={styles.time}>{row.time}</span>
-                    <span className={styles.client}>{row.client}</span>
+                    <span className={styles.client} title={row.deviceName ? row.client : undefined}>
+                      {row.deviceName ?? row.client}
+                    </span>
                     <span className={styles.domainCell}>
                       <span className={styles.domain} title={row.name}>
                         {row.name}

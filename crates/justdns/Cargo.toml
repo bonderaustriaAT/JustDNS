@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 justdns-auth = { path = "../justdns-auth" }
+justdns-clients = { path = "../justdns-clients" }
 justdns-config = { path = "../justdns-config" }
 justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }

@@ -17,10 +17,13 @@ export interface ActivityBucket {
   count: number;
 }
 
-/** One client and how many queries it made over the last 24 hours. */
+/** One client and how many queries it made over the last 24 hours, with its
+ *  device name resolved when one is set. */
 export interface ClientCount {
   client: string;
   count: number;
+  /** The device name for this address, when a device matches it. */
+  name?: string;
 }
 
 /** Last-24h figures for the overview's statistics. The live query rate is
@@ -80,6 +83,9 @@ export interface ServerSettings {
   instanceName: string;
   /// What a blocked name is answered with: the null IP (default) or NXDOMAIN.
   blockResponse: BlockResponse;
+  /// How many seconds since a client's last query still counts it as "active"
+  /// on the devices view.
+  activeWindowSecs: number;
 }
 
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
@@ -96,6 +102,8 @@ export interface QueryRow {
   /** The IPs the query resolved to, in answer order. Empty for a block, a
    *  NODATA answer, or a non-address record type. */
   addresses: string[];
+  /** The device name of the client that asked, when a device matches it. */
+  device_name?: string;
 }
 
 /** Which list a name is on and the rule that matched, or null if on no list. */
@@ -165,6 +173,53 @@ export interface Rewrite {
 export interface RewritesView {
   rewrites: Rewrite[];
   aliases: Alias[];
+}
+
+/** The kind of device a name stands for, shown as an icon. Matches the Rust
+ *  `DeviceKind`. */
+export type DeviceKind =
+  | "phone"
+  | "laptop"
+  | "desktop"
+  | "tablet"
+  | "tv"
+  | "console"
+  | "iot"
+  | "server"
+  | "printer"
+  | "router"
+  | "other";
+
+/** A named client (device): the address or CIDR range it matches, a display
+ *  name, an optional note and a kind. Matches the Rust `Device`. */
+export interface Device {
+  target: string;
+  name: string;
+  note?: string;
+  kind: DeviceKind;
+}
+
+/** One row of the devices view: a named device or a seen-but-unnamed client,
+ *  with its recent footprint. For a named device `target` is its address or
+ *  range and `name`/`note`/`kind` describe it; for an unnamed client `target`
+ *  is the bare address and `name` is absent. `known` tells the two apart. */
+export interface ClientRow {
+  target: string;
+  isRange: boolean;
+  name?: string;
+  note?: string;
+  kind: DeviceKind;
+  known: boolean;
+  count: number;
+  lastSeenMs?: number;
+  active: boolean;
+}
+
+/** Everything the devices view shows: the rows and the active-window the rows
+ *  were aged by (seconds since last query that still counts as active). */
+export interface ClientsView {
+  clients: ClientRow[];
+  activeWindowSecs: number;
 }
 
 /** One of the user's own allow/block entries: a domain, with an optional
@@ -351,6 +406,22 @@ export const api = {
   /** Remove an address object (refused while a rewrite still references it). */
   removeAlias: (name: string) =>
     sendJson<RewritesView>("DELETE", "/api/aliases", { name }),
+  /** The devices view: named devices plus recently seen unnamed clients. */
+  clients: (signal?: AbortSignal) => getJson<ClientsView>("/api/clients", signal),
+  /** Add a device, or replace the name/note/kind of one with the same target. */
+  setClient: (target: string, name: string, kind: DeviceKind, note?: string) =>
+    sendJson<ClientsView>("POST", "/api/clients", { target, name, kind, note }),
+  /** Re-point a device at a new target and replace its name/note/kind. */
+  editClient: (
+    oldTarget: string,
+    target: string,
+    name: string,
+    kind: DeviceKind,
+    note?: string,
+  ) => sendJson<ClientsView>("PUT", "/api/clients", { oldTarget, target, name, kind, note }),
+  /** Remove a device by its target. */
+  removeClient: (target: string) =>
+    sendJson<ClientsView>("DELETE", "/api/clients", { target }),
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
   /** Download the full configuration backup (settings, lists and rewrites) as a

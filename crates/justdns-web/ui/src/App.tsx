@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { Shell } from "./components/Shell";
+import { Clients } from "./pages/Clients";
 import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
@@ -30,6 +31,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/protokoll" element={<Logs />} />
+          <Route path="/geraete" element={<Clients />} />
           <Route path="/listen" element={<Navigate to="/listen/url" replace />} />
           <Route path="/listen/eigene" element={<Navigate to="/listen/url" replace />} />
           <Route path="/listen/url" element={<Lists section="mine" />} />

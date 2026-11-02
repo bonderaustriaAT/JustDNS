@@ -23,6 +23,7 @@ const DEFAULT_AUTH_PATH: &str = "auth.json";
 const DEFAULT_LISTS_PATH: &str = "lists.json";
 const DEFAULT_LISTS_CACHE: &str = "lists-cache";
 const DEFAULT_REWRITES_PATH: &str = "rewrites.json";
+const DEFAULT_CLIENTS_PATH: &str = "clients.json";
 
 #[derive(Debug)]
 pub struct Config {
@@ -42,6 +43,8 @@ pub struct Config {
     pub lists_cache_dir: PathBuf,
     /// Where the local DNS rewrites (name → IP) are stored.
     pub rewrites_path: PathBuf,
+    /// Where the named clients (devices) are stored.
+    pub clients_path: PathBuf,
     pub upstreams: UpstreamConfig,
     /// Whether `JUSTDNS_UPSTREAMS` was set, pinning the resolver pool to those
     /// addresses. When true the speed profile only tunes the cache and leaves
@@ -122,6 +125,10 @@ impl Config {
             read_var("JUSTDNS_REWRITES_PATH")?.unwrap_or_else(|| DEFAULT_REWRITES_PATH.to_owned()),
         );
 
+        let clients_path = PathBuf::from(
+            read_var("JUSTDNS_CLIENTS_PATH")?.unwrap_or_else(|| DEFAULT_CLIENTS_PATH.to_owned()),
+        );
+
         let (upstreams, upstreams_overridden) = match read_var("JUSTDNS_UPSTREAMS")? {
             Some(raw) => (parse_upstreams(&raw)?, true),
             None => (UpstreamConfig::eu_defaults(), false),
@@ -138,6 +145,7 @@ impl Config {
             lists_path,
             lists_cache_dir,
             rewrites_path,
+            clients_path,
             upstreams,
             upstreams_overridden,
         })

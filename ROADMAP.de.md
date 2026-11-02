@@ -7,8 +7,8 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.27
-(wiederverwendbare Adressobjekte für Rewrites).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.28
+(Geräte erkennen und benennen).
 
 ## Phase 1 — Einblick & schnelle Gewinne
 
@@ -37,9 +37,10 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
 
 ## Phase 2 — Geräte & Richtlinien
 
-- [ ] **Clients erkennen & benennen.** Eine Client-IP einem Gerätenamen zuordnen
-  und sehen, welche Geräte aktiv sind — damit Protokoll und Statistik in Namen
-  statt in Zahlen sprechen.
+- [x] **Clients erkennen & benennen.** Eine Client-IP (oder einen CIDR-Bereich)
+  einem Gerätenamen zuordnen und sehen, welche Geräte aktiv sind — damit Protokoll
+  und Statistik in Namen statt in Zahlen sprechen. Verwaltet auf der Seite
+  „Geräte“.
 - [ ] **Pro-Client-/Gruppen-Richtlinien.** Einem Gerät oder einer Gruppe eine
   eigene Schutz-Stärke und eigene Listen geben, wie bei AdGuard Home — der größte
   einzelne Schritt zu echter Haushaltskontrolle.

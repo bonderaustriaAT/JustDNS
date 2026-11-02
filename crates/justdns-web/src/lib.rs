@@ -21,12 +21,13 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use justdns_auth::{SessionStore, UserStore};
+use justdns_clients::{ClientError, ClientResolver, ClientStore, Device, DeviceKind, parse_target};
 use justdns_config::{BlockLevel, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
 use justdns_rewrite::{Alias, Rewrite, RewriteError, RewriteStore, RewritesView};
-use justdns_store::{ActivityBucket, ClientCount, QueryEvent, Store};
+use justdns_store::{ActivityBucket, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -61,6 +62,7 @@ struct AppState {
     blocker: Arc<Blocker>,
     lists: ListStore,
     rewrites: RewriteStore,
+    clients: ClientStore,
     cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
@@ -96,6 +98,12 @@ impl FromRef<AppState> for RewriteStore {
     }
 }
 
+impl FromRef<AppState> for ClientStore {
+    fn from_ref(state: &AppState) -> Self {
+        state.clients.clone()
+    }
+}
+
 impl FromRef<AppState> for DnsCache {
     fn from_ref(state: &AppState) -> Self {
         state.cache.clone()
@@ -126,6 +134,7 @@ pub async fn serve(
     blocker: Arc<Blocker>,
     lists: ListStore,
     rewrites: RewriteStore,
+    clients: ClientStore,
     cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
@@ -140,6 +149,7 @@ pub async fn serve(
             blocker,
             lists,
             rewrites,
+            clients,
             cache,
             users,
             sessions,
@@ -186,6 +196,13 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/aliases",
             post(set_alias).put(edit_alias).delete(remove_alias),
+        )
+        .route(
+            "/api/clients",
+            get(get_clients)
+                .post(set_client)
+                .put(edit_client)
+                .delete(remove_client),
         )
         .route("/api/cache/clear", post(clear_cache))
         .route("/api/backup", get(export_backup))
@@ -716,6 +733,220 @@ async fn remove_alias(
     Ok(Json(rewrites.view()))
 }
 
+/// Translate a client-store error into an HTTP status and message.
+fn client_error(error: ClientError) -> (StatusCode, String) {
+    let status = match &error {
+        ClientError::InvalidTarget(_) | ClientError::InvalidName => StatusCode::BAD_REQUEST,
+        ClientError::Unknown(_) => StatusCode::NOT_FOUND,
+        ClientError::Io { .. } | ClientError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, error.to_string())
+}
+
+/// One row of the devices view: a named device or a seen-but-unnamed client,
+/// with its recent footprint. For a named device, `target` is its address or
+/// range and `name`/`note`/`kind` describe it; for an unnamed client, `target`
+/// is the bare address it was seen from and `name` is absent. `known` tells the
+/// two apart so the UI offers "edit" for one and "name this" for the other.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientRow {
+    target: String,
+    is_range: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    kind: DeviceKind,
+    known: bool,
+    count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seen_ms: Option<i64>,
+    active: bool,
+}
+
+/// Everything the devices view needs: the rows (named devices plus recently seen
+/// unnamed clients) and the active-window the UI shows and the rows were aged by.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientsView {
+    clients: Vec<ClientRow>,
+    active_window_secs: u32,
+}
+
+/// Build the devices view: start a row for every stored device, fold each
+/// recently seen client's count and last-seen into the device that names it (or
+/// into its own unnamed row), then mark as active anything seen within the
+/// window. Rows are ordered most-recently-seen first, with never-seen named
+/// devices after, so the list reads like "what's on the network now".
+fn clients_view(store: &Store, clients: &ClientStore, config: &ConfigStore) -> ClientsView {
+    let devices = clients.view();
+    let resolver = ClientResolver::new(devices.clone());
+    let active_window_secs = config.get().active_window_secs;
+    let cutoff = now_ms() as i64 - i64::from(active_window_secs) * 1000;
+
+    let mut rows: Vec<ClientRow> = Vec::new();
+    // A stored device's row, by target, and a seen unnamed client's row, by the
+    // address text — so repeated sightings fold into one row each.
+    let mut device_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut unnamed_index: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+
+    for device in &devices {
+        let is_range = parse_target(&device.target).is_some_and(|m| m.is_range());
+        device_index.insert(device.target.clone(), rows.len());
+        rows.push(ClientRow {
+            target: device.target.clone(),
+            is_range,
+            name: Some(device.name.clone()),
+            note: device.note.clone(),
+            kind: device.kind,
+            known: true,
+            count: 0,
+            last_seen_ms: None,
+            active: false,
+        });
+    }
+
+    for activity in store.client_activity() {
+        match resolver.resolve(activity.client) {
+            Some(device) => {
+                let row = &mut rows[device_index[&device.target]];
+                row.count += activity.count;
+                row.last_seen_ms = Some(row.last_seen_ms.map_or(activity.last_seen_ms, |seen| {
+                    seen.max(activity.last_seen_ms)
+                }));
+            }
+            None => {
+                let key = activity.client.to_string();
+                match unnamed_index.get(&key) {
+                    Some(&pos) => {
+                        let row = &mut rows[pos];
+                        row.count += activity.count;
+                        row.last_seen_ms =
+                            Some(row.last_seen_ms.map_or(activity.last_seen_ms, |seen| {
+                                seen.max(activity.last_seen_ms)
+                            }));
+                    }
+                    None => {
+                        unnamed_index.insert(key.clone(), rows.len());
+                        rows.push(ClientRow {
+                            target: key,
+                            is_range: false,
+                            name: None,
+                            note: None,
+                            kind: DeviceKind::Other,
+                            known: false,
+                            count: activity.count,
+                            last_seen_ms: Some(activity.last_seen_ms),
+                            active: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for row in &mut rows {
+        row.active = row.last_seen_ms.is_some_and(|seen| seen >= cutoff);
+    }
+    // Most recently seen first (never-seen named devices, last_seen None, sort to
+    // the end); ties broken by target for a stable order.
+    rows.sort_by(|a, b| {
+        b.last_seen_ms
+            .unwrap_or(i64::MIN)
+            .cmp(&a.last_seen_ms.unwrap_or(i64::MIN))
+            .then_with(|| a.target.cmp(&b.target))
+    });
+
+    ClientsView {
+        clients: rows,
+        active_window_secs,
+    }
+}
+
+/// The devices view: named devices and recently seen unnamed clients.
+async fn get_clients(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+) -> Json<ClientsView> {
+    Json(clients_view(&store, &clients, &config))
+}
+
+/// Add a device, or replace the name/note/kind of one that already matches the
+/// same target.
+#[derive(Deserialize)]
+struct ClientBody {
+    target: String,
+    name: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    kind: DeviceKind,
+}
+
+async fn set_client(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    Json(body): Json<ClientBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients
+        .set(&body.target, &body.name, body.note.as_deref(), body.kind)
+        .map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config)))
+}
+
+/// Re-point a device at a new target and replace its name/note/kind, keyed by
+/// its old target.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientEditBody {
+    old_target: String,
+    target: String,
+    name: String,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    kind: DeviceKind,
+}
+
+async fn edit_client(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    Json(body): Json<ClientEditBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients
+        .edit(
+            &body.old_target,
+            &body.target,
+            &body.name,
+            body.note.as_deref(),
+            body.kind,
+        )
+        .map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config)))
+}
+
+/// Remove a device by its target.
+#[derive(Deserialize)]
+struct ClientTargetBody {
+    target: String,
+}
+
+async fn remove_client(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    Json(body): Json<ClientTargetBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients.remove(&body.target).map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config)))
+}
+
 /// Switch a rewrite on or off by name.
 #[derive(Deserialize)]
 struct RewriteEnabledBody {
@@ -783,6 +1014,10 @@ struct Backup {
     /// restores.
     #[serde(default)]
     aliases: Vec<Alias>,
+    /// Named clients (devices). Defaults to empty so a backup written by an older
+    /// build (version 1 without this field) still restores.
+    #[serde(default)]
+    clients: Vec<Device>,
 }
 
 /// Export the whole UI-set configuration as one downloadable JSON file. The
@@ -792,6 +1027,7 @@ async fn export_backup(
     State(config): State<ConfigStore>,
     State(lists): State<ListStore>,
     State(rewrites): State<RewriteStore>,
+    State(clients): State<ClientStore>,
 ) -> Result<Response, (StatusCode, String)> {
     let backup = Backup {
         app: BACKUP_APP.to_owned(),
@@ -802,6 +1038,7 @@ async fn export_backup(
         lists: lists.snapshot(),
         rewrites: rewrites.snapshot(),
         aliases: rewrites.alias_snapshot(),
+        clients: clients.snapshot(),
     };
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -828,6 +1065,7 @@ async fn restore_backup(
     State(config): State<ConfigStore>,
     State(lists): State<ListStore>,
     State(rewrites): State<RewriteStore>,
+    State(clients): State<ClientStore>,
     Json(backup): Json<Backup>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if backup.app != BACKUP_APP || backup.kind != BACKUP_KIND {
@@ -846,6 +1084,7 @@ async fn restore_backup(
     rewrites
         .replace_all(backup.rewrites, backup.aliases)
         .map_err(rewrite_error)?;
+    clients.replace(backup.clients).map_err(client_error)?;
     lists.replace(backup.lists).map_err(list_error)?;
     config
         .set(backup.settings)
@@ -923,6 +1162,17 @@ async fn stats(State(store): State<Store>) -> Json<StatsResponse> {
 /// How many top clients the statistics view asks for.
 const TOP_CLIENTS: usize = 5;
 
+/// A busiest-client entry with the device name resolved, so the overview can
+/// show "Living room TV" rather than a bare address. `name` is absent when no
+/// device matches the address.
+#[derive(Serialize)]
+struct NamedClientCount {
+    client: String,
+    count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
 /// The last-24h figures for the dashboard's statistics: queries handled, how
 /// many were blocked, the mean handling time, and the busiest clients. The
 /// live query rate is derived on the client from successive `/api/stats` polls,
@@ -932,16 +1182,29 @@ struct DayStatsResponse {
     total: u64,
     blocked: u64,
     avg_duration_ms: f64,
-    top_clients: Vec<ClientCount>,
+    top_clients: Vec<NamedClientCount>,
 }
 
-async fn stats_day(State(store): State<Store>) -> Json<DayStatsResponse> {
+async fn stats_day(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+) -> Json<DayStatsResponse> {
     let day = store.day_stats();
+    let resolver = ClientResolver::new(clients.view());
+    let top_clients = store
+        .top_clients(TOP_CLIENTS)
+        .into_iter()
+        .map(|entry| NamedClientCount {
+            name: resolver.name_for(entry.client).map(str::to_owned),
+            client: entry.client.to_string(),
+            count: entry.count,
+        })
+        .collect();
     Json(DayStatsResponse {
         total: day.total,
         blocked: day.blocked,
         avg_duration_ms: day.avg_duration_ms,
-        top_clients: store.top_clients(TOP_CLIENTS),
+        top_clients,
     })
 }
 
@@ -952,23 +1215,68 @@ async fn activity(State(store): State<Store>) -> Json<Vec<ActivityBucket>> {
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
-    /// Optional case-insensitive filter on the queried name or client address.
+    /// Optional case-insensitive filter on the queried name, client address or
+    /// device name.
     q: Option<String>,
 }
 
+/// A logged query with its client's device name resolved, so the log can show
+/// who made it. `device_name` is absent when no device matches the address. The
+/// query event's own fields are flattened in, so the shape is the plain event
+/// plus one optional field.
+#[derive(Serialize)]
+struct NamedQueryEvent {
+    #[serde(flatten)]
+    event: QueryEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device_name: Option<String>,
+}
+
+/// How many recent events to scan when a search includes device names: the whole
+/// hot ring, so a device-name match reaches as far back as a name/address match.
+const QUERY_SCAN_LIMIT: usize = 100_000;
+
 async fn queries(
     State(store): State<Store>,
+    State(clients): State<ClientStore>,
     Query(params): Query<QueryParams>,
-) -> Json<Vec<QueryEvent>> {
+) -> Json<Vec<NamedQueryEvent>> {
     let limit = params
         .limit
         .unwrap_or(DEFAULT_QUERY_LIMIT)
         .min(MAX_QUERY_LIMIT);
+    let resolver = ClientResolver::new(clients.view());
+
     let events = match params.q.as_deref().map(str::trim) {
-        Some(needle) if !needle.is_empty() => store.search(needle, limit),
+        Some(needle) if !needle.is_empty() => {
+            // Filter in the web layer so a device name counts alongside the
+            // queried name and the client address. Scans the hot ring (the same
+            // depth the store's own search uses), newest first, up to the limit.
+            let needle = needle.to_lowercase();
+            store
+                .recent(QUERY_SCAN_LIMIT)
+                .into_iter()
+                .filter(|event| {
+                    event.name.to_lowercase().contains(&needle)
+                        || event.client.to_string().contains(&needle)
+                        || resolver
+                            .name_for(event.client)
+                            .is_some_and(|name| name.to_lowercase().contains(&needle))
+                })
+                .take(limit)
+                .collect()
+        }
         _ => store.recent(limit),
     };
-    Json(events)
+
+    let named = events
+        .into_iter()
+        .map(|event| NamedQueryEvent {
+            device_name: resolver.name_for(event.client).map(str::to_owned),
+            event,
+        })
+        .collect();
+    Json(named)
 }
 
 /// Serve the requested asset, falling back to `index.html` for client-side
@@ -1072,6 +1380,17 @@ mod tests {
         RewriteStore::load(path, Arc::new(Rewriter::new())).unwrap()
     }
 
+    /// A throwaway client (device) store backed by a unique temp file.
+    fn test_clients() -> ClientStore {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "justdns-web-clients-{}-{}.json",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        ClientStore::load(path).unwrap()
+    }
+
     fn test_state(store: Store) -> AppState {
         let blocker = test_blocker();
         AppState {
@@ -1079,6 +1398,7 @@ mod tests {
             config: test_config(),
             lists: test_lists(blocker.clone()),
             rewrites: test_rewrites(),
+            clients: test_clients(),
             cache: DnsCache::new(100),
             blocker,
             users: test_users(),
@@ -1722,6 +2042,164 @@ mod tests {
             body.contains("192.168.20.50"),
             "object address changed: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn devices_round_trip_and_name_the_log_and_top_clients() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        // Two clients made queries: .10 (twice) and .20 (once).
+        store.record(sample(
+            Ipv4Addr::new(192, 168, 20, 10),
+            "a.example",
+            QuerySource::Upstream,
+        ));
+        store.record(sample(
+            Ipv4Addr::new(192, 168, 20, 10),
+            "b.example",
+            QuerySource::Cache,
+        ));
+        store.record(sample(
+            Ipv4Addr::new(192, 168, 20, 20),
+            "c.example",
+            QuerySource::Upstream,
+        ));
+        let (app, cookie) = app_and_cookie(store);
+
+        // Before naming, both clients show up unnamed in the devices view.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/clients")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"192.168.20.10\""), "unnamed client: {body}");
+        assert!(body.contains("\"known\":false"), "{body}");
+        assert!(body.contains("\"activeWindowSecs\":300"), "{body}");
+
+        // Name .10 as a laptop; the response lists it as a known device.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"target":"192.168.20.10","name":"Justins Laptop","kind":"laptop"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("Justins Laptop"), "named: {body}");
+        assert!(body.contains("\"known\":true"), "{body}");
+        // The named client folds its two queries into one row.
+        assert!(body.contains("\"count\":2"), "folded count: {body}");
+
+        // The log now carries the device name for that client's queries.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/queries")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            body.contains("\"device_name\":\"Justins Laptop\""),
+            "{body}"
+        );
+
+        // The log search matches the device name, returning that client's queries.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/queries?q=laptop")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("a.example"), "device-name search hit: {body}");
+        assert!(!body.contains("c.example"), "other client excluded: {body}");
+
+        // The overview's top clients carry the name too.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/stats/day")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"name\":\"Justins Laptop\""), "{body}");
+
+        // A CIDR device names a whole range: .20 falls under it.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"target":"192.168.20.0/24","name":"Heimnetz","kind":"other"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        // .20 now resolves to the range (…10 keeps its exact name).
+        assert!(body.contains("Heimnetz"), "range listed: {body}");
+
+        // A bad target is refused.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"target":"nope","name":"X"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Delete the laptop; it goes back to being an unnamed sighting.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::delete("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(r#"{"target":"192.168.20.10"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(!body.contains("Justins Laptop"), "name gone: {body}");
     }
 
     #[tokio::test]
