@@ -7,8 +7,8 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.17
-(Einrichtungs-Assistent, Schutz-Stärke, Instanzname).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.21
+(Sichern & Wiederherstellen).
 
 ## Phase 1 — Einblick & schnelle Gewinne
 
@@ -19,7 +19,7 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
 - [ ] **Konfigurierbare Block-Antwort.** Wähle, was ein gesperrter Name
   zurückgibt — heute ist es NXDOMAIN; geplant sind `0.0.0.0` / `::` oder eine
   kleine Sperrseite.
-- [ ] **Sichern & Wiederherstellen.** Die gesamte Konfiguration — Einstellungen,
+- [x] **Sichern & Wiederherstellen.** Die gesamte Konfiguration — Einstellungen,
   Listen, Abos und Rewrites — in eine einzige Datei exportieren und wieder
   einspielen. Das legt zugleich die Grundlage für den späteren Zwei-Server-Sync
   (Phase 5).
@@ -28,6 +28,11 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   DNS-Rewrites, statt die Adresse jedes Mal einzutippen. Änderst du die Adresse
   des Objekts einmal, werden alle Rewrites, die darauf zeigen, sofort angepasst —
   so musst du dieselbe IP nie an einem Dutzend Stellen ändern.
+- [ ] **Installierbare Web-App (PWA).** Eine mobil-optimierte, installierbare
+  Version des Dashboards — zum Home-Bildschirm des Handys hinzufügen und JustDNS
+  unterwegs verwalten. Vorgezogen als früher Gewinn; sie baut auf dem schon
+  vorhandenen Dashboard auf, sodass vollwertige native Apps später bleiben können
+  (Phase 6).
 
 ## Phase 2 — Geräte & Richtlinien
 
@@ -62,8 +67,7 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
 
 ## Phase 6 — Apps
 
-- [ ] **Zuerst eine installierbare Web-App (PWA).** Eine mobil-optimierte,
-  installierbare Version des Dashboards — zum Home-Bildschirm des Handys
-  hinzufügen und JustDNS unterwegs verwalten, bevor es eine native App gibt.
-- [ ] **Native Android- & iOS-Apps.** Darauf aufbauend eigene Apps für ein
-  erstklassiges mobiles Erlebnis und engere Betriebssystem-Integration.
+- [ ] **Native Android- & iOS-Apps.** Auf der Web-App aufbauend eigene Apps für
+  ein erstklassiges mobiles Erlebnis und engere Betriebssystem-Integration. Die
+  installierbare Web-App (Phase 1) kommt zuerst und deckt die mobile Nutzung bis
+  dahin ab.
