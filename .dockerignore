@@ -1,6 +1,5 @@
 /target
 /.git
-.claude
 **/node_modules
 **/dist
 *.db

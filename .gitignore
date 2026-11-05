@@ -15,4 +15,3 @@ crates/justdns-web/ui/dist/
 # Local
 .env
 .DS_Store
-.claude/
