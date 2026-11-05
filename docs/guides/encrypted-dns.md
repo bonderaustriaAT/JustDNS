@@ -18,8 +18,9 @@ upstream lookup — is exactly the same as for a plain port-53 query. JustDNS
 already encrypts the hop to its *upstream* resolvers; this adds encryption on the
 *client* side too.
 
-You find it under **Settings → Encrypted client DNS**. Both endpoints are **off**
-until you turn them on.
+You find it under **Settings → Encryption** (turn on **Expert mode** at the top of
+the settings page to reveal it), in the *Your devices → JustDNS* group. Both
+endpoints are **off** until you turn them on.
 
 ## Setting it up
 

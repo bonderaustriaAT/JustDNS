@@ -3,6 +3,24 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.2.1] - 2026-11-05
+
+- Changed: **the encryption settings are now in one place.** "Encrypted client
+  DNS" and upstream encryption have moved into a single **Encryption** category
+  (under Expert mode), split into the two directions: your devices reaching
+  JustDNS (DoT/DoH) and JustDNS reaching the upstream resolvers.
+
+- Improved: **the encrypted client DNS page now guides you.** Set the hostname
+  first — DoT and DoH can't be switched on without one (the field is highlighted
+  instead). The certificate download/upload and the copy-ready endpoint
+  addresses appear only once an endpoint is actually running, so the page stays
+  focused.
+
+- Fixed: **easier-to-read settings text.** Descriptions no longer look cramped.
+
+- Maintenance: security updates to the base image (Debian) and a web dependency
+  (react-router).
+
 ## [0.2.0] - 2026-11-05
 
 - New: **encrypted client DNS.** JustDNS can now be reached by your own devices

@@ -19,8 +19,9 @@ Cache, die Upstream-Abfrage — ist genau dasselbe wie bei einer Klartext-Anfrag
 auf Port 53. Die Strecke zu den *Upstream*-Resolvern verschlüsselt JustDNS ohnehin
 schon; dies verschlüsselt zusätzlich die *Client*-Seite.
 
-Zu finden unter **Einstellungen → Verschlüsseltes Client-DNS**. Beide Endpunkte
-sind **aus**, bis du sie einschaltest.
+Zu finden unter **Einstellungen → Verschlüsselung** (dazu oben auf der
+Einstellungsseite den **Experten-Modus** einschalten), in der Gruppe *Deine Geräte
+→ JustDNS*. Beide Endpunkte sind **aus**, bis du sie einschaltest.
 
 ## Einrichten
 

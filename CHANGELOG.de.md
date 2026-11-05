@@ -4,6 +4,26 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.2.1] - 2026-11-05
+
+- Geändert: **die Verschlüsselungs-Einstellungen sind jetzt an einem Ort.**
+  „Verschlüsseltes Client-DNS“ und die Upstream-Verschlüsselung liegen nun in
+  einer gemeinsamen Kategorie **Verschlüsselung** (im Experten-Modus), aufgeteilt
+  nach den beiden Richtungen: deine Geräte zu JustDNS (DoT/DoH) und JustDNS zu den
+  Upstream-Resolvern.
+
+- Verbessert: **die Seite für verschlüsseltes Client-DNS führt dich jetzt.**
+  Zuerst den Hostnamen setzen — ohne ihn lassen sich DoT und DoH nicht einschalten
+  (das Feld wird stattdessen markiert). Zertifikat-Download/-Upload und die
+  kopierfertigen Endpunkt-Adressen erscheinen erst, wenn ein Endpunkt tatsächlich
+  läuft, damit die Seite übersichtlich bleibt.
+
+- Behoben: **besser lesbare Einstellungstexte.** Beschreibungen wirken nicht mehr
+  gequetscht.
+
+- Wartung: Sicherheitsupdates für das Basis-Image (Debian) und eine
+  Web-Abhängigkeit (react-router).
+
 ## [0.2.0] - 2026-11-05
 
 - Neu: **verschlüsseltes Client-DNS.** JustDNS ist jetzt von den eigenen Geräten
