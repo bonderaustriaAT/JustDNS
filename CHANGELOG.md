@@ -3,6 +3,24 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.2.0] - 2026-11-05
+
+- New: **encrypted client DNS.** JustDNS can now be reached by your own devices
+  over an encrypted connection, not just in the clear on port 53. Turn on
+  **DNS-over-TLS (DoT)** on port 853 — what Android calls "Private DNS" — and/or
+  **DNS-over-HTTPS (DoH)** at `/dns-query`, under **Settings → Encrypted client
+  DNS**. Your per-device and per-group rules apply to encrypted clients exactly as
+  before.
+
+- New: **certificate handling, your choice.** By default JustDNS mints its own
+  certificate; download the small CA from the settings page and install it once on
+  each device. Or upload your own certificate and key (e.g. from an internal CA or
+  ACME). The page shows the certificate's SHA-256 fingerprint and copy-ready
+  endpoint addresses for setting up a phone or a browser. The certificate lives on
+  the data volume, so it survives updates and restarts; a step-by-step guide
+  (including installing the CA on Windows, macOS, iOS, Android and Linux) is in the
+  handbook.
+
 ## [0.1.32] - 2026-11-05
 
 - Changed: **the overview's response time now shows the median only.** The large

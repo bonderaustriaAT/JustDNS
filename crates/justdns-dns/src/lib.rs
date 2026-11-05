@@ -5,9 +5,11 @@
 
 pub mod cache;
 pub mod client;
+pub mod doh;
 pub mod observer;
 pub mod pipeline;
 pub mod router;
 pub mod safesearch;
 pub mod server;
+pub mod tls;
 pub mod upstream;
