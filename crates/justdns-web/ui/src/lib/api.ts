@@ -85,6 +85,37 @@ export interface ServerSettings {
   activeWindowSecs: number;
 }
 
+/// Where the encrypted client-DNS certificate comes from. Matches the Rust
+/// `CertSource`: a self-signed certificate JustDNS mints (with a CA to install),
+/// or an operator-uploaded chain and key.
+export type CertSource = "selfSigned" | "uploaded";
+
+/// State of the encrypted client-DNS endpoints (DoT on 853, DoH on `/dns-query`).
+/// Matches the Rust `TlsStatus`; every field is always present so the UI never
+/// has to guard a missing value. `available` is false when TLS could not be
+/// prepared, in which case the section is shown disabled.
+export interface TlsStatus {
+  available: boolean;
+  dotEnabled: boolean;
+  dohEnabled: boolean;
+  hostname: string;
+  certSource: CertSource;
+  /** SHA-256 fingerprint of the served certificate, or empty when unavailable. */
+  fingerprint: string;
+  /** Whether a local CA certificate can be downloaded (self-signed only). */
+  caAvailable: boolean;
+  dotPort: number;
+  dohPort: number;
+}
+
+/// The writable part of the encrypted-DNS settings, sent on a save.
+export interface TlsSettings {
+  dotEnabled: boolean;
+  dohEnabled: boolean;
+  hostname: string;
+  certSource: CertSource;
+}
+
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
 
 export interface QueryRow {
@@ -520,6 +551,23 @@ export const api = {
   /** Restore a backup file's parsed JSON, replacing the current settings, lists
    *  and rewrites. The server refuses a file that is not a JustDNS backup. */
   restoreBackup: (backup: unknown) => sendJson<void>("POST", "/api/backup/restore", backup),
+  /** The encrypted client-DNS status (DoT/DoH flags, hostname, certificate). */
+  tls: (signal?: AbortSignal) => getJson<TlsStatus>("/api/tls", signal),
+  /** Set the DoT/DoH flags, hostname and certificate source. Applied live. */
+  saveTls: (settings: TlsSettings) => sendJson<TlsStatus>("PUT", "/api/tls", settings),
+  /** Mint a fresh self-signed certificate for the configured hostname. */
+  regenerateCert: () => sendJson<TlsStatus>("POST", "/api/tls/regenerate"),
+  /** Install an operator-supplied certificate chain and key (both PEM). */
+  uploadCert: (cert: string, key: string) =>
+    sendJson<TlsStatus>("POST", "/api/tls/cert", { cert, key }),
+  /** Download the local CA certificate as a Blob the caller saves to a file. */
+  downloadCa: async (): Promise<Blob> => {
+    const response = await fetch("/api/tls/ca");
+    if (!response.ok) {
+      throw failed("/api/tls/ca", response.status);
+    }
+    return response.blob();
+  },
   authState: (signal?: AbortSignal) => getJson<AuthState>("/api/auth/state", signal),
   setup: (username: string, password: string) =>
     postJson<{ username: string }>("/api/auth/setup", { username, password }),

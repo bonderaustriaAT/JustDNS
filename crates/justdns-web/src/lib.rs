@@ -24,8 +24,9 @@ use justdns_auth::{SessionStore, UserStore};
 use justdns_clients::{
     ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
 };
-use justdns_config::{ConfigStore, Settings};
+use justdns_config::{CertSource, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
+use justdns_dns::tls::TlsManager;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
 use justdns_rewrite::{Alias, Rewrite, RewriteError, RewriteStore, RewritesView};
@@ -66,6 +67,14 @@ struct AppState {
     cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
+    /// The encrypted client-DNS (DoT/DoH) certificate manager. `None` when TLS
+    /// could not be prepared at startup, in which case the `/api/tls` endpoints
+    /// report it as unavailable rather than failing.
+    tls: Option<Arc<TlsManager>>,
+    /// The ports the DoT and DoH listeners bind, so the UI can show copy-ready
+    /// endpoint addresses. Taken from the binary's configuration.
+    dot_port: u16,
+    doh_port: u16,
 }
 
 impl FromRef<AppState> for Store {
@@ -122,6 +131,12 @@ impl FromRef<AppState> for SessionStore {
     }
 }
 
+impl FromRef<AppState> for Option<Arc<TlsManager>> {
+    fn from_ref(state: &AppState) -> Self {
+        state.tls.clone()
+    }
+}
+
 /// Bind `addr` and serve the API and embedded UI until the listener fails.
 ///
 /// This is the web layer's composition root: it takes each shared store the
@@ -138,6 +153,9 @@ pub async fn serve(
     cache: DnsCache,
     users: UserStore,
     sessions: SessionStore,
+    tls: Option<Arc<TlsManager>>,
+    dot_port: u16,
+    doh_port: u16,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
@@ -153,6 +171,9 @@ pub async fn serve(
             cache,
             users,
             sessions,
+            tls,
+            dot_port,
+            doh_port,
         }),
     )
     .await
@@ -210,6 +231,10 @@ fn router(state: AppState) -> Router {
                 .put(edit_group)
                 .delete(remove_group),
         )
+        .route("/api/tls", get(get_tls).put(put_tls))
+        .route("/api/tls/ca", get(download_ca))
+        .route("/api/tls/cert", post(upload_cert))
+        .route("/api/tls/regenerate", post(regenerate_cert))
         .route("/api/cache/clear", post(clear_cache))
         .route("/api/backup", get(export_backup))
         .route("/api/backup/restore", post(restore_backup))
@@ -1078,6 +1103,171 @@ async fn clear_cache(State(cache): State<DnsCache>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+/// The state of the encrypted client-DNS endpoints, for the settings view. Every
+/// field is always present (no nullable fields) so the UI never has to guard a
+/// missing value: `available` is false and the strings are empty when TLS could
+/// not be prepared. The UI builds the endpoint strings itself from `hostname`
+/// and the ports.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TlsStatus {
+    /// Whether the certificate manager is ready. False disables the whole
+    /// section in the UI with an explanation.
+    available: bool,
+    dot_enabled: bool,
+    doh_enabled: bool,
+    hostname: String,
+    cert_source: CertSource,
+    /// SHA-256 fingerprint of the served certificate, or empty when unavailable.
+    fingerprint: String,
+    /// Whether a local CA certificate can be downloaded (true only for a
+    /// self-signed certificate that JustDNS minted).
+    ca_available: bool,
+    dot_port: u16,
+    doh_port: u16,
+}
+
+/// Build the TLS status from the live settings and the certificate manager.
+fn tls_status(state: &AppState) -> TlsStatus {
+    let settings = state.config.get().encrypted_dns;
+    let (fingerprint, ca_available) = match &state.tls {
+        Some(tls) => (tls.fingerprint(), tls.ca_pem().ok().flatten().is_some()),
+        None => (String::new(), false),
+    };
+    TlsStatus {
+        available: state.tls.is_some(),
+        dot_enabled: settings.dot_enabled,
+        doh_enabled: settings.doh_enabled,
+        hostname: settings.hostname,
+        cert_source: settings.cert_source,
+        fingerprint,
+        ca_available,
+        dot_port: state.dot_port,
+        doh_port: state.doh_port,
+    }
+}
+
+/// The current encrypted-DNS status for the settings view.
+async fn get_tls(State(state): State<AppState>) -> Json<TlsStatus> {
+    Json(tls_status(&state))
+}
+
+/// Set which endpoints are on, the hostname and the certificate source. The
+/// change is persisted and applied live: the binary's supervisor starts or stops
+/// the listeners and re-mints the self-signed certificate on a hostname change.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TlsSettingsBody {
+    dot_enabled: bool,
+    doh_enabled: bool,
+    hostname: String,
+    cert_source: CertSource,
+}
+
+async fn put_tls(
+    State(state): State<AppState>,
+    Json(body): Json<TlsSettingsBody>,
+) -> Result<Json<TlsStatus>, (StatusCode, String)> {
+    if state.tls.is_none() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "encrypted DNS is unavailable on this instance".to_owned(),
+        ));
+    }
+    let mut settings = state.config.get();
+    settings.encrypted_dns.dot_enabled = body.dot_enabled;
+    settings.encrypted_dns.doh_enabled = body.doh_enabled;
+    settings.encrypted_dns.hostname = body.hostname.trim().to_owned();
+    settings.encrypted_dns.cert_source = body.cert_source;
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(tls_status(&state)))
+}
+
+/// Download the local CA certificate (PEM) so clients can be told to trust it.
+/// Only a self-signed certificate has a CA; an uploaded one returns 404.
+async fn download_ca(
+    State(tls): State<Option<Arc<TlsManager>>>,
+) -> Result<Response, (StatusCode, String)> {
+    let tls = tls.ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "encrypted DNS is unavailable on this instance".to_owned(),
+    ))?;
+    match tls
+        .ca_pem()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    {
+        Some(pem) => Ok((
+            [
+                (header::CONTENT_TYPE, "application/x-pem-file".to_owned()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"justdns-ca.pem\"".to_owned(),
+                ),
+            ],
+            pem,
+        )
+            .into_response()),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            "no local CA — the certificate was uploaded".to_owned(),
+        )),
+    }
+}
+
+/// Upload an operator-supplied certificate chain and private key (both PEM). The
+/// pair is validated before it is stored; on success the source is recorded as
+/// uploaded so the UI stops offering the CA download.
+#[derive(Deserialize)]
+struct CertUploadBody {
+    cert: String,
+    key: String,
+}
+
+async fn upload_cert(
+    State(state): State<AppState>,
+    Json(body): Json<CertUploadBody>,
+) -> Result<Json<TlsStatus>, (StatusCode, String)> {
+    let tls = state.tls.clone().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "encrypted DNS is unavailable on this instance".to_owned(),
+    ))?;
+    tls.install_uploaded(&body.cert, &body.key)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+
+    let mut settings = state.config.get();
+    settings.encrypted_dns.cert_source = CertSource::Uploaded;
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(tls_status(&state)))
+}
+
+/// Mint a fresh self-signed certificate for the configured hostname, replacing
+/// whatever is in use. Records the source as self-signed.
+async fn regenerate_cert(
+    State(state): State<AppState>,
+) -> Result<Json<TlsStatus>, (StatusCode, String)> {
+    let tls = state.tls.clone().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "encrypted DNS is unavailable on this instance".to_owned(),
+    ))?;
+    let hostname = state.config.get().encrypted_dns.hostname;
+    tls.regenerate(hostname.trim(), &[])
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    let mut settings = state.config.get();
+    settings.encrypted_dns.cert_source = CertSource::SelfSigned;
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(tls_status(&state)))
+}
+
 /// The marker a backup file carries so a restore can tell it is ours.
 const BACKUP_APP: &str = "justdns";
 /// The file kind, in case JustDNS ever exports something else one day.
@@ -1505,6 +1695,9 @@ mod tests {
             blocker,
             users: test_users(),
             sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
+            tls: None,
+            dot_port: 853,
+            doh_port: 8443,
         }
     }
 

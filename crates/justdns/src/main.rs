@@ -4,6 +4,7 @@
 //! The JustDNS binary: read the environment, build the resolver and serve.
 
 mod config;
+mod endpoints;
 mod observer;
 mod policy;
 
@@ -20,6 +21,7 @@ use justdns_dns::observer::QueryObserver;
 use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::{Router, SharedRouter};
 use justdns_dns::server::Server;
+use justdns_dns::tls::TlsManager;
 use justdns_dns::upstream::{Upstream, UpstreamConfig};
 use justdns_filter::{Blocker, PolicyEngine};
 use justdns_lists::ListStore;
@@ -29,6 +31,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
+use crate::endpoints::{EndpointSupervisor, to_tls_source};
 use crate::observer::StoreObserver;
 
 /// How many recent queries the dashboard's hot view keeps in memory.
@@ -234,6 +237,33 @@ async fn main() -> ExitCode {
     .with_rewriter(rewriter.clone());
     let server = Server::new(pipeline);
 
+    // Encrypted client-DNS (DoT/DoH). The TLS material lives on the data volume
+    // and is minted self-signed on first start; if it cannot be prepared we log
+    // and carry on without the encrypted endpoints rather than failing to boot.
+    // The supervisor brings the listeners up to match the settings and keeps
+    // them in step on every later change (folded into the on_change below).
+    let tls = match TlsManager::load_or_init(
+        &config.tls_dir,
+        &settings.encrypted_dns.hostname,
+        &[],
+        to_tls_source(settings.encrypted_dns.cert_source),
+    ) {
+        Ok(tls) => Some(tls),
+        Err(error) => {
+            error!(%error, dir = %config.tls_dir.display(), "cannot prepare TLS; DoT/DoH disabled");
+            None
+        }
+    };
+    let supervisor = tls.clone().map(|tls| {
+        EndpointSupervisor::new(
+            server.pipeline(),
+            tls,
+            config.dot_listen,
+            config.doh_listen,
+            &settings.encrypted_dns,
+        )
+    });
+
     // Reconfigure the live engine on every settings change: rebuild the router
     // from the new profile/mode/encryption, retune the cache, and rebuild the
     // per-client policies (the ads/malware flags are part of the global default).
@@ -245,11 +275,17 @@ async fn main() -> ExitCode {
         let engine = policy_engine.clone();
         let lists_handle = lists.clone();
         let clients_handle = clients.clone();
+        let supervisor = supervisor.clone();
         config_store.on_change(move |settings| {
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams));
             tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
             policy::rebuild(&engine, &lists_handle, &clients_handle, settings);
+            // Start/stop the encrypted-DNS listeners and re-mint the self-signed
+            // certificate to match the new settings.
+            if let Some(supervisor) = &supervisor {
+                supervisor.apply(&settings.encrypted_dns);
+            }
         });
     }
 
@@ -260,7 +296,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), cache.clone(), users.clone(), sessions.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), cache.clone(), users.clone(), sessions.clone(), tls.clone(), config.dot_listen.port(), config.doh_listen.port()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

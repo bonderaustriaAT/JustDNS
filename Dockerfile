@@ -45,7 +45,10 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_AUTH_PATH=/data/auth.json \
     JUSTDNS_LISTS_PATH=/data/lists.json \
     JUSTDNS_LISTS_CACHE=/data/lists-cache \
-    JUSTDNS_REWRITES_PATH=/data/rewrites.json
+    JUSTDNS_REWRITES_PATH=/data/rewrites.json \
+    JUSTDNS_DOT_LISTEN=0.0.0.0:853 \
+    JUSTDNS_DOH_LISTEN=0.0.0.0:8443 \
+    JUSTDNS_TLS_DIR=/data/tls
 
 # The query log persists here; mount a volume to keep it across restarts.
 VOLUME /data
@@ -53,5 +56,10 @@ VOLUME /data
 EXPOSE 53/udp
 EXPOSE 53/tcp
 EXPOSE 8080/tcp
+# Encrypted client DNS: DNS-over-TLS (853) and DNS-over-HTTPS (8443). Both are
+# off until enabled in the dashboard, but the ports are declared so a deploy can
+# map them up front.
+EXPOSE 853/tcp
+EXPOSE 8443/tcp
 
 ENTRYPOINT ["/usr/local/bin/justdns"]

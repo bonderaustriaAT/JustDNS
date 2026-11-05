@@ -104,6 +104,48 @@ pub enum UpstreamMode {
     Rules,
 }
 
+/// Where the certificate the clients should trust comes from, for the encrypted
+/// client-DNS endpoints. Mirrors the DNS core's `tls::CertSource`; kept here as
+/// its own type so the config crate stays a leaf.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CertSource {
+    /// JustDNS mints and serves its own local CA + leaf certificate.
+    #[default]
+    SelfSigned,
+    /// The operator uploaded their own certificate chain and key.
+    Uploaded,
+}
+
+/// Settings for the encrypted client-DNS endpoints (DNS-over-TLS on 853 and
+/// DNS-over-HTTPS on `/dns-query`). The certificate itself lives on the `/data`
+/// volume, not here; this only carries whether each endpoint is on, the hostname
+/// the certificate is minted for, and where the certificate comes from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EncryptedDns {
+    /// Serve DNS-over-TLS (port 853) to the local network.
+    pub dot_enabled: bool,
+    /// Serve DNS-over-HTTPS (`/dns-query`) to the local network.
+    pub doh_enabled: bool,
+    /// The hostname the devices dial and that the certificate is minted for,
+    /// e.g. `dns.fritz.box`. Used as the certificate's subject alternative name.
+    pub hostname: String,
+    /// Whether the certificate is self-signed (the default) or uploaded.
+    pub cert_source: CertSource,
+}
+
+impl Default for EncryptedDns {
+    fn default() -> Self {
+        Self {
+            dot_enabled: false,
+            doh_enabled: false,
+            hostname: String::new(),
+            cert_source: CertSource::SelfSigned,
+        }
+    }
+}
+
 /// The settings the dashboard shows and edits. Field names are serialised in
 /// camelCase to match the UI's JSON directly. `#[serde(default)]` lets a file
 /// written by an older build load even when newer fields are missing.
@@ -145,6 +187,9 @@ pub struct Settings {
     /// on the devices view. Read when that view is rendered, so a change takes
     /// effect at once; defaults to five minutes.
     pub active_window_secs: u32,
+    /// The encrypted client-DNS endpoints (DoT/DoH). A change to the enable flags
+    /// or hostname restarts the affected listener; see the binary's supervisor.
+    pub encrypted_dns: EncryptedDns,
 }
 
 impl Default for Settings {
@@ -164,6 +209,7 @@ impl Default for Settings {
             instance_name: "JustDNS".to_owned(),
             block_response: BlockResponse::NullIp,
             active_window_secs: 300,
+            encrypted_dns: EncryptedDns::default(),
         }
     }
 }
@@ -595,6 +641,41 @@ mod tests {
             settings,
             "round-trips through JSON"
         );
+    }
+
+    #[test]
+    fn encrypted_dns_round_trips_and_defaults_off() {
+        // Defaults: both endpoints off, empty hostname, self-signed.
+        let defaults = Settings::default().encrypted_dns;
+        assert!(!defaults.dot_enabled && !defaults.doh_enabled);
+        assert!(defaults.hostname.is_empty());
+        assert_eq!(defaults.cert_source, CertSource::SelfSigned);
+
+        let settings = Settings {
+            encrypted_dns: EncryptedDns {
+                dot_enabled: true,
+                doh_enabled: true,
+                hostname: "dns.fritz.box".to_owned(),
+                cert_source: CertSource::Uploaded,
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"encryptedDns\":{"), "{json}");
+        assert!(json.contains("\"dotEnabled\":true"));
+        assert!(json.contains("\"certSource\":\"uploaded\""), "{json}");
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn older_config_without_encrypted_dns_loads_with_defaults() {
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let encrypted = store.get().encrypted_dns;
+        assert!(!encrypted.dot_enabled && !encrypted.doh_enabled);
+        assert_eq!(encrypted.cert_source, CertSource::SelfSigned);
     }
 
     #[test]

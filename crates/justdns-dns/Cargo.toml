@@ -13,8 +13,23 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 hickory-proto = "0.25.2"
 hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }
 moka = { version = "0.12.16", features = ["future"] }
-tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "io-util"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "io-util", "fs"] }
 tracing = "0.1"
+# Server-side TLS for the DoT/DoH client endpoints. We pin everything to the
+# `ring` crypto provider (already compiled in via hickory's tls-ring) so the
+# static release build never pulls the aws-lc C toolchain.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+sha2 = "0.11"
+base64 = "0.22"
+hyper = { version = "1.12", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "service"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
 
 [dev-dependencies]
-tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "rt-multi-thread"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "rt-multi-thread", "io-util"] }
