@@ -4,6 +4,15 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.32] - 2026-11-05
+
+- Geändert: **die Antwortzeit auf der Übersicht zeigt nur noch den Median.** Die
+  große Zahl unter „Letzte 24 Stunden“ ist die typische Auflösungszeit (der Median)
+  und damit bei einem Cache-lastigen Setup angenehm niedrig — der Durchschnitt, den
+  eine einzelne langsame Upstream-Abfrage hochziehen konnte, und die zusätzlichen
+  Perzentile werden nicht mehr angezeigt, damit die Zahl auf einen Blick eindeutig
+  ist.
+
 ## [0.1.31] - 2026-11-05
 
 - Behoben: **das Bearbeiten einer Gruppe öffnet keine leere Seite mehr.** Beim

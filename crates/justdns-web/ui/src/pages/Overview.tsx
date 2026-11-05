@@ -132,22 +132,14 @@ export function Overview() {
             <dd>{nf.format(data.day.blocked)}</dd>
           </div>
           <div className={styles.stat}>
-            <dt>{t("overview.avgResponse")}</dt>
+            <dt>{t("overview.medianResponse")}</dt>
             {data.day.total === 0 ? (
               <dd>—</dd>
             ) : (
-              <>
-                <dd>
-                  {nf1.format(data.day.avgDurationMs)}&thinsp;
-                  <span className={styles.unit}>ms</span>
-                </dd>
-                <span className={styles.statNote}>
-                  {t("overview.responsePercentiles", {
-                    median: nf1.format(data.day.medianDurationMs),
-                    p95: nf1.format(data.day.p95DurationMs),
-                  })}
-                </span>
-              </>
+              <dd>
+                {nf1.format(data.day.medianDurationMs)}&thinsp;
+                <span className={styles.unit}>ms</span>
+              </dd>
             )}
           </div>
         </dl>
