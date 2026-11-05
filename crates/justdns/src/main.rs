@@ -5,6 +5,7 @@
 
 mod config;
 mod observer;
+mod policy;
 
 use std::net::IpAddr;
 use std::process::ExitCode;
@@ -20,7 +21,7 @@ use justdns_dns::pipeline::{Pipeline, PipelineOptions};
 use justdns_dns::router::{Router, SharedRouter};
 use justdns_dns::server::Server;
 use justdns_dns::upstream::{Upstream, UpstreamConfig};
-use justdns_filter::Blocker;
+use justdns_filter::{Blocker, PolicyEngine};
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
 use justdns_store::Store;
@@ -166,6 +167,41 @@ async fn main() -> ExitCode {
     };
     info!(clients = clients.view().len(), "loaded named clients");
 
+    // The client-scoped policy engine the DNS pipeline consults. The coordinator
+    // folds the global lists, the groups and the devices into one resolved policy
+    // per device plus a global default, and republishes whenever any of them
+    // change (each store runs the rebuild through its on-change hook).
+    let policy_engine = Arc::new(PolicyEngine::new());
+    policy::rebuild(&policy_engine, &lists, &clients, &config_store.get());
+    {
+        let engine = policy_engine.clone();
+        let lists_handle = lists.clone();
+        let clients_handle = clients.clone();
+        let config_handle = config_store.clone();
+        lists.on_change(move || {
+            policy::rebuild(
+                &engine,
+                &lists_handle,
+                &clients_handle,
+                &config_handle.get(),
+            );
+        });
+    }
+    {
+        let engine = policy_engine.clone();
+        let lists_handle = lists.clone();
+        let clients_handle = clients.clone();
+        let config_handle = config_store.clone();
+        clients.on_change(move || {
+            policy::rebuild(
+                &engine,
+                &lists_handle,
+                &clients_handle,
+                &config_handle.get(),
+            );
+        });
+    }
+
     // The upstream pool and the cache tuning both follow the live settings: the
     // speed profile chooses which resolvers run and how eagerly answers are
     // cached, the encryption toggle picks DoT vs plaintext, and the mode decides
@@ -194,20 +230,26 @@ async fn main() -> ExitCode {
         },
     )
     .with_observer(observer)
-    .with_blocker(blocker.clone())
+    .with_policy_engine(policy_engine.clone())
     .with_rewriter(rewriter.clone());
     let server = Server::new(pipeline);
 
     // Reconfigure the live engine on every settings change: rebuild the router
-    // from the new profile/mode/encryption and retune the cache. The config
-    // store runs this after each save, so the web layer needs no extra wiring.
+    // from the new profile/mode/encryption, retune the cache, and rebuild the
+    // per-client policies (the ads/malware flags are part of the global default).
+    // The config store runs this after each save, so the web layer needs no
+    // extra wiring.
     {
         let router = shared_router.clone();
         let tuning = cache_tuning.clone();
+        let engine = policy_engine.clone();
+        let lists_handle = lists.clone();
+        let clients_handle = clients.clone();
         config_store.on_change(move |settings| {
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams));
             tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
+            policy::rebuild(&engine, &lists_handle, &clients_handle, settings);
         });
     }
 

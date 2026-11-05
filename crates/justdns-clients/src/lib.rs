@@ -54,7 +54,7 @@ pub enum DeviceKind {
 /// dashboard's JSON directly. `target` is kept in its normalised text form (a
 /// canonical IP, or a masked CIDR such as `192.168.30.0/24`) so the file and the
 /// UI round-trip exactly what the matcher uses.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Device {
     /// The client address or CIDR range this entry names, already normalised.
@@ -67,6 +67,62 @@ pub struct Device {
     /// The device kind, shown as an icon. Defaults to [`DeviceKind::Other`].
     #[serde(default)]
     pub kind: DeviceKind,
+    /// The id of the group this device belongs to, if any. A device inherits its
+    /// group's policy delta on top of the global default. Absent = ungrouped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// This device's own filtering delta, layered on top of its group and the
+    /// global default. Omitted from the file when empty, so a device with no
+    /// policy round-trips exactly as older builds wrote it.
+    #[serde(default, skip_serializing_if = "PolicyDelta::is_empty")]
+    pub policy: PolicyDelta,
+}
+
+/// The filtering delta a scope — a group or a device — layers on top of what it
+/// inherits (global → group → device). Every field defaults empty, so a scope
+/// with no delta changes nothing. The policy coordinator folds these together at
+/// rebuild time into one resolved policy per device, so the DNS hot path never
+/// walks the inheritance. List references are stored as the opaque ids of list
+/// objects (feed subscriptions, or the built-in `ads`/`malware`); this crate does
+/// not validate them against the catalogue — the web layer does, where the
+/// catalogue is known.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PolicyDelta {
+    /// List-object ids this scope switches on in addition to what it inherits.
+    pub lists_added: Vec<String>,
+    /// Inherited list-object ids this scope switches off for itself.
+    pub lists_disabled: Vec<String>,
+    /// Single domains this scope always allows; an allow wins over every block.
+    pub allow: Vec<String>,
+    /// Single domains this scope always blocks.
+    pub block: Vec<String>,
+}
+
+impl PolicyDelta {
+    /// Whether this delta changes nothing — no list tweaks and no ad-hoc rules.
+    /// Used to omit an empty delta from the stored file.
+    pub fn is_empty(&self) -> bool {
+        self.lists_added.is_empty()
+            && self.lists_disabled.is_empty()
+            && self.allow.is_empty()
+            && self.block.is_empty()
+    }
+}
+
+/// A named group of devices with its own filtering delta. Devices point at a
+/// group by its stable `id`; the group's delta applies to every device in it,
+/// between the global default and the device's own delta.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Group {
+    /// Stable id, referenced by a device's `group` field and kept across renames.
+    pub id: String,
+    /// Display name shown in the dashboard.
+    pub name: String,
+    /// The group's filtering delta, layered on the global default.
+    #[serde(default, skip_serializing_if = "PolicyDelta::is_empty")]
+    pub policy: PolicyDelta,
 }
 
 /// What a device matches: a single address, or a CIDR range. Parsed from a
@@ -292,12 +348,14 @@ mod tests {
                 name: "Guest Wi-Fi".to_owned(),
                 note: None,
                 kind: DeviceKind::Other,
+                ..Default::default()
             },
             Device {
                 target: "192.168.30.10".to_owned(),
                 name: "Guest tablet".to_owned(),
                 note: None,
                 kind: DeviceKind::Tablet,
+                ..Default::default()
             },
         ];
         let resolver = ClientResolver::new(devices);
@@ -322,12 +380,14 @@ mod tests {
                 name: "Whole LAN".to_owned(),
                 note: None,
                 kind: DeviceKind::Other,
+                ..Default::default()
             },
             Device {
                 target: "10.1.2.0/24".to_owned(),
                 name: "Office".to_owned(),
                 note: None,
                 kind: DeviceKind::Other,
+                ..Default::default()
             },
         ];
         let resolver = ClientResolver::new(devices);

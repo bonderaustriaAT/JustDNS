@@ -7,8 +7,8 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.28
-(Geräte erkennen und benennen).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.30
+(Filterung pro Gerät und pro Gruppe).
 
 **So liest sich der Fahrplan:** ein angehaktes Kästchen (`[x]`) heißt, die
 Funktion ist fertig — Details stehen im [Änderungsverlauf](CHANGELOG.de.md). Ein
@@ -48,9 +48,11 @@ langfristig.
   einem Gerätenamen zuordnen und sehen, welche Geräte aktiv sind — damit Protokoll
   und Statistik in Namen statt in Zahlen sprechen. Verwaltet auf der Seite
   „Geräte“.
-- [ ] **Pro-Client-/Gruppen-Richtlinien.** Einem Gerät oder einer Gruppe eine
-  eigene Schutz-Stärke und eigene Listen geben, wie bei AdGuard Home — der größte
-  einzelne Schritt zu echter Haushaltskontrolle.
+- [x] **Pro-Client-/Gruppen-Richtlinien.** Einem Gerät oder einer Gruppe eigene
+  Sperrlisten und Erlauben/Sperren-Regeln zusätzlich zur globalen Vorgabe geben,
+  wie bei AdGuard Home — der größte einzelne Schritt zu echter Haushaltskontrolle.
+  Die Regeln stapeln sich (global → Gruppe → Gerät); verwaltet auf der Seite
+  „Geräte“.
 - [ ] **Tiefere Statistik.** Durchschnittliche Antwortzeit je Resolver (welcher
   Upstream geantwortet hat und wie schnell) und die Top-Domains je Client.
 

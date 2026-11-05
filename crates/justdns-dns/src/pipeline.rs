@@ -17,7 +17,7 @@ use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, CNAME};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use hickory_proto::xfer::DnsResponse;
-use justdns_filter::Blocker;
+use justdns_filter::PolicyEngine;
 use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
@@ -80,7 +80,7 @@ pub struct Pipeline<R> {
     router: Arc<R>,
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
-    blocker: Option<Arc<Blocker>>,
+    policy_engine: Option<Arc<PolicyEngine>>,
     rewriter: Option<Arc<Rewriter>>,
     /// Keys with a background refresh in flight, so however many clients hit a
     /// stale or near-expiry entry at once, only one of them forwards upstream.
@@ -94,7 +94,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             router,
             options,
             observer: None,
-            blocker: None,
+            policy_engine: None,
             rewriter: None,
             refreshing: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -107,12 +107,13 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         self
     }
 
-    /// Filter queries through `blocker`: a blocked name is answered with
-    /// NXDOMAIN before any cache or upstream lookup. Without one, nothing is
-    /// blocked.
+    /// Filter queries through `engine`: a name blocked for the query's client is
+    /// refused before any cache or upstream lookup. The engine resolves the
+    /// client to its effective policy (device, group or global default). Without
+    /// one, nothing is blocked.
     #[must_use]
-    pub fn with_blocker(mut self, blocker: Arc<Blocker>) -> Self {
-        self.blocker = Some(blocker);
+    pub fn with_policy_engine(mut self, engine: Arc<PolicyEngine>) -> Self {
+        self.policy_engine = Some(engine);
         self
     }
 
@@ -142,7 +143,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         };
         response.add_query(query.clone());
 
-        let source = self.answer(&query, &mut response).await;
+        let source = self.answer(&query, &mut response, client).await;
 
         if let Some(observer) = &self.observer {
             observer.observe(QueryRecord {
@@ -160,8 +161,9 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         response
     }
 
-    /// Fill `response` with the answer to `query` and report where it came from.
-    async fn answer(&self, query: &Query, response: &mut Message) -> AnswerSource {
+    /// Fill `response` with the answer to `query` for `client` and report where
+    /// it came from. The client decides which filtering policy applies.
+    async fn answer(&self, query: &Query, response: &mut Message, client: IpAddr) -> AnswerSource {
         // A local rewrite is the strongest, most explicit intent the user can
         // express, so it is answered first — before the block check and any
         // lookup — and owns the name for every record type.
@@ -172,11 +174,12 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             }
         }
 
-        // Blocked names are refused before any lookup. How depends on the block
-        // response: the null IP (so a connection to the blocked host fails at
-        // once) or NXDOMAIN (the name simply does not exist).
-        if let Some(blocker) = &self.blocker {
-            if blocker.blocks(&query.name().to_string()) {
+        // Blocked names are refused before any lookup, under the policy that
+        // applies to this client (its device, its group, or the global default).
+        // How depends on the block response: the null IP (so a connection to the
+        // blocked host fails at once) or NXDOMAIN (the name simply does not exist).
+        if let Some(engine) = &self.policy_engine {
+            if engine.blocks(client, &query.name().to_string()) {
                 if self.options.block_null_ip.load(Ordering::Relaxed) {
                     self.answer_blocked_null_ip(query, response);
                 } else {
@@ -433,6 +436,25 @@ mod tests {
 
     const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
 
+    /// A policy engine whose global default blocks `ads.example` for every
+    /// client, used by the block tests in place of the old global blocker.
+    fn block_ads_engine() -> Arc<PolicyEngine> {
+        use justdns_filter::{BlockCategory, BlockSource, DomainSet, Policy};
+        let engine = PolicyEngine::new();
+        engine.publish(
+            Policy::new(
+                DomainSet::new(),
+                vec![BlockSource {
+                    category: BlockCategory::AdsTrackers,
+                    label: "Werbung & Tracker".into(),
+                    set: DomainSet::from_rules("ads.example\n"),
+                }],
+            ),
+            vec![],
+        );
+        Arc::new(engine)
+    }
+
     #[derive(Default)]
     struct Recording {
         seen: Mutex<Vec<QueryRecord>>,
@@ -649,19 +671,11 @@ mod tests {
 
     #[tokio::test]
     async fn blocked_name_is_nxdomain_without_lookup() {
-        use justdns_filter::{Blocker, DomainSet};
-
         let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
         let calls = mock.calls.clone();
         let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
-        let blocker = Arc::new(Blocker::new(
-            DomainSet::from_rules("ads.example\n"),
-            Arc::new(AtomicBool::new(true)),
-            DomainSet::new(),
-            Arc::new(AtomicBool::new(false)),
-        ));
         let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
-            .with_blocker(blocker);
+            .with_policy_engine(block_ads_engine());
 
         // A blocked name (and a sub-domain of it) is refused without a lookup.
         let blocked = pipe
@@ -686,23 +700,16 @@ mod tests {
 
     #[tokio::test]
     async fn blocked_name_is_null_ip_when_configured() {
-        use justdns_filter::{Blocker, DomainSet};
-
         let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
         let calls = mock.calls.clone();
         let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
-        let blocker = Arc::new(Blocker::new(
-            DomainSet::from_rules("ads.example\n"),
-            Arc::new(AtomicBool::new(true)),
-            DomainSet::new(),
-            Arc::new(AtomicBool::new(false)),
-        ));
         let options = PipelineOptions {
             ipv6_enabled: Arc::new(AtomicBool::new(false)),
             safe_search: Arc::new(AtomicBool::new(false)),
             block_null_ip: Arc::new(AtomicBool::new(true)),
         };
-        let pipe = Pipeline::new(DnsCache::new(100), router, options).with_blocker(blocker);
+        let pipe = Pipeline::new(DnsCache::new(100), router, options)
+            .with_policy_engine(block_ads_engine());
 
         // A blocked A query is answered with 0.0.0.0, not NXDOMAIN, and never
         // reaches upstream.
