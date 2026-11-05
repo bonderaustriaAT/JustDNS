@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.32] - 2026-11-05
+
+- Changed: **the overview's response time now shows the median only.** The large
+  figure under "Last 24 hours" is the typical lookup time (the median), which on a
+  cache-heavy setup is reassuringly low — the average, which a single slow upstream
+  could inflate, and the extra percentiles are no longer shown, so the number is
+  unambiguous at a glance.
+
 ## [0.1.31] - 2026-11-05
 
 - Fixed: **editing a group no longer opens a blank page.** Opening the editor of a
