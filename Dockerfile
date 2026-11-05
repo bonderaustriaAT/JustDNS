@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # Runtime: just the binary. TLS roots are compiled in (webpki-roots), so no
 # system certificate store is needed for DoT/DoH upstreams.
-FROM debian:bookworm-slim AS runtime
+FROM debian:13.7-slim AS runtime
 COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
 
 ENV JUSTDNS_LISTEN=0.0.0.0:53 \
