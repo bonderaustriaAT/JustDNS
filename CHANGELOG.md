@@ -3,7 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
-## [0.1.28] - 2026-11-02
+## [0.1.29] - 2026-11-05
+
+- Improved: **the response time on the overview is harder to skew now.** A single
+  slow upstream lookup could pull the plain average up and out of proportion,
+  especially on a quiet day. The overview now also shows the **median and 95th
+  percentile** beneath it: the median is the typical query — close to zero when
+  most answers come from the cache — while the p95 still shows the slow tail. So a
+  cache-heavy setup reads as fast as it really is, and one outlier no longer
+  dominates the figure.
 
 - New: **recognise and name your devices.** On the new "Devices" page you can give
   the clients on your network names — a single address (e.g. `192.168.20.10` =

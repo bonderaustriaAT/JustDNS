@@ -31,7 +31,11 @@ export interface ClientCount {
 export interface DayStats {
   total: number;
   blocked: number;
+  /** Handling time across every query (cache hits included, so a cache-heavy day
+   *  reads fast); median and p95 keep one slow outlier from skewing it. */
   avg_duration_ms: number;
+  median_duration_ms: number;
+  p95_duration_ms: number;
   top_clients: ClientCount[];
 }
 
