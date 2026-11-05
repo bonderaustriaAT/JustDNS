@@ -260,6 +260,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A small muted second line under a figure — the median/p95 beneath the mean. */
+.statNote {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  font-variant-numeric: tabular-nums;
+}
+
 .recent {
   display: flex;
   flex-direction: column;

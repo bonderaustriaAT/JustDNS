@@ -32,6 +32,65 @@ const RCODE_SERVFAIL: u16 = 2;
 /// Response code for a non-existent name.
 const RCODE_NXDOMAIN: u16 = 3;
 
+/// Upper bounds (ms) of the latency histogram's buckets. A sample lands in the
+/// first bucket whose bound it does not exceed, or the overflow bucket past the
+/// last bound. Powers of two keep the buckets meaningful across the whole range
+/// a resolver shows, from an instant cache hit in the first bucket to a slow
+/// upstream in the tail. Every handled query is recorded, so the median reflects
+/// the typical (usually cached, near-zero) answer while the p95 still exposes the
+/// slow tail. Kept `pub(crate)` so the DuckDB rehydration bins exactly the same.
+pub(crate) const LATENCY_BOUNDS_MS: [u64; 13] =
+    [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
+/// Histogram bucket count: one per bound plus a final overflow bucket.
+pub(crate) const LATENCY_BINS: usize = LATENCY_BOUNDS_MS.len() + 1;
+
+/// The histogram bucket a latency falls in: the first bound it does not exceed,
+/// else the overflow bucket (the last index).
+pub(crate) fn latency_bin(duration_ms: u64) -> usize {
+    LATENCY_BOUNDS_MS
+        .iter()
+        .position(|&bound| duration_ms <= bound)
+        .unwrap_or(LATENCY_BOUNDS_MS.len())
+}
+
+/// The `[lower, upper]` millisecond bounds of histogram bucket `bin`, used to
+/// place an interpolated percentile inside it. The overflow bucket has no finite
+/// upper bound, so it reports its lower bound for both.
+fn bin_bounds(bin: usize) -> (f64, f64) {
+    let lo = if bin == 0 {
+        0.0
+    } else {
+        LATENCY_BOUNDS_MS[bin - 1] as f64
+    };
+    let hi = LATENCY_BOUNDS_MS.get(bin).map_or(lo, |&bound| bound as f64);
+    (lo, hi)
+}
+
+/// The `p`-quantile (0.0–1.0) of a merged handling-time histogram, in ms,
+/// estimated by linear interpolation inside the bucket the rank falls in. Zero
+/// when there are no samples. Approximate to the bucket's width, which is plenty
+/// for a dashboard figure and needs only the bounded per-hour histograms.
+fn percentile(hist: &[u64; LATENCY_BINS], total: u64, p: f64) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+    // 1-based rank of the target sample, at least the first one.
+    let target = (p * total as f64).ceil().max(1.0) as u64;
+    let mut cumulative = 0u64;
+    for (bin, &n) in hist.iter().enumerate() {
+        if n == 0 {
+            continue;
+        }
+        if cumulative + n >= target {
+            let (lo, hi) = bin_bounds(bin);
+            let within = (target - cumulative) as f64 / n as f64;
+            return lo + within * (hi - lo);
+        }
+        cumulative += n;
+    }
+    bin_bounds(LATENCY_BINS - 1).1
+}
+
 /// Running totals over every query seen since start.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Stats {
@@ -69,8 +128,18 @@ pub struct DayStats {
     pub total: u64,
     /// How many of them were refused by the blocking engine.
     pub blocked: u64,
-    /// Mean handling time across those queries, in milliseconds. Zero when none.
+    /// Mean handling time across all handled queries, in milliseconds. The many
+    /// instant cache/blocked/local answers count too, so a cache-heavy day reads
+    /// as fast as it really is. Zero when no query was handled.
     pub avg_duration_ms: f64,
+    /// Median (50th percentile) handling time, in milliseconds — the typical
+    /// query, close to zero when most are served from cache. Robust against a
+    /// single slow outlier, which the mean alone would let dominate a quiet hour.
+    pub median_duration_ms: f64,
+    /// 95th-percentile handling time, in milliseconds: the slow tail most queries
+    /// still beat, so the occasional upstream lookup is visible without skewing
+    /// the headline figure.
+    pub p95_duration_ms: f64,
 }
 
 /// One client and how many queries it made over the kept hours.
@@ -106,7 +175,15 @@ pub(crate) struct HourBucket {
     pub(crate) hour_ms: i64,
     pub(crate) count: u64,
     pub(crate) blocked: u64,
+    /// Summed handling time of every query this hour, in milliseconds (for the
+    /// mean). Instant cache/blocked answers count too, so a cache-heavy hour
+    /// reads as fast as it really is.
     pub(crate) duration_sum_ms: u64,
+    /// Distribution of every query's handling time across [`LATENCY_BINS`]
+    /// buckets (for the median and p95). Merged across hours to estimate the
+    /// day's percentiles; the many cache hits cluster in the first bucket, so the
+    /// median stays near zero while the p95 still shows the slow tail.
+    pub(crate) latency_hist: [u64; LATENCY_BINS],
     pub(crate) clients: HashMap<IpAddr, u64>,
 }
 
@@ -118,8 +195,16 @@ impl HourBucket {
             count: 0,
             blocked: 0,
             duration_sum_ms: 0,
+            latency_hist: [0; LATENCY_BINS],
             clients: HashMap::new(),
         }
+    }
+
+    /// Record one query's handling time into the hour's mean sum and latency
+    /// histogram. Called for every handled query, cache hits included.
+    pub(crate) fn add_latency(&mut self, duration_ms: u64) {
+        self.duration_sum_ms += duration_ms;
+        self.latency_hist[latency_bin(duration_ms)] += 1;
     }
 
     /// Count one client visit, respecting the per-hour cap: an address already
@@ -267,16 +352,21 @@ impl Recorder {
     }
 
     /// Totals over the kept hours (the last day): queries handled, how many were
-    /// blocked, and the mean handling time.
+    /// blocked, and the handling-time figures across every query (mean, median,
+    /// p95) — cache hits included, so a cache-heavy day reads as fast as it is.
     pub fn day_stats(&self) -> DayStats {
         let state = self.state.lock().expect("recorder lock poisoned");
         let mut total = 0u64;
         let mut blocked = 0u64;
         let mut duration_sum = 0u64;
+        let mut hist = [0u64; LATENCY_BINS];
         for bucket in &state.activity {
             total += bucket.count;
             blocked += bucket.blocked;
             duration_sum += bucket.duration_sum_ms;
+            for (bin, &n) in bucket.latency_hist.iter().enumerate() {
+                hist[bin] += n;
+            }
         }
         let avg_duration_ms = if total == 0 {
             0.0
@@ -287,6 +377,8 @@ impl Recorder {
             total,
             blocked,
             avg_duration_ms,
+            median_duration_ms: percentile(&hist, total, 0.5),
+            p95_duration_ms: percentile(&hist, total, 0.95),
         }
     }
 
@@ -392,7 +484,7 @@ fn bump_activity(
     if blocked {
         bucket.blocked += 1;
     }
-    bucket.duration_sum_ms += u64::from(duration_ms);
+    bucket.add_latency(u64::from(duration_ms));
     bucket.bump_client(client);
 }
 
@@ -565,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn day_stats_sum_count_blocked_and_average_duration() {
+    fn day_stats_mean_counts_every_query() {
         let recorder = Recorder::new(100);
         let a = Ipv4Addr::new(10, 0, 0, 1);
         recorder.record(event_with(5, QuerySource::Upstream, a, 10));
@@ -575,13 +667,86 @@ mod tests {
         let day = recorder.day_stats();
         assert_eq!(day.total, 3);
         assert_eq!(day.blocked, 1);
-        // (10 + 2 + 0) / 3 handled queries.
+        // Every query counts, cache and blocked included: (10 + 2 + 0) / 3.
         assert!((day.avg_duration_ms - 4.0).abs() < 1e-9, "{day:?}");
     }
 
     #[test]
+    fn day_stats_mean_stays_low_when_cache_heavy() {
+        // The reported complaint: with lots of cache hits the figure should read
+        // fast, not high. A flood of instant cache hits and a few slow upstream
+        // lookups keeps the mean near zero, because the cache hits count too.
+        let recorder = Recorder::new(2000);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        for at in 0..1000 {
+            recorder.record(event_with(at, QuerySource::Cache, a, 0));
+        }
+        for at in 0..10 {
+            recorder.record(event_with(1000 + at, QuerySource::Upstream, a, 100));
+        }
+
+        let day = recorder.day_stats();
+        assert_eq!(day.total, 1010);
+        // 1000 hits at 0 ms + 10 at 100 ms → mean ≈ 1 ms, not 100.
+        assert!(day.avg_duration_ms < 5.0, "mean stays low: {day:?}");
+        // The median is the typical (cached) query, near zero.
+        assert!(
+            day.median_duration_ms <= 1.0,
+            "median {}",
+            day.median_duration_ms
+        );
+    }
+
+    #[test]
+    fn day_stats_median_is_robust_while_p95_shows_the_tail() {
+        // 80 instant cache hits and 20 slow (200 ms) lookups. The median still
+        // sits in the first bucket — one-in-five slow answers cannot drag it up —
+        // while the p95 climbs into the slow tail, so the occasional slow lookup
+        // is visible without skewing the headline mean.
+        let recorder = Recorder::new(2000);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        for at in 0..80 {
+            recorder.record(event_with(at, QuerySource::Cache, a, 0));
+        }
+        for at in 0..20 {
+            recorder.record(event_with(100 + at, QuerySource::Upstream, a, 200));
+        }
+
+        let day = recorder.day_stats();
+        assert_eq!(day.total, 100);
+        assert!(
+            day.median_duration_ms <= 1.0,
+            "median stays near zero: {}",
+            day.median_duration_ms
+        );
+        assert!(
+            day.p95_duration_ms >= 100.0,
+            "p95 surfaces the slow tail: {}",
+            day.p95_duration_ms
+        );
+    }
+
+    #[test]
     fn day_stats_average_is_zero_without_queries() {
-        assert_eq!(Recorder::new(10).day_stats().avg_duration_ms, 0.0);
+        let day = Recorder::new(10).day_stats();
+        assert_eq!(day.avg_duration_ms, 0.0);
+        assert_eq!(day.median_duration_ms, 0.0);
+        assert_eq!(day.p95_duration_ms, 0.0);
+    }
+
+    #[test]
+    fn latency_bin_places_samples_in_the_right_bucket() {
+        assert_eq!(latency_bin(0), 0, "0 ms → first bucket (<=1)");
+        assert_eq!(latency_bin(1), 0);
+        assert_eq!(latency_bin(2), 1);
+        assert_eq!(latency_bin(10), 4, "<=16 ms bucket");
+        assert_eq!(latency_bin(4096), LATENCY_BOUNDS_MS.len() - 1);
+        assert_eq!(
+            latency_bin(4097),
+            LATENCY_BOUNDS_MS.len(),
+            "overflow bucket"
+        );
+        assert_eq!(latency_bin(99_999), LATENCY_BINS - 1);
     }
 
     #[test]
