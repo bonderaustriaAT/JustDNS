@@ -26,7 +26,10 @@ export interface RecentQuery {
 export interface DayFigures {
   total: number;
   blocked: number;
+  /** Handling time across all queries: mean, median and p95. */
   avgDurationMs: number;
+  medianDurationMs: number;
+  p95DurationMs: number;
 }
 
 export interface OverviewData {
@@ -135,6 +138,8 @@ export function useOverview(): OverviewState {
               total: statsDay.total,
               blocked: statsDay.blocked,
               avgDurationMs: statsDay.avg_duration_ms,
+              medianDurationMs: statsDay.median_duration_ms,
+              p95DurationMs: statsDay.p95_duration_ms,
             },
             topClients: statsDay.top_clients,
           },

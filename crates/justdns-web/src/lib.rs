@@ -1181,7 +1181,12 @@ struct NamedClientCount {
 struct DayStatsResponse {
     total: u64,
     blocked: u64,
+    /// Mean, median and 95th-percentile handling time across every query (cache
+    /// hits included, so a cache-heavy day reads fast); the median and p95 keep a
+    /// single slow outlier from skewing the picture.
     avg_duration_ms: f64,
+    median_duration_ms: f64,
+    p95_duration_ms: f64,
     top_clients: Vec<NamedClientCount>,
 }
 
@@ -1204,6 +1209,8 @@ async fn stats_day(
         total: day.total,
         blocked: day.blocked,
         avg_duration_ms: day.avg_duration_ms,
+        median_duration_ms: day.median_duration_ms,
+        p95_duration_ms: day.p95_duration_ms,
         top_clients,
     })
 }
@@ -1475,7 +1482,7 @@ mod tests {
     async fn stats_day_reports_window_blocked_average_and_top_clients() {
         let (store, _writer) = Store::in_memory(100).unwrap();
         // Two queries from .1 (one of them blocked) and one from .2; every sample
-        // has a 5 ms handling time, so the mean is 5.
+        // has a 5 ms handling time, so the mean across all three is 5.
         store.record(sample(
             Ipv4Addr::new(10, 0, 0, 1),
             "a.example",

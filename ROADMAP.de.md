@@ -10,7 +10,14 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
 [Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.28
 (Geräte erkennen und benennen).
 
-## Phase 1 — Einblick & schnelle Gewinne
+**So liest sich der Fahrplan:** ein angehaktes Kästchen (`[x]`) heißt, die
+Funktion ist fertig — Details stehen im [Änderungsverlauf](CHANGELOG.de.md). Ein
+offenes Kästchen (`[ ]`) ist noch geplant. Die Phasen gehen grob von bald zu
+langfristig.
+
+---
+
+## Phase 1 — Einblick & schnelle Gewinne _(fertig)_
 
 - [x] **Live-Statistik.** Eine Live-Rate der Anfragen (pro Sekunde oder pro
   Minute, umschaltbar), Kennzahlen der letzten 24 Stunden (Anfragen gesamt, von
@@ -35,7 +42,7 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
   vorhandenen Dashboard auf, sodass vollwertige native Apps später bleiben können
   (Phase 6).
 
-## Phase 2 — Geräte & Richtlinien
+## Phase 2 — Geräte & Richtlinien _(in Arbeit)_
 
 - [x] **Clients erkennen & benennen.** Eine Client-IP (oder einen CIDR-Bereich)
   einem Gerätenamen zuordnen und sehen, welche Geräte aktiv sind — damit Protokoll
@@ -47,27 +54,27 @@ Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen i
 - [ ] **Tiefere Statistik.** Durchschnittliche Antwortzeit je Resolver (welcher
   Upstream geantwortet hat und wie schnell) und die Top-Domains je Client.
 
-## Phase 3 — Zeit & Zugang
+## Phase 3 — Zeit & Zugang _(geplant)_
 
 - [ ] **Zeitpläne.** Bestimmte Dienste oder Listen in Zeitfenstern sperren, je
   Gerät oder Gruppe — Kinderzeiten, Fokuszeit, Schlafenszeit.
 - [ ] **Benutzer & Rollen.** Mehr als ein Administrator, Nur-Lese-Konten und eine
   einfache Aufzeichnung, wer was geändert hat.
 
-## Phase 4 — Verschlüsselung & Reichweite
+## Phase 4 — Verschlüsselung & Reichweite _(geplant)_
 
 - [ ] **Verschlüsseltes Client-DNS.** JustDNS selbst als DNS-over-TLS- und
   DNS-over-HTTPS-Endpunkt betreiben, damit sich die eigenen Geräte verschlüsselt
   verbinden — nicht nur die Upstream-Resolver.
 
-## Phase 5 — Hochverfügbarkeit
+## Phase 5 — Hochverfügbarkeit _(geplant)_
 
 - [ ] **Zwei-Server-Betrieb.** Eine zweite JustDNS-Instanz betreiben, die sich
   synchron hält — Listen, Konfiguration, Rewrites und (optional) Statistiken —
   mit automatischem Failover, damit DNS weiterläuft, während ein Knoten aus ist
   oder aktualisiert wird.
 
-## Phase 6 — Apps
+## Phase 6 — Apps _(geplant)_
 
 - [ ] **Native Android- & iOS-Apps.** Auf der Web-App aufbauend eigene Apps für
   ein erstklassiges mobiles Erlebnis und engere Betriebssystem-Integration. Die
