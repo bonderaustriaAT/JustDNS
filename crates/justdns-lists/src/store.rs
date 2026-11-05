@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use justdns_filter::{BlockSource, Blocker, DomainSet, parse_rule};
+use justdns_filter::{BlockCategory, BlockSource, Blocker, DomainSet, parse_rule};
 use serde::{Deserialize, Serialize};
 
 use crate::ListKind;
@@ -218,14 +218,53 @@ pub struct RefreshOutcome {
     pub error: Option<String>,
 }
 
+/// A callback run after every change that alters what is blocked, so the binary
+/// can rebuild the live per-client policies. Registered by the binary; the store
+/// itself knows nothing of the policy engine.
+type OnChange = Arc<dyn Fn() + Send + Sync>;
+
 struct Inner {
     /// The JSON file holding [`UserLists`].
     path: PathBuf,
     /// Directory holding one cached feed file per subscription.
     cache_dir: PathBuf,
     lists: RwLock<UserLists>,
-    /// The live blocker whose allow and custom sets we own and rebuild.
+    /// The global default blocker whose allow and custom sets we own and rebuild.
+    /// It backs the dashboard's active-list counts and is the base the per-client
+    /// policies are layered on; the per-client engine itself is built by the
+    /// binary from [`ListStore::resolved`] plus the groups and devices.
     blocker: Arc<Blocker>,
+    /// Run after each change that alters what is blocked, to rebuild the policies.
+    on_change: RwLock<Option<OnChange>>,
+}
+
+/// One reusable block-list object the per-client policies can switch on or off:
+/// a subscribed feed, resolved to its domain set. Bundled ads/malware are added
+/// by the binary from the filter crate; this covers the user's own feeds.
+#[derive(Clone, Debug)]
+pub struct ListObject {
+    /// Stable id, referenced by a scope's list delta (the subscription id).
+    pub id: String,
+    /// Display name shown in the dashboard.
+    pub label: String,
+    /// The domains this object blocks.
+    pub set: DomainSet,
+    /// Whether it is on in the global default (the subscription's enabled flag).
+    pub enabled: bool,
+}
+
+/// The user-managed building blocks the policy coordinator folds into the global
+/// and per-scope policies: the merged allow set, the user's own manual block set,
+/// and each block feed as a switchable object. Bundled ads/malware and the config
+/// flags are added by the binary, which owns them.
+#[derive(Clone, Debug, Default)]
+pub struct ResolvedLists {
+    /// The global allow set: manual allow entries plus every enabled allow feed.
+    pub allow: DomainSet,
+    /// The user's own manual block entries, as one set (always on globally).
+    pub own_block: DomainSet,
+    /// Every block feed subscription, resolved, with its global enabled flag.
+    pub block_feeds: Vec<ListObject>,
 }
 
 /// A cheap, cloneable handle to the persistent lists.
@@ -269,6 +308,7 @@ impl ListStore {
                 cache_dir,
                 lists: RwLock::new(lists),
                 blocker,
+                on_change: RwLock::new(None),
             }),
         };
         // Populate the blocker from the manual entries and any cached feeds.
@@ -276,6 +316,77 @@ impl ListStore {
         store.rebuild(&lists);
         drop(lists);
         Ok(store)
+    }
+
+    /// Register the callback run after every change that alters what is blocked,
+    /// so the binary can rebuild the live per-client policies. Replaces any
+    /// previously registered callback.
+    pub fn on_change(&self, callback: impl Fn() + Send + Sync + 'static) {
+        *self.inner.on_change.write().expect("lists lock poisoned") = Some(Arc::new(callback));
+    }
+
+    fn fire_on_change(&self) {
+        let callback = self
+            .inner
+            .on_change
+            .read()
+            .expect("lists lock poisoned")
+            .clone();
+        if let Some(callback) = callback {
+            callback();
+        }
+    }
+
+    /// The user-managed building blocks for the policy coordinator: the merged
+    /// allow set, the user's own manual block set, and each block feed as a
+    /// switchable object. Mirrors how [`rebuild`](Self::rebuild) assembles the
+    /// global blocker, but returns the pieces as data so the binary can layer the
+    /// groups' and devices' deltas on top.
+    pub fn resolved(&self) -> ResolvedLists {
+        let lists = self.read();
+
+        let mut allow = DomainSet::new();
+        for entry in &lists.allow {
+            allow.add_rules(&entry.domain);
+        }
+
+        let mut own_block = DomainSet::new();
+        for entry in &lists.block {
+            own_block.add_rules(&entry.domain);
+        }
+
+        let mut block_feeds = Vec::new();
+        for sub in &lists.subscriptions {
+            match sub.kind {
+                // Allow feeds merge into the one allow set; they are global-only.
+                ListKind::Allow => {
+                    if sub.enabled {
+                        if let Some(text) = self.read_cache(&sub.id) {
+                            allow.add_rules(&text);
+                        }
+                    }
+                }
+                // Each block feed is a switchable object a scope can toggle.
+                ListKind::Block => {
+                    let mut set = DomainSet::new();
+                    if let Some(text) = self.read_cache(&sub.id) {
+                        set.add_rules(&text);
+                    }
+                    block_feeds.push(ListObject {
+                        id: sub.id.clone(),
+                        label: sub.name.clone(),
+                        set,
+                        enabled: sub.enabled,
+                    });
+                }
+            }
+        }
+
+        ResolvedLists {
+            allow,
+            own_block,
+            block_feeds,
+        }
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, UserLists> {
@@ -329,6 +440,8 @@ impl ListStore {
         *guard = lists;
         self.persist(&guard)?;
         self.rebuild(&guard);
+        drop(guard);
+        self.fire_on_change();
         Ok(())
     }
 
@@ -394,6 +507,8 @@ impl ListStore {
         }
         self.persist(&lists)?;
         self.rebuild(&lists);
+        drop(lists);
+        self.fire_on_change();
         Ok(normalised)
     }
 
@@ -421,6 +536,8 @@ impl ListStore {
         bucket.retain(|entry| entry.domain != target && entry.domain != domain);
         self.persist(&lists)?;
         self.rebuild(&lists);
+        drop(lists);
+        self.fire_on_change();
         Ok(())
     }
 
@@ -468,6 +585,7 @@ impl ListStore {
         self.rebuild(&lists);
         drop(lists);
         self.remove_cache(id);
+        self.fire_on_change();
         Ok(())
     }
 
@@ -482,6 +600,8 @@ impl ListStore {
         sub.enabled = enabled;
         self.persist(&lists)?;
         self.rebuild(&lists);
+        drop(lists);
+        self.fire_on_change();
         Ok(())
     }
 
@@ -512,6 +632,8 @@ impl ListStore {
             }
             self.persist(&lists)?;
             self.rebuild(&lists);
+            drop(lists);
+            self.fire_on_change();
             Ok(())
         } else {
             let mut lists = self.write();
@@ -530,6 +652,7 @@ impl ListStore {
             for id in removed {
                 self.remove_cache(&id);
             }
+            self.fire_on_change();
             Ok(())
         }
     }
@@ -575,6 +698,7 @@ impl ListStore {
         let _ = self.persist(&lists);
         self.rebuild(&lists);
         drop(lists);
+        self.fire_on_change();
 
         results
             .into_iter()
@@ -613,6 +737,7 @@ impl ListStore {
         }
         if !own.is_empty() {
             sources.push(BlockSource {
+                category: BlockCategory::Custom,
                 label: "Eigene Blockliste".to_owned(),
                 set: own,
             });
@@ -634,6 +759,7 @@ impl ListStore {
                     let mut set = DomainSet::new();
                     set.add_rules(&text);
                     sources.push(BlockSource {
+                        category: BlockCategory::Custom,
                         label: sub.name.clone(),
                         set,
                     });
