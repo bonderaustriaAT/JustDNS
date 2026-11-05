@@ -19,6 +19,13 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
+      # DuckDB's unity-build translation units are huge; compiling several in
+      # parallel pushed the runner over its memory/disk limit, so the C++ build
+      # (libduckdb-sys) died before the job could ever populate the target
+      # cache — every run then rebuilt DuckDB cold and failed again. Serialise
+      # the build so one object exists at a time: slower on a cold run, but it
+      # completes, saves the cache, and later runs restore it and stay fast.
+      CARGO_BUILD_JOBS: "1"
     steps:
       - uses: actions/checkout@v4
 
