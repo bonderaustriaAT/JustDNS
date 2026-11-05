@@ -17,7 +17,7 @@ use duckdb::{Connection, params};
 use std::collections::HashMap;
 
 use crate::event::{QueryEvent, QuerySource};
-use crate::recorder::{HourBucket, Stats};
+use crate::recorder::{HourBucket, LATENCY_BOUNDS_MS, Stats};
 
 /// One hour in milliseconds, used to bucket activity in SQL.
 const HOUR_MS: i64 = 3_600_000;
@@ -147,9 +147,11 @@ impl DuckStore {
     /// time and per-client counts. Used to rehydrate the hot view on startup so a
     /// restart continues the day's figures instead of counting from zero.
     pub(crate) fn day_buckets(&self) -> Result<Vec<HourBucket>, StoreError> {
-        // Per-hour totals for the most recent 24 hours that saw traffic. SUM is
-        // cast back to BIGINT so it reads as an i64 (DuckDB widens a BIGINT sum
-        // to HUGEINT otherwise); per-hour handling time never approaches i64.
+        // Per-hour totals for the most recent 24 hours that saw traffic. The
+        // handling-time sum covers every query, cache hits included, matching the
+        // hot view. SUM is cast back to BIGINT so it reads as an i64 (DuckDB
+        // widens a BIGINT sum to HUGEINT otherwise); per-hour handling time never
+        // approaches i64.
         let mut stmt = self.conn.prepare(&format!(
             "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour,
                     COUNT(*),
@@ -196,10 +198,44 @@ impl DuckStore {
                     buckets[i].add_client(client, count);
                 }
             }
+
+            // Seed the per-hour latency histogram from every query, binned
+            // exactly as the hot view bins a live answer (see `latency_bin`), so
+            // the day's median and p95 survive a restart.
+            let bin_case = latency_bin_case("duration_ms");
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, {bin_case} AS bin, COUNT(*)
+                 FROM queries WHERE at_ms >= ?
+                 GROUP BY hour, bin"
+            ))?;
+            let rows = stmt.query_map([cutoff], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, count(row, 2)?))
+            })?;
+            for row in rows {
+                let (hour, bin, count) = row?;
+                if let (Some(&i), Ok(bin)) = (index.get(&hour), usize::try_from(bin)) {
+                    if let Some(slot) = buckets[i].latency_hist.get_mut(bin) {
+                        *slot += count;
+                    }
+                }
+            }
         }
 
         Ok(buckets)
     }
+}
+
+/// Build the SQL `CASE` that maps `column` (a duration in ms) to a latency
+/// histogram bucket index, from the very bounds the hot view's `latency_bin`
+/// uses — so a rehydrated row lands in the same bucket a live one would. The
+/// final `ELSE` is the overflow bucket past the last bound.
+fn latency_bin_case(column: &str) -> String {
+    let mut sql = String::from("CASE");
+    for (bin, bound) in LATENCY_BOUNDS_MS.iter().enumerate() {
+        sql.push_str(&format!(" WHEN {column} <= {bound} THEN {bin}"));
+    }
+    sql.push_str(&format!(" ELSE {} END", LATENCY_BOUNDS_MS.len()));
+    sql
 }
 
 /// Read a non-negative `COUNT(*)` column as a `u64`.
@@ -406,7 +442,13 @@ mod tests {
         let hour = &buckets[0];
         assert_eq!(hour.count, 3);
         assert_eq!(hour.blocked, 1, "one blocked query");
-        assert_eq!(hour.duration_sum_ms, 12, "10 + 2 + 0");
+        // Every query feeds the handling-time figures: 10 + 2 + 0.
+        assert_eq!(hour.duration_sum_ms, 12, "all three durations summed");
+        // The histogram bins all three: two instant (0 and 2 ms) in the low
+        // buckets, the 10 ms one in the <=16 ms bucket.
+        assert_eq!(hour.latency_hist[0], 1, "0 ms in the <=1 ms bucket");
+        assert_eq!(hour.latency_hist[1], 1, "2 ms in the <=2 ms bucket");
+        assert_eq!(hour.latency_hist[4], 1, "10 ms in the <=16 ms bucket");
         assert_eq!(hour.clients.get(&client_a), Some(&2));
         assert_eq!(hour.clients.get(&client_b), Some(&1));
     }

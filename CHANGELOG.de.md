@@ -4,7 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
-## [0.1.28] - 2026-11-02
+## [0.1.29] - 2026-11-05
+
+- Verbessert: **die Antwortzeit auf der Übersicht lässt sich nicht mehr so leicht
+  verzerren.** Eine einzelne langsame Upstream-Abfrage konnte den reinen
+  Durchschnitt unverhältnismäßig nach oben ziehen — gerade an ruhigen Tagen. Unter
+  dem Wert stehen jetzt zusätzlich **Median und 95. Perzentil**: der Median ist die
+  typische Anfrage — nahe null, wenn das meiste aus dem Cache kommt — während das
+  95. Perzentil weiterhin den langsamen Ausläufer zeigt. So liest sich ein
+  Cache-lastiger Betrieb so schnell, wie er wirklich ist, und ein einzelner
+  Ausreißer dominiert die Zahl nicht mehr.
 
 - Neu: **Geräte erkennen und benennen.** Auf der neuen Seite „Geräte“ gibst du
   den Clients in deinem Netzwerk Namen — einer einzelnen Adresse (z. B.
