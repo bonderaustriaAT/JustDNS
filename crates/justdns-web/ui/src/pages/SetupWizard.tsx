@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { ApiError, api, type BlockLevel, type SpeedProfile } from "../lib/api";
+import { ApiError, api, type SpeedProfile } from "../lib/api";
 import { LANGS, useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import { useAuth } from "../state/auth";
@@ -10,33 +10,22 @@ import styles from "./Wizard.module.css";
 /// Mirrored from the server's own check so a too-short password is caught here.
 const MIN_PASSWORD = 8;
 
-/// The levels the wizard offers, in order of strength. `custom` is never a
-/// choice — it only ever results from hand-tuning later.
-const LEVELS: Exclude<BlockLevel, "custom">[] = ["off", "minimal", "standard", "extreme"];
-
 /// The upstream profiles, reusing the settings page's choice.
 const PROFILES: SpeedProfile[] = ["privacy", "balanced", "speed"];
 
 /// How long to keep query-log entries, in days.
 const RETENTIONS = [7, 30, 90, 365];
 
-/// Coarse false-positive risk per level, driving the coloured note.
-const LEVEL_RISK: Record<string, "low" | "medium" | "high"> = {
-  off: "low",
-  minimal: "low",
-  standard: "low",
-  extreme: "high",
-};
-
 /// Which way the user starts: a fresh guided setup, or restoring a backup file.
 type Mode = "fresh" | "restore";
 
 /// The wizard's steps depend on the chosen mode. The first screen is always the
 /// mode choice; both modes then create the admin account (a backup carries no
-/// login). A fresh setup walks the protection/upstream/finish steps; a restore
-/// only needs the backup file.
+/// login). A fresh setup walks the upstream/finish steps; a restore only needs
+/// the backup file. Blocking uses the global default lists, so there is no
+/// protection step to pick — devices and groups refine it later.
 const STEPS_BY_MODE: Record<Mode, readonly string[]> = {
-  fresh: ["mode", "account", "protection", "upstream", "finish"],
+  fresh: ["mode", "account", "upstream", "finish"],
   restore: ["mode", "account", "restore"],
 };
 
@@ -50,7 +39,6 @@ export function SetupWizard() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [instanceName, setInstanceName] = useState("");
-  const [blockLevel, setBlockLevel] = useState<Exclude<BlockLevel, "custom">>("standard");
   const [speedProfile, setSpeedProfile] = useState<SpeedProfile>("balanced");
   const [retention, setRetention] = useState(7);
   const [backupFile, setBackupFile] = useState<File | null>(null);
@@ -106,7 +94,6 @@ export function SetupWizard() {
         speedProfile,
         logRetentionDays: retention,
       });
-      await api.setBlockLevel(blockLevel);
       return true;
     } catch {
       setError(t("auth.setupFailed"));
@@ -303,33 +290,6 @@ export function SetupWizard() {
             </label>
           )}
 
-          {stepName === "protection" && (
-            <>
-              <div className={styles.segmented} role="group" aria-label={t("wizard.protection.title")}>
-                {LEVELS.map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    className={styles.segment}
-                    data-active={blockLevel === level || undefined}
-                    aria-pressed={blockLevel === level}
-                    onClick={() => setBlockLevel(level)}
-                  >
-                    {t(`wizard.level.${level}` as MessageKey)}
-                  </button>
-                ))}
-              </div>
-              <p className={styles.choiceDesc}>{t(`wizard.level.${blockLevel}Desc` as MessageKey)}</p>
-              <p className={styles.fpNote}>
-                <span className={styles.fpLabel}>{t("wizard.fpLabel")}</span>
-                <span className={styles.fpValue} data-risk={LEVEL_RISK[blockLevel]}>
-                  {t(`wizard.risk.${LEVEL_RISK[blockLevel]}` as MessageKey)}
-                </span>
-                <span className={styles.fpLabel}>· {t(`wizard.level.${blockLevel}Fp` as MessageKey)}</span>
-              </p>
-            </>
-          )}
-
           {stepName === "upstream" && (
             <>
               <div className={styles.segmented} role="group" aria-label={t("wizard.upstream.title")}>
@@ -372,12 +332,6 @@ export function SetupWizard() {
                 <li className={styles.summaryRow}>
                   <span className={styles.summaryLabel}>{t("wizard.summary.name")}</span>
                   <span className={styles.summaryValue}>{instanceName.trim() || "JustDNS"}</span>
-                </li>
-                <li className={styles.summaryRow}>
-                  <span className={styles.summaryLabel}>{t("wizard.summary.protection")}</span>
-                  <span className={styles.summaryValue}>
-                    {t(`wizard.level.${blockLevel}` as MessageKey)}
-                  </span>
                 </li>
                 <li className={styles.summaryRow}>
                   <span className={styles.summaryLabel}>{t("wizard.summary.upstream")}</span>

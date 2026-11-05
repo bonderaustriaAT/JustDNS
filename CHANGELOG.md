@@ -3,6 +3,26 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.30] - 2026-11-05
+
+- New: **per-device and per-group filtering.** Until now JustDNS filtered every
+  client the same. On the "Devices" page you can now give a single device, or a
+  whole **group** of devices, its own rules on top of the global default: switch
+  individual block lists **on** or **off**, and **always allow** or **always
+  block** individual domains — an allow still wins over any block. Rules stack:
+  a device inherits its group's rules, and the group inherits the global default,
+  so you only set what differs. Each editor shows "Active here", the block lists
+  that actually apply once everything is folded together. Create groups in the new
+  "Groups" section and assign a device to one from its editor. Everything is
+  included in backups.
+
+- Changed: **the "protection strength" level is gone.** The old Off / Minimal /
+  Standard / Extreme switch (and the matching step in the setup wizard) has been
+  replaced by the global block lists and the ads/malware switches you already see
+  under Settings — that is now the default policy, which devices and groups refine.
+  Your existing lists and switches are untouched; only the extra level control is
+  removed.
+
 ## [0.1.29] - 2026-11-05
 
 - Improved: **the response time on the overview is harder to skew now.** A single

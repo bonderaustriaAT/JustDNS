@@ -17,10 +17,10 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
 ## Highlights
 
 - **Blockt Werbung, Tracker und Schadsoftware** von Haus aus, mit kuratierten
-  [Hagezi](https://github.com/hagezi/dns-blocklists)-Listen. Ein Schalter für die
-  **Schutz-Stärke** (Aus / Minimal / Standard / Extrem) aktiviert die passenden
-  Listen für dich; eigene Allow-/Block-Einträge oder Listen-Abos jederzeit
-  ergänzbar.
+  [Hagezi](https://github.com/hagezi/dns-blocklists)-Listen. Schalte die
+  eingebauten Kategorien an oder aus, ergänze jederzeit eigene Allow-/Block-
+  Einträge oder Listen-Abos und gib jedem **Gerät oder jeder Gruppe** eigene
+  Regeln obendrauf.
 - **Privat von Anfang an.** Standardmäßig datenschutzfreundliche EU-Resolver
   (DNS4EU, Quad9) über **DNS-over-TLS**, um die Wette abgefragt. Nutze eigene
   Resolver — Klartext, DoT oder DoH — oder wähle ein Profil **Privatsphäre /
@@ -34,9 +34,12 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
 - **Alles im Blick.** Ein Live-Dashboard und ein durchsuchbares Anfrage-Protokoll
   (was gefragt wurde, von welchem Gerät, wie es beantwortet wurde und worauf es
   auflöste).
+- **Richtlinien pro Gerät & Gruppe.** Gib einem einzelnen Gerät oder einer ganzen
+  Gruppe eigene Sperrlisten und Erlauben/Sperren-Regeln. Die Regeln stapeln sich —
+  globale Vorgabe → Gruppe → Gerät — du stellst also nur ein, was abweicht.
 - **Geführte Einrichtung.** Ein Assistent beim ersten Start führt durch
-  Administratorkonto, Schutz-Stärke, Resolver und Aufbewahrung. Oberfläche auf
-  **Deutsch und Englisch**.
+  Administratorkonto, Resolver und Aufbewahrung. Oberfläche auf **Deutsch und
+  Englisch**.
 
 ## Schnellstart (Docker)
 

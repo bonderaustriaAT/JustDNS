@@ -17,9 +17,9 @@ box.
 ## Highlights
 
 - **Blocks ads, trackers and malware** out of the box, using curated
-  [Hagezi](https://github.com/hagezi/dns-blocklists) lists. One **protection
-  strength** switch (Off / Minimal / Standard / Extreme) turns on the right lists
-  for you; add your own allow/block entries or list subscriptions any time.
+  [Hagezi](https://github.com/hagezi/dns-blocklists) lists. Switch the built-in
+  categories on or off, add your own allow/block entries or list subscriptions any
+  time, and give any **device or group** its own rules on top.
 - **Private by default.** Ships with privacy-friendly EU resolvers (DNS4EU,
   Quad9) over **DNS-over-TLS**, raced for speed. Swap in your own resolvers —
   plaintext, DoT or DoH — or pick a **Privacy / Balanced / Speed** profile.
@@ -31,9 +31,11 @@ box.
   endpoints, network-wide.
 - **See everything.** A live dashboard and a searchable query log (what was
   asked, by which device, how it was answered, and what it resolved to).
+- **Per-device & per-group policies.** Give a single device or a whole group its
+  own block lists and allow/block rules. Rules stack — global default → group →
+  device — so you only set what differs.
 - **Guided setup.** A first-run wizard walks you through the admin account,
-  protection strength, resolvers and log retention. Interface in **German and
-  English**.
+  resolvers and log retention. Interface in **German and English**.
 
 ## Quick start (Docker)
 
