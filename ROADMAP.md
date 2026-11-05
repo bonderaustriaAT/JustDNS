@@ -9,7 +9,13 @@ The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
 release is v0.1.28 (recognise and name your devices).
 
-## Phase 1 — Insight & quick wins
+**How to read this:** a ticked box (`[x]`) means the feature has shipped — the
+[changelog](CHANGELOG.md) has the details. An open box (`[ ]`) is still planned.
+The phases run roughly from near-term to long-term.
+
+---
+
+## Phase 1 — Insight & quick wins _(shipped)_
 
 - [x] **Live statistics.** A live query rate (per second or per minute,
   switchable), last-24h figures (total queries, blocked by filters, average
@@ -32,7 +38,7 @@ release is v0.1.28 (recognise and name your devices).
   go. Pulled forward as an early win; it wraps the dashboard you already have, so
   full native apps can stay later (Phase 6).
 
-## Phase 2 — Devices & policies
+## Phase 2 — Devices & policies _(in progress)_
 
 - [x] **Recognise & name clients.** Map a client IP (or a CIDR range) to a
   friendly device name and see which devices are active, so logs and stats read in
@@ -43,26 +49,26 @@ release is v0.1.28 (recognise and name your devices).
 - [ ] **Deeper statistics.** Average response time per resolver (which upstream
   answered and how fast), and the top domains per client.
 
-## Phase 3 — Time & access
+## Phase 3 — Time & access _(planned)_
 
 - [ ] **Schedules.** Block chosen services or lists during time windows, per
   device or group — kids' hours, focus time, bedtime.
 - [ ] **Users & roles.** More than one administrator, read-only accounts, and a
   basic record of who changed what.
 
-## Phase 4 — Encryption & reach
+## Phase 4 — Encryption & reach _(planned)_
 
 - [ ] **Encrypted client DNS.** Run JustDNS itself as a DNS-over-TLS and
   DNS-over-HTTPS endpoint, so your own devices connect to it encrypted — not only
   its upstream resolvers.
 
-## Phase 5 — High availability
+## Phase 5 — High availability _(planned)_
 
 - [ ] **Two-server operation.** Run a second JustDNS that stays in sync — lists,
   configuration, rewrites and (optionally) statistics — with automatic failover,
   so DNS keeps working while one node is down or being updated.
 
-## Phase 6 — Apps
+## Phase 6 — Apps _(planned)_
 
 - [ ] **Native Android & iOS apps.** Dedicated apps on top of the web app, for a
   first-class mobile experience and tighter operating-system integration. The
