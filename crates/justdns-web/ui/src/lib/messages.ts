@@ -220,6 +220,8 @@ const de = {
   // Devices (named clients) page.
   "clients.title": "Geräte",
   "clients.lead": "Gib den Geräten im Netzwerk Namen, damit Protokoll und Statistik in Namen statt IP-Adressen sprechen.",
+  "clients.devicesTitle": "Geräte",
+  "clients.listTitle": "Benannte & gesehene Geräte",
   "clients.hint": "Ordne einer Client-Adresse einen Namen zu — eine einzelne IP (192.168.20.10) oder einen Bereich in CIDR-Form (192.168.30.0/24). Eine einzelne IP gewinnt vor einem Bereich. Die Zuordnung ist reine Anzeige und ändert nichts an der Auflösung.",
   "clients.loadFailed": "Die Geräte konnten nicht geladen werden.",
   "clients.badInput": "Adresse/Bereich oder Name ist ungültig.",
@@ -265,6 +267,10 @@ const de = {
   "clients.groupGone": "Gruppe entfernt",
   "clients.ownPolicy": "Eigene Regeln",
   "clients.listsLabel": "Sperrlisten",
+  "clients.listStateHint":
+    "Je Liste: „Erben“ folgt der übergeordneten Ebene (global bzw. Gruppe) und zieht mit, wenn du sie dort umstellst. „An“ erzwingt die Liste hier, auch wenn sie oben aus ist. „Aus“ schaltet sie hier ab, auch wenn sie oben an ist — nützlich, um eine überall aktive Liste für ein einzelnes Gerät auszunehmen.",
+  "clients.noFeedsHint":
+    "Nur die eingebauten Objekte stehen bereit. Weitere Listen erscheinen hier, sobald du unter „Block/Allow → Fertige Listen“ eine Sperrliste aktivierst oder eine eigene Sperrliste per URL hinzufügst.",
   "clients.list.inherit": "Erben",
   "clients.list.on": "An",
   "clients.list.off": "Aus",
@@ -722,6 +728,8 @@ const en: Catalog = {
   // Devices (named clients) page.
   "clients.title": "Devices",
   "clients.lead": "Give the devices on your network names, so the log and statistics speak in names instead of IP addresses.",
+  "clients.devicesTitle": "Devices",
+  "clients.listTitle": "Named & seen devices",
   "clients.hint": "Map a client address to a name — a single IP (192.168.20.10) or a range in CIDR form (192.168.30.0/24). A single IP wins over a range. Naming is display only and changes nothing about resolution.",
   "clients.loadFailed": "The devices could not be loaded.",
   "clients.badInput": "The address/range or the name is invalid.",
@@ -767,6 +775,10 @@ const en: Catalog = {
   "clients.groupGone": "Group removed",
   "clients.ownPolicy": "Own rules",
   "clients.listsLabel": "Block lists",
+  "clients.listStateHint":
+    "Per list: “Inherit” follows the level above (global, or the group) and tracks any change you make there. “On” forces the list on here, even when it is off above. “Off” switches it off here, even when it is on above — handy to exempt a single device from a list that is on everywhere.",
+  "clients.noFeedsHint":
+    "Only the built-in objects are available. More lists appear here once you enable a block list under “Block/Allow → Curated lists” or add your own block list by URL.",
   "clients.list.inherit": "Inherit",
   "clients.list.on": "On",
   "clients.list.off": "Off",

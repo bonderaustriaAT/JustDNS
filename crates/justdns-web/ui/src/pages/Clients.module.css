@@ -382,6 +382,15 @@
   color: var(--text-muted);
 }
 
+/* Shown when a scope has only the two built-in objects, pointing at where more
+   block lists come from so the short list is not read as a hard limit. */
+.listsEmptyHint {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  margin-block-start: var(--space-1);
+  max-inline-size: var(--measure);
+}
+
 /* A three-way segmented switch (inherit / on / off), styled like the settings
    profile switch so the two read as one control family. */
 .listSwitch {
@@ -474,21 +483,78 @@
   padding: 0 var(--space-2);
 }
 
-/* The groups panel sits below the devices list, separated by a rule. */
+/* The groups panel sits at the top of the page, above the devices list. */
 .groups {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* The devices block sits below the groups panel, separated by a rule. */
+.devices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
   padding-block-start: var(--space-5);
   border-block-start: 2px solid var(--line);
 }
 
-.groupsTitle {
+.groupsTitle,
+.sectionTitle {
   font-size: var(--step-2);
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+/* The device list's collapse toggle: a full-width row showing the list name and
+   a count, with a chevron that turns as it opens. */
+.listToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  text-align: start;
+}
+
+.listToggle:hover {
+  border-color: var(--text-muted);
+}
+
+.listToggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.listChevron {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  inline-size: 1rem;
+  text-align: center;
+}
+
+.listToggleText {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.listCount {
+  flex: none;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill, 999px);
+  padding: 0 var(--space-2);
 }
 
 .groupAdd {

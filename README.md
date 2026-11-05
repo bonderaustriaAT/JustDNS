@@ -98,6 +98,13 @@ the **block** check (a blocked name is refused before any lookup), then the
 Every handled query is recorded to a local DuckDB log that feeds the dashboard —
 and never leaves the machine.
 
+## Guides
+
+Step-by-step guides for every feature, in plain language (German and English),
+live in the **[handbook](docs/README.md)** ([Deutsch](docs/README.de.md)). New to
+JustDNS? Start with [first-run setup](docs/guides/setup.md), then
+[the overview](docs/guides/overview.md).
+
 ## Roadmap & changelog
 
 - Where JustDNS is headed: [ROADMAP.md](ROADMAP.md)

@@ -7,8 +7,9 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.30
-(Filterung pro Gerät und pro Gruppe).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.31
+(Filterung pro Gerät und pro Gruppe, mit Bedien-Verbesserungen auf der
+Geräte-Seite).
 
 **So liest sich der Fahrplan:** ein angehaktes Kästchen (`[x]`) heißt, die
 Funktion ist fertig — Details stehen im [Änderungsverlauf](CHANGELOG.de.md). Ein

@@ -228,7 +228,9 @@ function devicePolicyBody(policy: DevicePolicy): Record<string, unknown> {
 export interface Group {
   id: string;
   name: string;
-  policy: PolicyDelta;
+  /** Absent when the group's delta is empty — the server omits an empty delta,
+   *  so treat a missing policy as {@link emptyDelta}. */
+  policy?: PolicyDelta;
 }
 
 /** One switchable block object the policy editor offers: the two built-ins

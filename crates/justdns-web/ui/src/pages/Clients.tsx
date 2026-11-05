@@ -144,6 +144,10 @@ export function Clients() {
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ClientRow | null>(null);
 
+  // The device list can grow long, so it collapses by default — the groups
+  // panel sits above it and stays reachable without scrolling past every device.
+  const [devicesOpen, setDevicesOpen] = useState(false);
+
   useEffect(() => {
     const controller = new AbortController();
     api
@@ -221,63 +225,86 @@ export function Clients() {
 
       {error && <p className={styles.banner}>{error}</p>}
 
-      <form className={styles.addForm} onSubmit={submitAdd}>
-        <div className={styles.addRow}>
+      {view && <GroupsSection view={view} run={run} pending={pending} />}
+
+      <section className={styles.devices}>
+        <h2 className={styles.sectionTitle}>
+          {t("clients.devicesTitle")}
+          <InfoHint label={t("clients.devicesTitle")} text={t("clients.hint")} />
+        </h2>
+
+        <form className={styles.addForm} onSubmit={submitAdd}>
+          <div className={styles.addRow}>
+            <input
+              className={styles.input}
+              value={target}
+              onChange={(event) => setTarget(event.target.value)}
+              placeholder={t("clients.targetPlaceholderAdd")}
+              aria-label={t("clients.targetAria")}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <input
+              ref={nameRef}
+              className={styles.input}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={t("clients.namePlaceholder")}
+              aria-label={t("clients.nameAria")}
+              autoComplete="off"
+            />
+            <select
+              className={styles.select}
+              value={kind}
+              onChange={(event) => setKind(event.target.value as DeviceKind)}
+              aria-label={t("clients.kindAria")}
+            >
+              {KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {t(`clients.kind.${k}` as MessageKey)}
+                </option>
+              ))}
+            </select>
+            <button className={styles.addButton} type="submit" disabled={pending.has("add")}>
+              {t("clients.add")}
+            </button>
+          </div>
           <input
             className={styles.input}
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-            placeholder={t("clients.targetPlaceholderAdd")}
-            aria-label={t("clients.targetAria")}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <input
-            ref={nameRef}
-            className={styles.input}
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t("clients.namePlaceholder")}
-            aria-label={t("clients.nameAria")}
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder={t("clients.notePlaceholder")}
+            aria-label={t("clients.noteAria")}
             autoComplete="off"
           />
-          <select
-            className={styles.select}
-            value={kind}
-            onChange={(event) => setKind(event.target.value as DeviceKind)}
-            aria-label={t("clients.kindAria")}
-          >
-            {KINDS.map((k) => (
-              <option key={k} value={k}>
-                {t(`clients.kind.${k}` as MessageKey)}
-              </option>
-            ))}
-          </select>
-          <button className={styles.addButton} type="submit" disabled={pending.has("add")}>
-            {t("clients.add")}
-          </button>
-        </div>
-        <input
-          className={styles.input}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder={t("clients.notePlaceholder")}
-          aria-label={t("clients.noteAria")}
-          autoComplete="off"
-        />
-      </form>
+        </form>
 
-      <p className={styles.windowHint}>
-        {t("clients.activeWindowHint", { minutes: activeMinutes })}
-      </p>
+        <p className={styles.windowHint}>
+          {t("clients.activeWindowHint", { minutes: activeMinutes })}
+        </p>
 
-      {view === null ? (
-        <p className={styles.empty}>{t("clients.loadFailed")}</p>
-      ) : view.clients.length === 0 ? (
-        <p className={styles.empty}>{t("clients.empty")}</p>
-      ) : (
-        <ul className={styles.entries}>
-          {view.clients.map((row) => {
+        {view === null ? (
+          <p className={styles.empty}>{t("clients.loadFailed")}</p>
+        ) : view.clients.length === 0 ? (
+          <p className={styles.empty}>{t("clients.empty")}</p>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={styles.listToggle}
+              aria-expanded={devicesOpen}
+              aria-controls="device-list"
+              onClick={() => setDevicesOpen((open) => !open)}
+            >
+              <span className={styles.listChevron} aria-hidden="true">
+                {devicesOpen ? "▾" : "▸"}
+              </span>
+              <span className={styles.listToggleText}>{t("clients.listTitle")}</span>
+              <span className={styles.listCount}>{nf.current.format(view.clients.length)}</span>
+            </button>
+            {devicesOpen && (
+              <ul id="device-list" className={styles.entries}>
+                {view.clients.map((row) => {
             const key = row.target;
             const isEditing = editing === key;
             return (
@@ -367,11 +394,12 @@ export function Clients() {
                 )}
               </li>
             );
-          })}
-        </ul>
-      )}
-
-      {view && <GroupsSection view={view} run={run} pending={pending} />}
+                })}
+              </ul>
+            )}
+          </>
+        )}
+      </section>
 
       {confirming && (
         <ConfirmDialog
@@ -542,11 +570,18 @@ function PolicyEditor({
 }) {
   const { t } = useI18n();
   const states: ListState[] = ["inherit", "on", "off"];
+  // Only the two built-in objects (ads, malware) are always present; any further
+  // entry is a block feed the user enabled. With none, point them at where more
+  // lists come from, so an empty-looking editor is not mistaken for a limit.
+  const hasFeeds = lists.some((list) => list.id !== "ads" && list.id !== "malware");
 
   return (
     <div className={styles.policy}>
       <div className={styles.policyLists}>
-        <span className={styles.policyLabel}>{t("clients.listsLabel")}</span>
+        <span className={styles.policyLabel}>
+          {t("clients.listsLabel")}
+          <InfoHint label={t("clients.listsLabel")} text={t("clients.listStateHint")} />
+        </span>
         {lists.map((list) => {
           const state = listStateOf(delta, list.id);
           const inheritedOn = inherited.has(list.id);
@@ -579,6 +614,7 @@ function PolicyEditor({
             </div>
           );
         })}
+        {hasFeeds ? null : <p className={styles.listsEmptyHint}>{t("clients.noFeedsHint")}</p>}
       </div>
       <div className={styles.policyDomains}>
         <label className={styles.policyDomain}>
@@ -755,7 +791,7 @@ function GroupEditor({
 }) {
   const { t } = useI18n();
   const [name, setName] = useState(group.name);
-  const [delta, setDelta] = useState<PolicyDelta>(group.policy);
+  const [delta, setDelta] = useState<PolicyDelta>(group.policy ?? emptyDelta());
 
   const inherited = effectiveLists(lists, []);
   const active = effectiveLists(lists, [delta]);

@@ -3,6 +3,24 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.1.31] - 2026-11-05
+
+- Fixed: **editing a group no longer opens a blank page.** Opening the editor of a
+  freshly created group (one with no rules yet) could leave the page empty. It now
+  opens correctly every time.
+
+- Changed: **the Groups section now sits at the top of the Devices page**, and the
+  list of devices is **collapsed by default** behind a labelled toggle with a count.
+  Groups are reachable without first scrolling past every device, and you expand the
+  device list only when you need it.
+
+- Improved: **the per-device and per-group list controls explain themselves.** The
+  three-way switch next to each block list now carries a short explanation of
+  **Inherit / On / Off** (in particular that "Off" keeps a list off for this scope
+  even when it is on above). When only the two built-in objects are available, a hint
+  points you to where more lists come from — enable a block list under the curated
+  lists, or add your own by URL, and it appears here to assign per device or group.
+
 ## [0.1.30] - 2026-11-05
 
 - New: **per-device and per-group filtering.** Until now JustDNS filtered every
