@@ -13,12 +13,14 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use hickory_proto::op::Message;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, UdpSocket};
+use tokio_rustls::TlsAcceptor;
 use tracing::warn;
 
 use crate::pipeline::Pipeline;
 use crate::router::Resolve;
+use crate::tls::TlsManager;
 
 /// A UDP datagram large enough for an EDNS-advertised buffer.
 const UDP_RECV_BUFFER: usize = 4096;
@@ -35,6 +37,12 @@ where
         Self {
             pipeline: Arc::new(pipeline),
         }
+    }
+
+    /// A shared handle to the pipeline, so the encrypted-DNS listeners (DoT/DoH)
+    /// can run the same filtering and caching as the plain port-53 server.
+    pub fn pipeline(&self) -> Arc<Pipeline<R>> {
+        self.pipeline.clone()
     }
 
     /// Bind UDP and TCP on `addr` and serve until one listener fails.
@@ -114,14 +122,50 @@ where
     truncated(response).to_vec().ok()
 }
 
-/// A DNS-over-TCP connection: each message is framed by a two-byte length.
-async fn handle_stream<R>(
-    mut stream: TcpStream,
+/// Serve DNS-over-TLS (RFC 7858) on `addr`: a TLS-wrapped, length-framed TCP
+/// stream. The same wire handling as plain TCP runs over the decrypted stream,
+/// and the peer address is the real client IP, so per-device policies apply
+/// unchanged. The server config is read per connection, so a certificate change
+/// takes effect for new connections without rebinding.
+pub async fn serve_dot<R>(
+    addr: SocketAddr,
+    pipeline: Arc<Pipeline<R>>,
+    tls: Arc<TlsManager>,
+) -> io::Result<()>
+where
+    R: Resolve + Send + Sync + 'static,
+{
+    let listener = TcpListener::bind(addr).await?;
+    loop {
+        let (stream, peer) = listener.accept().await?;
+        let pipeline = pipeline.clone();
+        let acceptor = TlsAcceptor::from(tls.dot_config());
+        tokio::spawn(async move {
+            let stream = match acceptor.accept(stream).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    warn!(%peer, %error, "DoT TLS handshake failed");
+                    return;
+                }
+            };
+            if let Err(error) = handle_stream(stream, &pipeline, peer.ip()).await {
+                warn!(%peer, %error, "DoT connection ended on error");
+            }
+        });
+    }
+}
+
+/// A DNS-over-TCP connection: each message is framed by a two-byte length. The
+/// stream is generic so the same handler serves plain TCP and the decrypted DoT
+/// stream.
+async fn handle_stream<R, S>(
+    mut stream: S,
     pipeline: &Pipeline<R>,
     client: IpAddr,
 ) -> io::Result<()>
 where
     R: Resolve + Send + Sync + 'static,
+    S: AsyncRead + AsyncWrite + Unpin,
 {
     loop {
         let mut length = [0u8; 2];
@@ -246,6 +290,35 @@ mod tests {
         assert!(decoded.truncated());
         assert!(decoded.answers().is_empty());
         assert_eq!(decoded.id(), 1234);
+    }
+
+    #[tokio::test]
+    async fn stream_round_trip_is_length_framed() {
+        // The generic handler must serve a length-framed exchange over any
+        // async stream (here an in-memory duplex standing in for a TLS stream).
+        let pipe = pipeline(1);
+        let (mut client, server) = tokio::io::duplex(4096);
+
+        let handler = tokio::spawn(async move { handle_stream(server, &pipe, CLIENT).await });
+
+        let request = request_bytes(RecordType::A);
+        let length = u16::try_from(request.len()).unwrap().to_be_bytes();
+        client.write_all(&length).await.unwrap();
+        client.write_all(&request).await.unwrap();
+        client.flush().await.unwrap();
+
+        let mut reply_length = [0u8; 2];
+        client.read_exact(&mut reply_length).await.unwrap();
+        let mut reply = vec![0u8; usize::from(u16::from_be_bytes(reply_length))];
+        client.read_exact(&mut reply).await.unwrap();
+
+        let decoded = Message::from_vec(&reply).unwrap();
+        assert_eq!(decoded.id(), 1234);
+        assert_eq!(decoded.answers().len(), 1);
+
+        // Closing the client ends the connection cleanly.
+        drop(client);
+        handler.await.unwrap().expect("clean close");
     }
 
     #[tokio::test]

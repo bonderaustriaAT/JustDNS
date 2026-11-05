@@ -24,6 +24,9 @@ const DEFAULT_LISTS_PATH: &str = "lists.json";
 const DEFAULT_LISTS_CACHE: &str = "lists-cache";
 const DEFAULT_REWRITES_PATH: &str = "rewrites.json";
 const DEFAULT_CLIENTS_PATH: &str = "clients.json";
+const DEFAULT_DOT_LISTEN: &str = "0.0.0.0:853";
+const DEFAULT_DOH_LISTEN: &str = "0.0.0.0:8443";
+const DEFAULT_TLS_DIR: &str = "tls";
 
 #[derive(Debug)]
 pub struct Config {
@@ -51,6 +54,13 @@ pub struct Config {
     /// the explicitly configured upstreams alone (used by local/test setups);
     /// when false the profile also chooses which resolvers are used.
     pub upstreams_overridden: bool,
+    /// Where DNS-over-TLS (RFC 7858) listens when enabled in the settings.
+    pub dot_listen: SocketAddr,
+    /// Where DNS-over-HTTPS (RFC 8484) listens when enabled in the settings.
+    pub doh_listen: SocketAddr,
+    /// Directory holding the server TLS certificate and key for the encrypted
+    /// client-DNS endpoints. Lives on `/data` so it survives image updates.
+    pub tls_dir: PathBuf,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -134,6 +144,32 @@ impl Config {
             None => (UpstreamConfig::eu_defaults(), false),
         };
 
+        let dot_listen = parse_var(
+            "JUSTDNS_DOT_LISTEN",
+            DEFAULT_DOT_LISTEN.parse().unwrap(),
+            |value| {
+                value.parse().map_err(|source| ConfigError::BadAddress {
+                    var: "JUSTDNS_DOT_LISTEN",
+                    source,
+                })
+            },
+        )?;
+
+        let doh_listen = parse_var(
+            "JUSTDNS_DOH_LISTEN",
+            DEFAULT_DOH_LISTEN.parse().unwrap(),
+            |value| {
+                value.parse().map_err(|source| ConfigError::BadAddress {
+                    var: "JUSTDNS_DOH_LISTEN",
+                    source,
+                })
+            },
+        )?;
+
+        let tls_dir = PathBuf::from(
+            read_var("JUSTDNS_TLS_DIR")?.unwrap_or_else(|| DEFAULT_TLS_DIR.to_owned()),
+        );
+
         Ok(Self {
             listen,
             web_listen,
@@ -148,6 +184,9 @@ impl Config {
             clients_path,
             upstreams,
             upstreams_overridden,
+            dot_listen,
+            doh_listen,
+            tls_dir,
         })
     }
 }

@@ -500,3 +500,127 @@
     gap: var(--space-3);
   }
 }
+
+/* Encrypted client DNS (DoT/DoH) section. */
+.encUnavailable {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.encHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.hostnameControl {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.encFingerprint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.encCode {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.encCertActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.encUpload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.encField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.encTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  resize: vertical;
+}
+
+.encTextarea:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.encEndpoints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.encEndpointRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.encEndpointLabel {
+  min-width: 14ch;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.encEndpointRow .encCode {
+  flex: 1 1 12rem;
+}
+
+.copyButton {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-size: var(--step--1);
+  cursor: pointer;
+}
+
+.copyButton:hover {
+  border-color: var(--line-strong);
+}
+
+@media (max-width: 540px) {
+  .hostnameControl {
+    justify-content: stretch;
+  }
+
+  .encEndpointLabel {
+    min-width: 0;
+  }
+}

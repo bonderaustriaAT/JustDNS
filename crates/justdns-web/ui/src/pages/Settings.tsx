@@ -1,9 +1,16 @@
-import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
-import { ApiError, api } from "../lib/api";
+import { ApiError, api, type CertSource, type TlsSettings, type TlsStatus } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import {
@@ -426,6 +433,329 @@ function BlockResponseControl() {
   );
 }
 
+/** The certificate sources, in the order the switch lists them. */
+const CERT_SOURCES: CertSource[] = ["selfSigned", "uploaded"];
+
+/** A copy-to-clipboard button for an endpoint address. */
+function CopyButton({ value }: { value: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className={styles.copyButton}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // Clipboard blocked (e.g. insecure context): the value is still shown
+          // for the user to select and copy by hand.
+        }
+      }}
+    >
+      {copied ? t("settings.encDns.copied") : t("settings.encDns.copy")}
+    </button>
+  );
+}
+
+/** The encrypted client-DNS section: DoT/DoH toggles, the hostname and
+ *  certificate source, the CA download or certificate upload, the fingerprint,
+ *  and copy-ready endpoint addresses. Backed by the `/api/tls` endpoints rather
+ *  than the shared settings store, so it fetches and saves its own state. */
+function EncryptedDnsSection() {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<TlsStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [hostnameDraft, setHostnameDraft] = useState("");
+  const [cert, setCert] = useState("");
+  const [key, setKey] = useState("");
+  const [uploadState, setUploadState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [regenState, setRegenState] = useState<"idle" | "busy" | "done">("idle");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .tls()
+      .then((loaded) => {
+        if (cancelled) return;
+        setStatus(loaded);
+        setHostnameDraft(loaded.hostname);
+      })
+      .catch(() => {
+        if (!cancelled) setError(t("settings.encDns.saveError"));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Loaded once on mount; `t` is stable enough that re-fetching on a locale
+    // change is not worth the extra request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function patch(partial: Partial<TlsSettings>) {
+    if (!status) return;
+    const next: TlsSettings = {
+      dotEnabled: status.dotEnabled,
+      dohEnabled: status.dohEnabled,
+      hostname: status.hostname,
+      certSource: status.certSource,
+      ...partial,
+    };
+    setError(null);
+    try {
+      const updated = await api.saveTls(next);
+      setStatus(updated);
+      setHostnameDraft(updated.hostname);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : t("settings.encDns.saveError"));
+    }
+  }
+
+  async function downloadCa() {
+    try {
+      const blob = await api.downloadCa();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "justdns-ca.pem";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(t("settings.encDns.saveError"));
+    }
+  }
+
+  async function uploadCert() {
+    setUploadState("busy");
+    setError(null);
+    try {
+      const updated = await api.uploadCert(cert, key);
+      setStatus(updated);
+      setCert("");
+      setKey("");
+      setUploadState("done");
+      window.setTimeout(() => setUploadState("idle"), 2500);
+    } catch (e) {
+      setUploadState("error");
+      setError(e instanceof ApiError ? e.message : t("settings.encDns.saveError"));
+    }
+  }
+
+  async function regenerate() {
+    setRegenState("busy");
+    setError(null);
+    try {
+      const updated = await api.regenerateCert();
+      setStatus(updated);
+      setRegenState("done");
+      window.setTimeout(() => setRegenState("idle"), 2500);
+    } catch (e) {
+      setRegenState("idle");
+      setError(e instanceof ApiError ? e.message : t("settings.encDns.saveError"));
+    }
+  }
+
+  if (!status) {
+    return error ? <p className={styles.encUnavailable}>{error}</p> : null;
+  }
+  if (!status.available) {
+    return <p className={styles.encUnavailable}>{t("settings.encDns.unavailable")}</p>;
+  }
+
+  const hostname = status.hostname.trim();
+  const dotEndpoint = hostname ? `${hostname}:${status.dotPort}` : "";
+  const dohEndpoint = hostname ? `https://${hostname}:${status.dohPort}/dns-query` : "";
+
+  return (
+    <>
+      <Row
+        label={t("settings.encDns.dotLabel")}
+        description={t("settings.encDns.dotDesc")}
+        details={t("settings.encDns.dotDetails")}
+        control={
+          <Toggle
+            label={t("settings.encDns.dotLabel")}
+            checked={status.dotEnabled}
+            onChange={(v) => patch({ dotEnabled: v })}
+          />
+        }
+      />
+      <Row
+        label={t("settings.encDns.dohLabel")}
+        description={t("settings.encDns.dohDesc")}
+        details={t("settings.encDns.dohDetails")}
+        control={
+          <Toggle
+            label={t("settings.encDns.dohLabel")}
+            checked={status.dohEnabled}
+            onChange={(v) => patch({ dohEnabled: v })}
+          />
+        }
+      />
+      <Row
+        label={t("settings.encDns.hostnameLabel")}
+        description={t("settings.encDns.hostnameDesc")}
+        details={t("settings.encDns.hostnameDetails")}
+        control={
+          <div className={styles.hostnameControl}>
+            <input
+              className={styles.select}
+              type="text"
+              value={hostnameDraft}
+              placeholder={t("settings.encDns.hostnamePlaceholder")}
+              aria-label={t("settings.encDns.hostnameLabel")}
+              onChange={(e) => setHostnameDraft(e.target.value)}
+              onBlur={() => {
+                if (hostnameDraft.trim() !== status.hostname) patch({ hostname: hostnameDraft.trim() });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </div>
+        }
+      />
+
+      {!hostname ? <p className={styles.encHint}>{t("settings.encDns.setHostnameFirst")}</p> : null}
+
+      <div className={styles.profile}>
+        <span className={styles.labelLine}>
+          <span className={styles.label}>{t("settings.encDns.certSourceLabel")}</span>
+          <InfoHint
+            label={t("settings.encDns.certSourceLabel")}
+            text={t("settings.encDns.certSourceDetails")}
+          />
+        </span>
+        <div
+          className={styles.profileSwitch}
+          role="group"
+          aria-label={t("settings.encDns.certSourceLabel")}
+        >
+          {CERT_SOURCES.map((source) => (
+            <button
+              key={source}
+              type="button"
+              className={styles.profileButton}
+              data-active={status.certSource === source || undefined}
+              aria-pressed={status.certSource === source}
+              onClick={() => patch({ certSource: source })}
+            >
+              {t(
+                source === "selfSigned"
+                  ? "settings.encDns.certSelfSigned"
+                  : "settings.encDns.certUploaded",
+              )}
+            </button>
+          ))}
+        </div>
+        <p className={styles.profileDesc}>
+          {t(
+            status.certSource === "selfSigned"
+              ? "settings.encDns.certSelfSignedDesc"
+              : "settings.encDns.certUploadedDesc",
+          )}
+        </p>
+      </div>
+
+      {status.fingerprint ? (
+        <div className={styles.encFingerprint}>
+          <span className={styles.label}>{t("settings.encDns.fingerprintLabel")}</span>
+          <code className={styles.encCode}>{status.fingerprint}</code>
+        </div>
+      ) : null}
+
+      {status.certSource === "selfSigned" ? (
+        <div className={styles.encCertActions}>
+          <div className={styles.action}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={downloadCa}
+              disabled={!status.caAvailable}
+            >
+              {t("settings.encDns.caDownload")}
+            </button>
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={regenerate}
+              disabled={regenState === "busy"}
+            >
+              {regenState === "busy"
+                ? t("settings.encDns.regenerateBusy")
+                : regenState === "done"
+                  ? t("settings.encDns.regenerateDone")
+                  : t("settings.encDns.regenerateButton")}
+            </button>
+          </div>
+          <p className={styles.encHint}>{t("settings.encDns.caHint")}</p>
+        </div>
+      ) : (
+        <div className={styles.encUpload}>
+          <label className={styles.encField}>
+            <span className={styles.label}>{t("settings.encDns.uploadCertField")}</span>
+            <textarea
+              className={styles.encTextarea}
+              value={cert}
+              onChange={(e) => setCert(e.target.value)}
+              rows={4}
+              spellCheck={false}
+              placeholder="-----BEGIN CERTIFICATE-----"
+            />
+          </label>
+          <label className={styles.encField}>
+            <span className={styles.label}>{t("settings.encDns.uploadKeyField")}</span>
+            <textarea
+              className={styles.encTextarea}
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              rows={4}
+              spellCheck={false}
+              placeholder="-----BEGIN PRIVATE KEY-----"
+            />
+          </label>
+          <div className={styles.action}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={uploadCert}
+              disabled={uploadState === "busy" || !cert.trim() || !key.trim()}
+            >
+              {uploadState === "busy"
+                ? t("settings.encDns.uploadBusy")
+                : uploadState === "done"
+                  ? t("settings.encDns.uploadDone")
+                  : t("settings.encDns.uploadButton")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {hostname ? (
+        <div className={styles.encEndpoints}>
+          <span className={styles.resolversTitle}>{t("settings.encDns.endpointsTitle")}</span>
+          <div className={styles.encEndpointRow}>
+            <span className={styles.encEndpointLabel}>{t("settings.encDns.dotEndpointLabel")}</span>
+            <code className={styles.encCode}>{dotEndpoint}</code>
+            <CopyButton value={dotEndpoint} />
+          </div>
+          <div className={styles.encEndpointRow}>
+            <span className={styles.encEndpointLabel}>{t("settings.encDns.dohEndpointLabel")}</span>
+            <code className={styles.encCode}>{dohEndpoint}</code>
+            <CopyButton value={dohEndpoint} />
+          </div>
+        </div>
+      ) : null}
+
+      {error ? <p className={styles.actionError}>{error}</p> : null}
+    </>
+  );
+}
+
 export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -437,6 +767,9 @@ export function Settings() {
     const base: CategoryMeta[] = [
       { id: "schutz", titleKey: "settings.cat.schutz" },
       { id: "upstream", titleKey: "settings.cat.upstream" },
+      // Encrypted client DNS (DoT/DoH) stays visible even outside expert mode:
+      // pointing your own devices at it is a headline user-facing capability.
+      { id: "verschluesseltesDns", titleKey: "settings.cat.verschluesseltesDns" },
       // Backup & restore stays visible even outside expert mode: making a
       // safety copy is a headline user-facing action, not a technical knob.
       { id: "sicherung", titleKey: "settings.cat.sicherung" },
@@ -695,6 +1028,16 @@ export function Settings() {
                 details={t("settings.clearCacheDetails")}
                 control={<ClearCacheButton />}
               />
+            </Category>
+          )}
+
+          {active === "verschluesseltesDns" && (
+            <Category
+              id="verschluesseltesDns"
+              title={t("settings.cat.verschluesseltesDns")}
+              description={t("settings.encDns.desc")}
+            >
+              <EncryptedDnsSection />
             </Category>
           )}
 
