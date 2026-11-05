@@ -45,10 +45,6 @@ export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 /// eagerly answers are cached. Matches the Rust `SpeedProfile`.
 export type SpeedProfile = "privacy" | "balanced" | "speed";
 
-/// How hard JustDNS blocks, as one plain choice. Matches the Rust `BlockLevel`.
-/// "custom" means the active lists match no level (hand-tuned).
-export type BlockLevel = "off" | "minimal" | "standard" | "extreme" | "custom";
-
 /// How a user-defined resolver is reached. Matches the Rust `CustomTransport`.
 export type CustomTransport = "plain" | "dot" | "doh";
 
@@ -80,9 +76,6 @@ export interface ServerSettings {
   ipv6: boolean;
   queryLog: boolean;
   logRetentionDays: number;
-  /// The blocking strength as one plain choice; "custom" when the active lists
-  /// match no level. Changed via `setBlockLevel`, not a plain settings save.
-  blockLevel: BlockLevel;
   /// A display name for this instance, shown in the header.
   instanceName: string;
   /// What a blocked name is answered with: the null IP (default) or NXDOMAIN.
@@ -194,19 +187,76 @@ export type DeviceKind =
   | "router"
   | "other";
 
+/** The filtering delta a scope (group or device) layers on what it inherits
+ *  (global → group → device). Every field is additive except `listsDisabled`,
+ *  which switches an inherited list off. List references are the ids from the
+ *  catalogue (`ListObject.id`): a feed subscription id, or `ads`/`malware`.
+ *  Matches the Rust `PolicyDelta`. */
+export interface PolicyDelta {
+  /** List ids switched on in addition to what is inherited. */
+  listsAdded: string[];
+  /** Inherited list ids switched off for this scope. */
+  listsDisabled: string[];
+  /** Domains this scope always allows (an allow wins over every block). */
+  allow: string[];
+  /** Domains this scope always blocks. */
+  block: string[];
+}
+
+/** An empty delta, for a fresh scope. */
+export function emptyDelta(): PolicyDelta {
+  return { listsAdded: [], listsDisabled: [], allow: [], block: [] };
+}
+
+/** A device's policy as the client holds it while editing: its group (or null
+ *  for ungrouped) and its own delta. Sent to the server flattened, matching the
+ *  Rust `DevicePolicyInput`. */
+export interface DevicePolicy {
+  group: string | null;
+  delta: PolicyDelta;
+}
+
+/** Flatten a `DevicePolicy` into the wire shape the server expects: the group
+ *  alongside the delta's own fields. */
+function devicePolicyBody(policy: DevicePolicy): Record<string, unknown> {
+  return { group: policy.group, ...policy.delta };
+}
+
+/** A named group of devices with its own delta. Devices reference it by `id`;
+ *  the delta applies between the global default and the device's own delta.
+ *  Matches the Rust `Group`. */
+export interface Group {
+  id: string;
+  name: string;
+  policy: PolicyDelta;
+}
+
+/** One switchable block object the policy editor offers: the two built-ins
+ *  (`ads`, `malware`) and every block feed. `globalOn` is its state in the
+ *  global default, so a scope that neither adds nor disables it inherits this. */
+export interface ListObject {
+  id: string;
+  label: string;
+  globalOn: boolean;
+}
+
 /** A named client (device): the address or CIDR range it matches, a display
- *  name, an optional note and a kind. Matches the Rust `Device`. */
+ *  name, an optional note, a kind, its group and its own policy delta. Matches
+ *  the Rust `Device`. */
 export interface Device {
   target: string;
   name: string;
   note?: string;
   kind: DeviceKind;
+  group?: string;
+  policy: PolicyDelta;
 }
 
 /** One row of the devices view: a named device or a seen-but-unnamed client,
  *  with its recent footprint. For a named device `target` is its address or
  *  range and `name`/`note`/`kind` describe it; for an unnamed client `target`
- *  is the bare address and `name` is absent. `known` tells the two apart. */
+ *  is the bare address and `name` is absent. `known` tells the two apart.
+ *  `group`/`policy` are present only for named devices. */
 export interface ClientRow {
   target: string;
   isRange: boolean;
@@ -217,12 +267,17 @@ export interface ClientRow {
   count: number;
   lastSeenMs?: number;
   active: boolean;
+  group?: string;
+  policy?: PolicyDelta;
 }
 
-/** Everything the devices view shows: the rows and the active-window the rows
- *  were aged by (seconds since last query that still counts as active). */
+/** Everything the devices view shows: the device rows, the groups, the list
+ *  catalogue the policy editor draws from, and the active-window the rows were
+ *  aged by (seconds since last query that still counts as active). */
 export interface ClientsView {
   clients: ClientRow[];
+  groups: Group[];
+  lists: ListObject[];
   activeWindowSecs: number;
 }
 
@@ -351,15 +406,6 @@ export const api = {
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/api/settings", signal),
   saveSettings: (settings: ServerSettings, signal?: AbortSignal) =>
     putJson<ServerSettings>("/api/settings", settings, signal),
-  /** Apply a block level: the server toggles the matching feeds and switches,
-   *  stores the level, and returns the fresh settings and lists. "custom" is not
-   *  applicable and is rejected. */
-  setBlockLevel: (level: BlockLevel) =>
-    sendJson<{ settings: ServerSettings; lists: ListsView }>(
-      "PUT",
-      "/api/settings/block-level",
-      { level },
-    ),
   classify: (name: string, signal?: AbortSignal) => {
     const params = new URLSearchParams({ name });
     return getJson<ClassifyResult | null>(`/api/classify?${params}`, signal);
@@ -410,22 +456,54 @@ export const api = {
   /** Remove an address object (refused while a rewrite still references it). */
   removeAlias: (name: string) =>
     sendJson<RewritesView>("DELETE", "/api/aliases", { name }),
-  /** The devices view: named devices plus recently seen unnamed clients. */
+  /** The devices view: named devices plus recently seen unnamed clients, the
+   *  groups and the list catalogue the policy editor draws from. */
   clients: (signal?: AbortSignal) => getJson<ClientsView>("/api/clients", signal),
-  /** Add a device, or replace the name/note/kind of one with the same target. */
-  setClient: (target: string, name: string, kind: DeviceKind, note?: string) =>
-    sendJson<ClientsView>("POST", "/api/clients", { target, name, kind, note }),
-  /** Re-point a device at a new target and replace its name/note/kind. */
+  /** Add a device, or replace the name/note/kind of one with the same target.
+   *  When `policy` is given, the device's group and delta are applied too. */
+  setClient: (
+    target: string,
+    name: string,
+    kind: DeviceKind,
+    note?: string,
+    policy?: DevicePolicy,
+  ) =>
+    sendJson<ClientsView>("POST", "/api/clients", {
+      target,
+      name,
+      kind,
+      note,
+      policy: policy && devicePolicyBody(policy),
+    }),
+  /** Re-point a device at a new target and replace its name/note/kind. When
+   *  `policy` is given, the device's group and delta are applied too. */
   editClient: (
     oldTarget: string,
     target: string,
     name: string,
     kind: DeviceKind,
     note?: string,
-  ) => sendJson<ClientsView>("PUT", "/api/clients", { oldTarget, target, name, kind, note }),
+    policy?: DevicePolicy,
+  ) =>
+    sendJson<ClientsView>("PUT", "/api/clients", {
+      oldTarget,
+      target,
+      name,
+      kind,
+      note,
+      policy: policy && devicePolicyBody(policy),
+    }),
   /** Remove a device by its target. */
   removeClient: (target: string) =>
     sendJson<ClientsView>("DELETE", "/api/clients", { target }),
+  /** Create a group with a name and delta. */
+  addGroup: (name: string, policy: PolicyDelta) =>
+    sendJson<ClientsView>("POST", "/api/groups", { name, ...policy }),
+  /** Rename a group and replace its delta, keyed by its id. */
+  editGroup: (id: string, name: string, policy: PolicyDelta) =>
+    sendJson<ClientsView>("PUT", "/api/groups", { id, name, ...policy }),
+  /** Delete a group; its devices become ungrouped. */
+  removeGroup: (id: string) => sendJson<ClientsView>("DELETE", "/api/groups", { id }),
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
   /** Download the full configuration backup (settings, lists and rewrites) as a

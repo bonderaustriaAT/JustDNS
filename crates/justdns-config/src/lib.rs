@@ -40,29 +40,6 @@ pub enum SpeedProfile {
     Speed,
 }
 
-/// How hard JustDNS blocks, as one plain choice the setup wizard offers and the
-/// settings page shows. Each level stands for a curated set of block feeds plus
-/// the ads/malware switches; the mapping lives in the lists crate, which owns the
-/// catalogue. `Custom` means the active lists match no level — the user has since
-/// tuned them by hand — so it is the default for a config that predates this
-/// field (its lists already stand individually).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BlockLevel {
-    /// No blocking at all.
-    Off,
-    /// A gentle ad/tracker list only.
-    Minimal,
-    /// Ads/trackers plus a malware/phishing list — the recommended default.
-    Standard,
-    /// The strict set: aggressive ad/telemetry lists, malware, and a
-    /// DoH/VPN-bypass list.
-    Extreme,
-    /// The active lists match no level; the user tuned them by hand.
-    #[default]
-    Custom,
-}
-
 /// What JustDNS answers when a name is blocked. `NullIp` hands back the
 /// unroutable null address (`0.0.0.0` for A, `::` for AAAA), so a client's
 /// connection to a blocked host fails at once and apps move on — this is the
@@ -158,10 +135,6 @@ pub struct Settings {
     pub query_log: bool,
     /// How many days log entries are kept.
     pub log_retention_days: u32,
-    /// The blocking strength as one plain choice. The lists crate maps each
-    /// level to a set of feeds plus the ads/malware switches; the web layer
-    /// snaps this to `Custom` when the active lists stop matching the level.
-    pub block_level: BlockLevel,
     /// A display name for this instance, shown in the header. Free text the user
     /// sets in the setup wizard; defaults to "JustDNS".
     pub instance_name: String,
@@ -188,7 +161,6 @@ impl Default for Settings {
             ipv6: false,
             query_log: true,
             log_retention_days: 7,
-            block_level: BlockLevel::Custom,
             instance_name: "JustDNS".to_owned(),
             block_response: BlockResponse::NullIp,
             active_window_secs: 300,
@@ -547,19 +519,30 @@ mod tests {
         assert!(settings.custom_upstreams.is_empty());
         assert_eq!(settings.speed_profile, SpeedProfile::Speed);
         // Fields added later also fall back to their defaults.
-        assert_eq!(settings.block_level, BlockLevel::Custom);
         assert_eq!(settings.instance_name, "JustDNS");
     }
 
     #[test]
-    fn block_level_and_instance_name_round_trip() {
+    fn a_config_with_the_retired_block_level_field_still_loads() {
+        // Older files carried a `blockLevel`; it is gone now, and serde ignores
+        // the unknown field rather than failing the load.
+        let (_dir, path) = temp_path();
+        std::fs::write(
+            &path,
+            r#"{"blockLevel":"extreme","instanceName":"Heimnetz"}"#,
+        )
+        .unwrap();
+        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        assert_eq!(store.get().instance_name, "Heimnetz");
+    }
+
+    #[test]
+    fn instance_name_round_trips() {
         let settings = Settings {
-            block_level: BlockLevel::Standard,
             instance_name: "Heimnetz".to_owned(),
             ..Default::default()
         };
         let json = serde_json::to_string(&settings).unwrap();
-        assert!(json.contains("\"blockLevel\":\"standard\""));
         assert!(json.contains("\"instanceName\":\"Heimnetz\""));
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, settings);
@@ -626,15 +609,6 @@ mod tests {
         next.block_response = BlockResponse::NxDomain;
         store.set(next).unwrap();
         assert!(!flag.load(Ordering::Relaxed), "flag follows the setting");
-    }
-
-    #[test]
-    fn block_level_defaults_to_custom() {
-        assert_eq!(Settings::default().block_level, BlockLevel::Custom);
-        assert_eq!(
-            serde_json::from_str::<BlockLevel>("\"extreme\"").unwrap(),
-            BlockLevel::Extreme
-        );
     }
 
     #[test]

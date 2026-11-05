@@ -1309,6 +1309,7 @@ name = "justdns-filter"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
+ "justdns-clients",
 ]
 
 [[package]]

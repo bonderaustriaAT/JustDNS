@@ -11,7 +11,6 @@ import {
 
 import {
   api,
-  type BlockLevel,
   type BlockResponse,
   type CustomTransport,
   type CustomUpstream,
@@ -20,7 +19,7 @@ import {
   type UpstreamMode,
 } from "../lib/api";
 
-export type { BlockLevel, BlockResponse, CustomTransport, CustomUpstream, SpeedProfile, UpstreamMode };
+export type { BlockResponse, CustomTransport, CustomUpstream, SpeedProfile, UpstreamMode };
 
 /// The full settings the UI works with: the server-persisted fields plus
 /// `expertMode`, a per-browser preference about what the UI reveals that the
@@ -43,7 +42,6 @@ const SERVER_DEFAULTS: ServerSettings = {
   ipv6: false,
   queryLog: true,
   logRetentionDays: 7,
-  blockLevel: "custom",
   instanceName: "JustDNS",
   blockResponse: "null-ip",
   activeWindowSecs: 300,
@@ -64,7 +62,6 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "ipv6",
   "queryLog",
   "logRetentionDays",
-  "blockLevel",
   "instanceName",
   "blockResponse",
   "activeWindowSecs",
@@ -88,9 +85,6 @@ function loadExpertMode(): boolean {
 interface SettingsContextValue {
   settings: Settings;
   update: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-  /// Apply a block level through its own endpoint (it also flips the matching
-  /// ads/malware switches and toggles feeds), then reflect the server's result.
-  applyBlockLevel: (level: BlockLevel) => Promise<void>;
 }
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
@@ -146,16 +140,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [scheduleSave],
   );
 
-  const applyBlockLevel = useCallback(async (level: BlockLevel) => {
-    const result = await api.setBlockLevel(level);
-    // The endpoint returns the fresh settings (level + the switches it moved).
-    setSettings((prev) => ({ ...prev, ...result.settings }));
-  }, []);
-
-  const value = useMemo(
-    () => ({ settings, update, applyBlockLevel }),
-    [settings, update, applyBlockLevel],
-  );
+  const value = useMemo(() => ({ settings, update }), [settings, update]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

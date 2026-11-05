@@ -4,6 +4,27 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.30] - 2026-11-05
+
+- Neu: **Filterung pro Gerät und pro Gruppe.** Bisher hat JustDNS jeden Client
+  gleich gefiltert. Auf der Seite „Geräte“ kannst du jetzt einem einzelnen Gerät
+  oder einer ganzen **Gruppe** von Geräten eigene Regeln zusätzlich zur globalen
+  Vorgabe geben: einzelne Sperrlisten **an**- oder **ausschalten** und einzelne
+  Domains **immer erlauben** oder **immer sperren** — eine Freigabe gewinnt weiter
+  über jede Sperre. Die Regeln stapeln sich: ein Gerät erbt die Regeln seiner
+  Gruppe, die Gruppe erbt die globale Vorgabe — du stellst also nur ein, was
+  abweicht. Jeder Editor zeigt „Hier aktiv“: die Sperrlisten, die nach dem
+  Zusammenfalten wirklich gelten. Gruppen legst du im neuen Bereich „Gruppen“ an
+  und weist ein Gerät in seinem Editor einer Gruppe zu. Alles steckt im Backup.
+
+- Geändert: **die „Schutz-Stärke“-Stufe ist entfallen.** Der bisherige Schalter
+  Aus / Minimal / Standard / Extrem (und der passende Schritt im Einrichtungs-
+  Assistenten) ist durch die globalen Sperrlisten und die Schalter für Werbung/
+  Schadsoftware ersetzt, die du schon unter Einstellungen siehst — das ist jetzt
+  die Standard-Richtlinie, die Geräte und Gruppen verfeinern. Deine vorhandenen
+  Listen und Schalter bleiben unberührt; nur die zusätzliche Stufen-Auswahl fällt
+  weg.
+
 ## [0.1.29] - 2026-11-05
 
 - Verbessert: **die Antwortzeit auf der Übersicht lässt sich nicht mehr so leicht

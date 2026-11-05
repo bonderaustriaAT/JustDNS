@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 arc-swap = "1.7.1"
+justdns-clients = { path = "../justdns-clients" }

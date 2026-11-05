@@ -21,8 +21,10 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use justdns_auth::{SessionStore, UserStore};
-use justdns_clients::{ClientError, ClientResolver, ClientStore, Device, DeviceKind, parse_target};
-use justdns_config::{BlockLevel, ConfigStore, Settings};
+use justdns_clients::{
+    ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
+};
+use justdns_config::{ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
@@ -32,8 +34,6 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
-
-mod levels;
 
 /// Name of the cookie that carries the session token. HttpOnly and
 /// SameSite=Strict; not marked Secure because the dashboard is served over
@@ -167,7 +167,6 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
-        .route("/api/settings/block-level", put(set_block_level))
         .route("/api/classify", get(classify))
         .route("/api/lists", get(get_lists))
         .route(
@@ -203,6 +202,13 @@ fn router(state: AppState) -> Router {
                 .post(set_client)
                 .put(edit_client)
                 .delete(remove_client),
+        )
+        .route(
+            "/api/groups",
+            get(get_groups)
+                .post(add_group)
+                .put(edit_group)
+                .delete(remove_group),
         )
         .route("/api/cache/clear", post(clear_cache))
         .route("/api/backup", get(export_backup))
@@ -506,88 +512,11 @@ struct PresetBody {
 
 async fn set_preset(
     State(lists): State<ListStore>,
-    State(config): State<ConfigStore>,
     Path(key): Path<String>,
     Json(body): Json<PresetBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
     lists.set_preset(&key, body.on).map_err(list_error)?;
-    // Switching a feed by hand may no longer match the stored block level, so
-    // snap the level (usually to Custom) to what the lists now represent.
-    sync_block_level(&lists, &config)?;
     Ok(Json(lists.view()))
-}
-
-/// What a block-level change returns: both the new settings and the lists view,
-/// since applying a level touches each.
-#[derive(Serialize)]
-struct BlockLevelResponse {
-    settings: Settings,
-    lists: ListsView,
-}
-
-/// The body of a block-level change: the level to apply.
-#[derive(Deserialize)]
-struct BlockLevelBody {
-    level: BlockLevel,
-}
-
-/// Apply a block level: turn its block feeds on and the other level feeds off,
-/// set the ads/malware switches, and store the level. `Custom` cannot be applied
-/// (it only ever results from hand-tuning), so it is rejected.
-async fn set_block_level(
-    State(lists): State<ListStore>,
-    State(config): State<ConfigStore>,
-    Json(body): Json<BlockLevelBody>,
-) -> Result<Json<BlockLevelResponse>, (StatusCode, String)> {
-    let targets = levels::level_targets(body.level).ok_or((
-        StatusCode::BAD_REQUEST,
-        "block level 'custom' cannot be applied".to_owned(),
-    ))?;
-    let want: HashSet<&str> = targets.presets.iter().copied().collect();
-
-    // Toggle every catalogue block feed to match the level's set, touching only
-    // the ones whose state actually changes.
-    for view in lists.view().presets {
-        if view.preset.kind != ListKind::Block {
-            continue;
-        }
-        let on = want.contains(view.preset.key);
-        if view.enabled != on {
-            lists.set_preset(view.preset.key, on).map_err(list_error)?;
-        }
-    }
-
-    // Record the switches and the chosen level in one settings write.
-    let mut settings = config.get();
-    settings.block_ads_trackers = targets.block_ads;
-    settings.block_malware = targets.block_malware;
-    settings.block_level = body.level;
-    config
-        .set(settings)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-
-    Ok(Json(BlockLevelResponse {
-        settings: config.get(),
-        lists: lists.view(),
-    }))
-}
-
-/// Recompute which level the live lists represent and store it if it changed.
-/// Called after any change that can alter the block signature, so a hand edit
-/// shows up as `Custom` and re-selecting a level's exact set snaps back to it.
-fn sync_block_level(lists: &ListStore, config: &ConfigStore) -> Result<(), (StatusCode, String)> {
-    let settings = config.get();
-    let effective = levels::effective_level(&lists.view(), &settings);
-    if settings.block_level != effective {
-        let next = Settings {
-            block_level: effective,
-            ..settings
-        };
-        config
-            .set(next)
-            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    }
-    Ok(())
 }
 
 /// What a manual refresh returns: the per-feed outcomes and the fresh view.
@@ -736,7 +665,10 @@ async fn remove_alias(
 /// Translate a client-store error into an HTTP status and message.
 fn client_error(error: ClientError) -> (StatusCode, String) {
     let status = match &error {
-        ClientError::InvalidTarget(_) | ClientError::InvalidName => StatusCode::BAD_REQUEST,
+        ClientError::InvalidTarget(_)
+        | ClientError::InvalidName
+        | ClientError::InvalidGroupName
+        | ClientError::UnknownGroup(_) => StatusCode::BAD_REQUEST,
         ClientError::Unknown(_) => StatusCode::NOT_FOUND,
         ClientError::Io { .. } | ClientError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -763,14 +695,38 @@ struct ClientRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     last_seen_ms: Option<i64>,
     active: bool,
+    /// The id of the group this device belongs to, if any. Absent for unnamed
+    /// clients and ungrouped devices.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
+    /// This device's own filtering delta. Always present for a named device (empty
+    /// when it has none), so the editor can read and write it uniformly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy: Option<PolicyDelta>,
+}
+
+/// One entry in the list catalogue the policy editor offers: a switchable block
+/// object, with whether it is on in the global default. Covers the two built-in
+/// objects (`ads`, `malware`) and every block feed subscription.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ListObjectRow {
+    id: String,
+    label: String,
+    /// Whether this object is on in the global default (so a scope that neither
+    /// adds nor disables it inherits this state).
+    global_on: bool,
 }
 
 /// Everything the devices view needs: the rows (named devices plus recently seen
-/// unnamed clients) and the active-window the UI shows and the rows were aged by.
+/// unnamed clients), the group definitions, the list catalogue the policy editor
+/// draws from, and the active-window the UI shows and the rows were aged by.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientsView {
     clients: Vec<ClientRow>,
+    groups: Vec<Group>,
+    lists: Vec<ListObjectRow>,
     active_window_secs: u32,
 }
 
@@ -779,11 +735,39 @@ struct ClientsView {
 /// into its own unnamed row), then mark as active anything seen within the
 /// window. Rows are ordered most-recently-seen first, with never-seen named
 /// devices after, so the list reads like "what's on the network now".
-fn clients_view(store: &Store, clients: &ClientStore, config: &ConfigStore) -> ClientsView {
+fn clients_view(
+    store: &Store,
+    clients: &ClientStore,
+    config: &ConfigStore,
+    lists: &ListStore,
+) -> ClientsView {
     let devices = clients.view();
     let resolver = ClientResolver::new(devices.clone());
-    let active_window_secs = config.get().active_window_secs;
+    let settings = config.get();
+    let active_window_secs = settings.active_window_secs;
     let cutoff = now_ms() as i64 - i64::from(active_window_secs) * 1000;
+
+    // The list catalogue the policy editor draws from: the two built-in objects
+    // followed by every block feed, each with its global-default state so the UI
+    // can show what an untouched scope inherits.
+    let resolved = lists.resolved();
+    let mut list_catalog = vec![
+        ListObjectRow {
+            id: "ads".to_owned(),
+            label: "Werbung & Tracker".to_owned(),
+            global_on: settings.block_ads_trackers,
+        },
+        ListObjectRow {
+            id: "malware".to_owned(),
+            label: "Schadsoftware".to_owned(),
+            global_on: settings.block_malware,
+        },
+    ];
+    list_catalog.extend(resolved.block_feeds.iter().map(|feed| ListObjectRow {
+        id: feed.id.clone(),
+        label: feed.label.clone(),
+        global_on: feed.enabled,
+    }));
 
     let mut rows: Vec<ClientRow> = Vec::new();
     // A stored device's row, by target, and a seen unnamed client's row, by the
@@ -806,6 +790,8 @@ fn clients_view(store: &Store, clients: &ClientStore, config: &ConfigStore) -> C
             count: 0,
             last_seen_ms: None,
             active: false,
+            group: device.group.clone(),
+            policy: Some(device.policy.clone()),
         });
     }
 
@@ -841,6 +827,8 @@ fn clients_view(store: &Store, clients: &ClientStore, config: &ConfigStore) -> C
                             count: activity.count,
                             last_seen_ms: Some(activity.last_seen_ms),
                             active: false,
+                            group: None,
+                            policy: None,
                         });
                     }
                 }
@@ -862,6 +850,8 @@ fn clients_view(store: &Store, clients: &ClientStore, config: &ConfigStore) -> C
 
     ClientsView {
         clients: rows,
+        groups: clients.groups(),
+        lists: list_catalog,
         active_window_secs,
     }
 }
@@ -871,12 +861,27 @@ async fn get_clients(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
     State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
 ) -> Json<ClientsView> {
-    Json(clients_view(&store, &clients, &config))
+    Json(clients_view(&store, &clients, &config, &lists))
+}
+
+/// The policy part of a device write: its group and its own delta. Optional on
+/// the body — when omitted, a device's existing group and delta are left
+/// untouched (so an older UI that only renames a device keeps its policy).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevicePolicyInput {
+    /// The group to put the device in, or `null`/absent for ungrouped.
+    #[serde(default)]
+    group: Option<String>,
+    /// The device's own delta, layered on its group and the global default.
+    #[serde(flatten)]
+    delta: PolicyDelta,
 }
 
 /// Add a device, or replace the name/note/kind of one that already matches the
-/// same target.
+/// same target. When `policy` is present, its group and delta are applied too.
 #[derive(Deserialize)]
 struct ClientBody {
     target: String,
@@ -885,22 +890,31 @@ struct ClientBody {
     note: Option<String>,
     #[serde(default)]
     kind: DeviceKind,
+    #[serde(default)]
+    policy: Option<DevicePolicyInput>,
 }
 
 async fn set_client(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
     State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
     Json(body): Json<ClientBody>,
 ) -> Result<Json<ClientsView>, (StatusCode, String)> {
     clients
         .set(&body.target, &body.name, body.note.as_deref(), body.kind)
         .map_err(client_error)?;
-    Ok(Json(clients_view(&store, &clients, &config)))
+    if let Some(policy) = body.policy {
+        clients
+            .set_device_policy(&body.target, policy.group.as_deref(), policy.delta)
+            .map_err(client_error)?;
+    }
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
 }
 
 /// Re-point a device at a new target and replace its name/note/kind, keyed by
-/// its old target.
+/// its old target. When `policy` is present, its group and delta are applied to
+/// the device at its new target.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientEditBody {
@@ -911,12 +925,15 @@ struct ClientEditBody {
     note: Option<String>,
     #[serde(default)]
     kind: DeviceKind,
+    #[serde(default)]
+    policy: Option<DevicePolicyInput>,
 }
 
 async fn edit_client(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
     State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
     Json(body): Json<ClientEditBody>,
 ) -> Result<Json<ClientsView>, (StatusCode, String)> {
     clients
@@ -928,7 +945,12 @@ async fn edit_client(
             body.kind,
         )
         .map_err(client_error)?;
-    Ok(Json(clients_view(&store, &clients, &config)))
+    if let Some(policy) = body.policy {
+        clients
+            .set_device_policy(&body.target, policy.group.as_deref(), policy.delta)
+            .map_err(client_error)?;
+    }
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
 }
 
 /// Remove a device by its target.
@@ -941,10 +963,82 @@ async fn remove_client(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
     State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
     Json(body): Json<ClientTargetBody>,
 ) -> Result<Json<ClientsView>, (StatusCode, String)> {
     clients.remove(&body.target).map_err(client_error)?;
-    Ok(Json(clients_view(&store, &clients, &config)))
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
+}
+
+/// The devices/groups view, groups alone — returned by the group endpoints so the
+/// UI refreshes the whole picture after a group change.
+async fn get_groups(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+) -> Json<ClientsView> {
+    Json(clients_view(&store, &clients, &config, &lists))
+}
+
+/// Create a group with the given name and delta.
+#[derive(Deserialize)]
+struct GroupBody {
+    name: String,
+    #[serde(flatten)]
+    policy: PolicyDelta,
+}
+
+async fn add_group(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+    Json(body): Json<GroupBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients
+        .add_group(&body.name, body.policy)
+        .map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
+}
+
+/// Rename a group and replace its delta, keyed by its id.
+#[derive(Deserialize)]
+struct GroupEditBody {
+    id: String,
+    name: String,
+    #[serde(flatten)]
+    policy: PolicyDelta,
+}
+
+async fn edit_group(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+    Json(body): Json<GroupEditBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients
+        .edit_group(&body.id, &body.name, body.policy)
+        .map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
+}
+
+/// Delete a group by id; devices that referenced it become ungrouped.
+#[derive(Deserialize)]
+struct GroupIdBody {
+    id: String,
+}
+
+async fn remove_group(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
+    State(lists): State<ListStore>,
+    Json(body): Json<GroupIdBody>,
+) -> Result<Json<ClientsView>, (StatusCode, String)> {
+    clients.remove_group(&body.id).map_err(client_error)?;
+    Ok(Json(clients_view(&store, &clients, &config, &lists)))
 }
 
 /// Switch a rewrite on or off by name.
@@ -1018,6 +1112,11 @@ struct Backup {
     /// build (version 1 without this field) still restores.
     #[serde(default)]
     clients: Vec<Device>,
+    /// Device groups and their policy deltas. Defaults to empty so a backup
+    /// written before groups existed (version 1 without this field) still
+    /// restores; devices in it simply resolve to the global default.
+    #[serde(default)]
+    groups: Vec<Group>,
 }
 
 /// Export the whole UI-set configuration as one downloadable JSON file. The
@@ -1039,6 +1138,7 @@ async fn export_backup(
         rewrites: rewrites.snapshot(),
         aliases: rewrites.alias_snapshot(),
         clients: clients.snapshot(),
+        groups: clients.snapshot_groups(),
     };
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -1084,14 +1184,13 @@ async fn restore_backup(
     rewrites
         .replace_all(backup.rewrites, backup.aliases)
         .map_err(rewrite_error)?;
-    clients.replace(backup.clients).map_err(client_error)?;
+    clients
+        .replace(backup.clients, backup.groups)
+        .map_err(client_error)?;
     lists.replace(backup.lists).map_err(list_error)?;
     config
         .set(backup.settings)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    // The restored lists and the ads/malware switches should agree on a block
-    // level; re-derive it so the stored level matches what came back.
-    sync_block_level(&lists, &config)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1113,15 +1212,11 @@ async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
 /// not saved durably.
 async fn put_settings(
     State(config): State<ConfigStore>,
-    State(lists): State<ListStore>,
     Json(settings): Json<Settings>,
 ) -> Result<Json<Settings>, (StatusCode, String)> {
     config
         .set(settings)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    // The ads/malware switches feed the block level, so a direct edit here may
-    // move it off a named level onto Custom.
-    sync_block_level(&lists, &config)?;
     Ok(Json(config.get()))
 }
 
@@ -1611,76 +1706,6 @@ mod tests {
         assert!(
             body.contains("\"logRetentionDays\":14"),
             "persisted: {body}"
-        );
-    }
-
-    #[tokio::test]
-    async fn applying_a_block_level_toggles_feeds_and_a_hand_edit_makes_it_custom() {
-        let (store, _writer) = Store::in_memory(100).unwrap();
-        let (app, cookie) = app_and_cookie(store);
-
-        // Apply the Standard level: it turns on the multi + threat-intel feeds.
-        let put = Request::put("/api/settings/block-level")
-            .header("content-type", "application/json")
-            .header("cookie", &cookie)
-            .body(Body::from(r#"{"level":"standard"}"#))
-            .unwrap();
-        let body = body_of(app.clone().oneshot(put).await.unwrap()).await;
-        assert!(body.contains("\"blockLevel\":\"standard\""), "{body}");
-        assert!(body.contains("hagezi-multi"), "{body}");
-
-        // The stored settings now read back as Standard.
-        let body = body_of(
-            app.clone()
-                .oneshot(
-                    Request::get("/api/settings")
-                        .header("cookie", &cookie)
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap(),
-        )
-        .await;
-        assert!(body.contains("\"blockLevel\":\"standard\""), "{body}");
-
-        // Switching an extra block feed on by hand drops the level to Custom.
-        let put = Request::put("/api/lists/presets/hagezi-pro")
-            .header("content-type", "application/json")
-            .header("cookie", &cookie)
-            .body(Body::from(r#"{"on":true}"#))
-            .unwrap();
-        assert_eq!(
-            app.clone().oneshot(put).await.unwrap().status(),
-            StatusCode::OK
-        );
-
-        let body = body_of(
-            app.oneshot(
-                Request::get("/api/settings")
-                    .header("cookie", &cookie)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap(),
-        )
-        .await;
-        assert!(body.contains("\"blockLevel\":\"custom\""), "{body}");
-    }
-
-    #[tokio::test]
-    async fn custom_block_level_cannot_be_applied() {
-        let (store, _writer) = Store::in_memory(100).unwrap();
-        let (app, cookie) = app_and_cookie(store);
-        let put = Request::put("/api/settings/block-level")
-            .header("content-type", "application/json")
-            .header("cookie", &cookie)
-            .body(Body::from(r#"{"level":"custom"}"#))
-            .unwrap();
-        assert_eq!(
-            app.oneshot(put).await.unwrap().status(),
-            StatusCode::BAD_REQUEST
         );
     }
 
@@ -2210,6 +2235,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn groups_and_device_policies_round_trip_through_the_api() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        // The devices view carries the list catalogue, with the two built-in
+        // objects, so the editor knows what a scope can switch.
+        let body = body_of(
+            app.clone()
+                .oneshot(
+                    Request::get("/api/clients")
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(body.contains("\"groups\":[]"), "no groups yet: {body}");
+        assert!(body.contains("\"id\":\"ads\""), "ads in catalogue: {body}");
+        assert!(
+            body.contains("\"id\":\"malware\""),
+            "malware in catalogue: {body}"
+        );
+
+        // Create a group that disables the ads object and blocks one domain.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/groups")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"name":"Kinderzimmer","listsDisabled":["ads"],"block":["spiele.test"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("Kinderzimmer"), "group listed: {body}");
+        // Capture the generated group id for the device assignment.
+        let group_id = {
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            value["groups"][0]["id"].as_str().unwrap().to_owned()
+        };
+
+        // Put a device in the group and give it its own allow + added list.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(
+                        r#"{{"target":"192.168.20.30","name":"Tablet","kind":"tablet","policy":{{"group":"{group_id}","listsAdded":["malware"],"allow":["ok.test"]}}}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("Tablet"), "device named: {body}");
+        assert!(
+            body.contains(&format!("\"group\":\"{group_id}\"")),
+            "device grouped: {body}"
+        );
+        assert!(
+            body.contains("\"listsAdded\":[\"malware\"]"),
+            "delta: {body}"
+        );
+        assert!(
+            body.contains("\"allow\":[\"ok.test\"]"),
+            "delta allow: {body}"
+        );
+
+        // An unknown group on a device is a bad request.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(
+                        r#"{"target":"192.168.20.31","name":"X","policy":{"group":"ghost"}}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // Delete the group; the device is detached but kept.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::delete("/api/groups")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie)
+                    .body(Body::from(format!(r#"{{"id":"{group_id}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"groups\":[]"), "group gone: {body}");
+        assert!(body.contains("Tablet"), "device kept: {body}");
+        assert!(
+            !body.contains(&format!("\"group\":\"{group_id}\"")),
+            "device detached: {body}"
+        );
+    }
+
+    #[tokio::test]
     async fn backup_exports_and_restores_into_a_fresh_instance() {
         // Instance A: set a custom block entry (with a note), a rewrite and a
         // couple of settings, then export a backup.
@@ -2257,6 +2399,42 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
+        // A group with a delta, and a device placed in it with its own delta, so
+        // the backup carries the whole policy picture.
+        let res = app_a
+            .clone()
+            .oneshot(
+                Request::post("/api/groups")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_a)
+                    .body(Body::from(
+                        r#"{"name":"Gaeste","listsDisabled":["malware"]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let group_id = {
+            let body = body_of(res).await;
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            value["groups"][0]["id"].as_str().unwrap().to_owned()
+        };
+        let res = app_a
+            .clone()
+            .oneshot(
+                Request::post("/api/clients")
+                    .header("content-type", "application/json")
+                    .header("cookie", &cookie_a)
+                    .body(Body::from(format!(
+                        r#"{{"target":"192.168.20.40","name":"Gastgeraet","policy":{{"group":"{group_id}","block":["werbung.test"]}}}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
         let backup = body_of(
             app_a
                 .oneshot(
@@ -2271,6 +2449,11 @@ mod tests {
         .await;
         assert!(backup.contains("justdns"), "envelope marker: {backup}");
         assert!(backup.contains("tracker.test"), "lists in file: {backup}");
+        assert!(backup.contains("Gaeste"), "group in file: {backup}");
+        assert!(
+            backup.contains("werbung.test"),
+            "device delta in file: {backup}"
+        );
 
         // Instance B: a fresh box. Restoring the backup brings everything back.
         let (store_b, _writer_b) = Store::in_memory(100).unwrap();
@@ -2325,6 +2508,7 @@ mod tests {
 
         let settings = body_of(
             app_b
+                .clone()
                 .oneshot(
                     Request::get("/api/settings")
                         .header("cookie", &cookie_b)
@@ -2342,6 +2526,26 @@ mod tests {
         assert!(
             settings.contains("\"logRetentionDays\":21"),
             "settings restored: {settings}"
+        );
+
+        // The group and the device's delta came back together.
+        let clients = body_of(
+            app_b
+                .oneshot(
+                    Request::get("/api/clients")
+                        .header("cookie", &cookie_b)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(clients.contains("Gaeste"), "group restored: {clients}");
+        assert!(clients.contains("Gastgeraet"), "device restored: {clients}");
+        assert!(
+            clients.contains("\"block\":[\"werbung.test\"]"),
+            "device delta restored: {clients}"
         );
     }
 
