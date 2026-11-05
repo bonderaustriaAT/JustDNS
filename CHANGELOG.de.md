@@ -4,6 +4,25 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.1.31] - 2026-11-05
+
+- Behoben: **das Bearbeiten einer Gruppe öffnet keine leere Seite mehr.** Beim
+  Öffnen des Editors einer frisch angelegten Gruppe (noch ohne Regeln) konnte die
+  Seite leer bleiben. Er öffnet jetzt jedes Mal korrekt.
+
+- Geändert: **der Bereich „Gruppen“ steht jetzt oben auf der Geräte-Seite**, und die
+  Geräteliste ist **standardmäßig eingeklappt** hinter einer beschrifteten Schaltfläche
+  mit Anzahl. So erreichst du die Gruppen, ohne erst an jedem Gerät vorbeizuscrollen,
+  und klappst die Liste nur bei Bedarf auf.
+
+- Verbessert: **die Listen-Schalter je Gerät und Gruppe erklären sich selbst.** Der
+  dreistufige Schalter neben jeder Sperrliste trägt jetzt eine kurze Erklärung zu
+  **Erben / An / Aus** (insbesondere, dass „Aus“ eine Liste für diesen Bereich
+  abschaltet, auch wenn sie oben an ist). Stehen nur die zwei eingebauten Objekte
+  bereit, weist ein Hinweis, woher weitere Listen kommen — aktiviere unter den
+  fertigen Listen eine Sperrliste oder füge eine eigene per URL hinzu, dann erscheint
+  sie hier zum Zuweisen je Gerät oder Gruppe.
+
 ## [0.1.30] - 2026-11-05
 
 - Neu: **Filterung pro Gerät und pro Gruppe.** Bisher hat JustDNS jeden Client

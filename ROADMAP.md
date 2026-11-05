@@ -7,7 +7,8 @@ JustDNS is built to be self-hosted by anyone (AGPL-3.0), so the direction favour
 features that are useful and robust for people running it on their own network.
 The order below is our current intent, not a promise — things can move as we
 learn. Already-shipped features live in the [changelog](CHANGELOG.md); the latest
-release is v0.1.30 (per-device and per-group filtering).
+release is v0.1.31 (per-device and per-group filtering, with usability fixes to
+the Devices page).
 
 **How to read this:** a ticked box (`[x]`) means the feature has shipped — the
 [changelog](CHANGELOG.md) has the details. An open box (`[ ]`) is still planned.
