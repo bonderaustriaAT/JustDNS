@@ -4,6 +4,24 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.2.0] - 2026-11-05
+
+- Neu: **verschlüsseltes Client-DNS.** JustDNS ist jetzt von den eigenen Geräten
+  über eine verschlüsselte Verbindung erreichbar, nicht nur im Klartext auf Port 53.
+  Schalte unter **Einstellungen → Verschlüsseltes Client-DNS** wahlweise
+  **DNS-over-TLS (DoT)** auf Port 853 — das, was Android „Privates DNS“ nennt — und/oder
+  **DNS-over-HTTPS (DoH)** unter `/dns-query` ein. Deine Geräte- und Gruppenregeln
+  gelten für verschlüsselte Clients genauso wie bisher.
+
+- Neu: **Zertifikate nach Wahl.** Standardmäßig erzeugt JustDNS ein eigenes
+  Zertifikat; lade die kleine CA auf der Einstellungsseite herunter und installiere
+  sie einmalig auf jedem Gerät. Oder lade dein eigenes Zertifikat samt Schlüssel
+  hoch (z. B. von einer internen CA oder per ACME). Die Seite zeigt den
+  SHA-256-Fingerabdruck des Zertifikats und kopierfertige Endpunkt-Adressen zum
+  Einrichten von Handy oder Browser. Das Zertifikat liegt auf dem Daten-Volume und
+  übersteht so Updates und Neustarts; eine Schritt-für-Schritt-Anleitung (inklusive
+  CA-Installation unter Windows, macOS, iOS, Android und Linux) steht im Handbuch.
+
 ## [0.1.32] - 2026-11-05
 
 - Geändert: **die Antwortzeit auf der Übersicht zeigt nur noch den Median.** Die

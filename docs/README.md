@@ -22,6 +22,7 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [Devices](guides/devices.md) | Give your network's clients friendly names |
 | [Per-device & per-group policies](guides/policies.md) | Give a device or a group its own filtering rules |
 | [DNS rewrites & address objects](guides/rewrites.md) | Answer your own names from fixed addresses |
+| [Encrypted client DNS (DoT & DoH)](guides/encrypted-dns.md) | Let your devices reach JustDNS over DNS-over-TLS and DNS-over-HTTPS |
 | [Settings](guides/settings.md) | Resolvers, speed, block response, Safe Search, logging and more |
 | [Backup & restore](guides/backup.md) | Save your whole configuration to a file and bring it back |
 

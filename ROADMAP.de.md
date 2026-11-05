@@ -7,9 +7,9 @@ JustDNS ist dafür gemacht, dass es jede und jeder selbst betreiben kann
 (AGPL-3.0) — die Richtung bevorzugt deshalb Funktionen, die im eigenen Netz
 wirklich nützlich und robust sind. Die Reihenfolge unten ist unsere aktuelle
 Absicht, kein Versprechen — sie kann sich ändern. Fertige Funktionen stehen im
-[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.1.32
-(Filterung pro Gerät und pro Gruppe, mit Bedien-Verbesserungen auf der
-Geräte-Seite und einer klareren Antwortzeit auf der Übersicht).
+[Änderungsverlauf](CHANGELOG.de.md); die neueste Version ist v0.2.0
+(verschlüsseltes Client-DNS: die eigenen Geräte erreichen JustDNS per
+DNS-over-TLS und DNS-over-HTTPS).
 
 **So liest sich der Fahrplan:** ein angehaktes Kästchen (`[x]`) heißt, die
 Funktion ist fertig — Details stehen im [Änderungsverlauf](CHANGELOG.de.md). Ein
@@ -64,11 +64,13 @@ langfristig.
 - [ ] **Benutzer & Rollen.** Mehr als ein Administrator, Nur-Lese-Konten und eine
   einfache Aufzeichnung, wer was geändert hat.
 
-## Phase 4 — Verschlüsselung & Reichweite _(geplant)_
+## Phase 4 — Verschlüsselung & Reichweite _(fertig)_
 
-- [ ] **Verschlüsseltes Client-DNS.** JustDNS selbst als DNS-over-TLS- und
+- [x] **Verschlüsseltes Client-DNS.** JustDNS selbst als DNS-over-TLS- und
   DNS-over-HTTPS-Endpunkt betreiben, damit sich die eigenen Geräte verschlüsselt
-  verbinden — nicht nur die Upstream-Resolver.
+  verbinden — nicht nur die Upstream-Resolver. Selbstsigniertes Zertifikat mit
+  CA-Download oder eigenes Zertifikat hochladen; die Geräte-/Gruppenregeln gelten
+  für verschlüsselte Clients unverändert.
 
 ## Phase 5 — Hochverfügbarkeit _(geplant)_
 
