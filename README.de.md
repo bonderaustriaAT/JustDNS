@@ -104,6 +104,13 @@ Auflösung abgelehnt), dann der **Cache** und schließlich die **Upstream**-Reso
 DuckDB-Protokoll festgehalten, das das Dashboard speist — und die Maschine nie
 verlässt.
 
+## Anleitungen
+
+Schritt-für-Schritt-Anleitungen zu jedem Feature, in Klartext (Deutsch und
+Englisch), liegen im **[Handbuch](docs/README.de.md)** ([English](docs/README.md)).
+Neu bei JustDNS? Starte mit der [Ersteinrichtung](docs/guides/setup.de.md), dann
+[die Übersicht](docs/guides/overview.de.md).
+
 ## Fahrplan & Änderungsverlauf
 
 - Wohin sich JustDNS entwickelt: [ROADMAP.de.md](ROADMAP.de.md)
