@@ -473,6 +473,10 @@ function EncryptedDnsSection() {
   const [key, setKey] = useState("");
   const [uploadState, setUploadState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const [regenState, setRegenState] = useState<"idle" | "busy" | "done">("idle");
+  // Set when the user tries to switch an endpoint on without a hostname: the
+  // field is highlighted and focused, and the switch stays off until one is set.
+  const [needsHostname, setNeedsHostname] = useState(false);
+  const hostnameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -511,6 +515,29 @@ function EncryptedDnsSection() {
     } catch (e) {
       setError(e instanceof ApiError ? e.message : t("settings.encDns.saveError"));
     }
+  }
+
+  // Enabling DoT/DoH needs a hostname: without one we refuse the switch, ask for
+  // a hostname and focus the field, so the endpoint never comes up without a
+  // name in its certificate. Turning off is always allowed.
+  function toggleFeature(field: "dotEnabled" | "dohEnabled", on: boolean) {
+    if (!status) return;
+    if (!on) {
+      setNeedsHostname(false);
+      patch(field === "dotEnabled" ? { dotEnabled: false } : { dohEnabled: false });
+      return;
+    }
+    const effectiveHostname = hostnameDraft.trim() || status.hostname.trim();
+    if (!effectiveHostname) {
+      setNeedsHostname(true);
+      hostnameRef.current?.focus();
+      return;
+    }
+    setNeedsHostname(false);
+    const partial: Partial<TlsSettings> = { hostname: effectiveHostname };
+    if (field === "dotEnabled") partial.dotEnabled = true;
+    else partial.dohEnabled = true;
+    patch(partial);
   }
 
   async function downloadCa() {
@@ -567,11 +594,56 @@ function EncryptedDnsSection() {
   }
 
   const hostname = status.hostname.trim();
+  const featureActive = status.dotEnabled || status.dohEnabled;
   const dotEndpoint = hostname ? `${hostname}:${status.dotPort}` : "";
   const dohEndpoint = hostname ? `https://${hostname}:${status.dohPort}/dns-query` : "";
 
   return (
     <>
+      {/* Hostname first: the certificate and the endpoint addresses both build
+          on it, so nothing below works until it is set. */}
+      <Row
+        label={t("settings.encDns.hostnameLabel")}
+        description={t("settings.encDns.hostnameDesc")}
+        details={t("settings.encDns.hostnameDetails")}
+        control={
+          <div className={styles.hostnameControl}>
+            <input
+              ref={hostnameRef}
+              className={styles.select}
+              type="text"
+              value={hostnameDraft}
+              placeholder={t("settings.encDns.hostnamePlaceholder")}
+              aria-label={t("settings.encDns.hostnameLabel")}
+              data-required={needsHostname || undefined}
+              onChange={(e) => {
+                setHostnameDraft(e.target.value);
+                if (e.target.value.trim()) setNeedsHostname(false);
+              }}
+              onBlur={() => {
+                const draft = hostnameDraft.trim();
+                // Never persist an empty hostname while an endpoint is live.
+                if (!draft && featureActive) {
+                  setHostnameDraft(status.hostname);
+                  return;
+                }
+                if (draft) setNeedsHostname(false);
+                if (draft !== status.hostname) patch({ hostname: draft });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </div>
+        }
+      />
+
+      {needsHostname ? (
+        <p className={styles.encRequired}>{t("settings.encDns.hostnameRequired")}</p>
+      ) : null}
+
+      {/* The two endpoint switches. Turning one on without a hostname is refused
+          by toggleFeature, which asks for one instead of enabling. */}
       <Row
         label={t("settings.encDns.dotLabel")}
         description={t("settings.encDns.dotDesc")}
@@ -580,7 +652,7 @@ function EncryptedDnsSection() {
           <Toggle
             label={t("settings.encDns.dotLabel")}
             checked={status.dotEnabled}
-            onChange={(v) => patch({ dotEnabled: v })}
+            onChange={(v) => toggleFeature("dotEnabled", v)}
           />
         }
       />
@@ -592,36 +664,15 @@ function EncryptedDnsSection() {
           <Toggle
             label={t("settings.encDns.dohLabel")}
             checked={status.dohEnabled}
-            onChange={(v) => patch({ dohEnabled: v })}
+            onChange={(v) => toggleFeature("dohEnabled", v)}
           />
         }
       />
-      <Row
-        label={t("settings.encDns.hostnameLabel")}
-        description={t("settings.encDns.hostnameDesc")}
-        details={t("settings.encDns.hostnameDetails")}
-        control={
-          <div className={styles.hostnameControl}>
-            <input
-              className={styles.select}
-              type="text"
-              value={hostnameDraft}
-              placeholder={t("settings.encDns.hostnamePlaceholder")}
-              aria-label={t("settings.encDns.hostnameLabel")}
-              onChange={(e) => setHostnameDraft(e.target.value)}
-              onBlur={() => {
-                if (hostnameDraft.trim() !== status.hostname) patch({ hostname: hostnameDraft.trim() });
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-            />
-          </div>
-        }
-      />
 
-      {!hostname ? <p className={styles.encHint}>{t("settings.encDns.setHostnameFirst")}</p> : null}
-
+      {/* Certificate and endpoint addresses only make sense once an endpoint is
+          actually running — hidden until then to keep the page focused. */}
+      {featureActive ? (
+        <>
       <div className={styles.profile}>
         <span className={styles.labelLine}>
           <span className={styles.label}>{t("settings.encDns.certSourceLabel")}</span>
@@ -750,6 +801,8 @@ function EncryptedDnsSection() {
           </div>
         </div>
       ) : null}
+        </>
+      ) : null}
 
       {error ? <p className={styles.actionError}>{error}</p> : null}
     </>
@@ -767,15 +820,14 @@ export function Settings() {
     const base: CategoryMeta[] = [
       { id: "schutz", titleKey: "settings.cat.schutz" },
       { id: "upstream", titleKey: "settings.cat.upstream" },
-      // Encrypted client DNS (DoT/DoH) stays visible even outside expert mode:
-      // pointing your own devices at it is a headline user-facing capability.
-      { id: "verschluesseltesDns", titleKey: "settings.cat.verschluesseltesDns" },
       // Backup & restore stays visible even outside expert mode: making a
       // safety copy is a headline user-facing action, not a technical knob.
       { id: "sicherung", titleKey: "settings.cat.sicherung" },
     ];
     if (settings.expertMode) {
       base.push(
+        // Encryption (both directions: client DoT/DoH and upstream) is a
+        // technical area, so it lives behind expert mode.
         { id: "verschluesselung", titleKey: "settings.cat.verschluesselung" },
         { id: "netzwerk", titleKey: "settings.cat.netzwerk" },
         { id: "cache", titleKey: "settings.cat.cache" },
@@ -978,8 +1030,16 @@ export function Settings() {
             <Category
               id="verschluesselung"
               title={t("settings.cat.verschluesselung")}
-              description={t("settings.encryptionDesc")}
+              description={t("settings.enc.desc")}
             >
+              {/* Incoming: your own devices reach JustDNS over DoT/DoH. */}
+              <h3 className={styles.encGroupTitle}>{t("settings.enc.clientGroup")}</h3>
+              <p className={styles.encGroupDesc}>{t("settings.encDns.desc")}</p>
+              <EncryptedDnsSection />
+
+              {/* Outgoing: JustDNS encrypts its queries to the upstream resolvers. */}
+              <h3 className={styles.encGroupTitle}>{t("settings.enc.upstreamGroup")}</h3>
+              <p className={styles.encGroupDesc}>{t("settings.encryptionDesc")}</p>
               <Row
                 label={t("settings.encryptLabel")}
                 description={t("settings.encryptDesc")}
@@ -1028,16 +1088,6 @@ export function Settings() {
                 details={t("settings.clearCacheDetails")}
                 control={<ClearCacheButton />}
               />
-            </Category>
-          )}
-
-          {active === "verschluesseltesDns" && (
-            <Category
-              id="verschluesseltesDns"
-              title={t("settings.cat.verschluesseltesDns")}
-              description={t("settings.encDns.desc")}
-            >
-              <EncryptedDnsSection />
             </Category>
           )}
 

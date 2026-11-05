@@ -144,6 +144,7 @@
 .description {
   color: var(--text-muted);
   font-size: var(--step--1);
+  line-height: 1.5;
   max-inline-size: 48ch;
 }
 
@@ -613,6 +614,38 @@
 
 .copyButton:hover {
   border-color: var(--line-strong);
+}
+
+/* Hostname field highlighted when the user tried to enable an endpoint without
+   it; cleared as soon as a name is typed. */
+.hostnameControl .select[data-required] {
+  border-color: var(--warn);
+  outline: 2px solid var(--warn);
+  outline-offset: 1px;
+}
+
+.encRequired {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* Sub-group headings inside the merged Encryption category: they split the
+   client-facing endpoints (your devices → JustDNS) from the upstream direction
+   (JustDNS → resolvers). */
+.encGroupTitle {
+  margin: var(--space-5) 0 0;
+  font-size: var(--step-0);
+  font-weight: 600;
+}
+
+.encGroupDesc {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-inline-size: 60ch;
 }
 
 @media (max-width: 540px) {
