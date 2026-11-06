@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.2.4] - 2026-11-06
+
+- Maintenance: **security update to the upstream DNS library.** JustDNS uses the
+  hickory-dns library to talk to the resolvers it forwards to, including over DoT
+  and DoH. It has been updated to close three reported security issues: one where
+  a failed DNSSEC validation could be hidden instead of reported, one where
+  unrelated records in a reply could be followed, and one where a crafted reply
+  could pin the CPU while a response was being assembled. Nothing changes in how
+  you use JustDNS.
+
 ## [0.2.3] - 2026-11-06
 
 - New: **resolver response times.** The **Overview** now shows how each upstream

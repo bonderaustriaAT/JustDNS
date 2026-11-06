@@ -148,11 +148,11 @@ async fn collect_body(body: Incoming) -> Option<Vec<u8>> {
 /// answer with no records (NXDOMAIN, errors) caches for zero seconds.
 fn min_ttl(response: &Message) -> u32 {
     response
-        .answers()
+        .answers
         .iter()
-        .chain(response.name_servers())
-        .chain(response.additionals())
-        .map(|record| record.ttl())
+        .chain(response.authorities.iter())
+        .chain(response.additionals.iter())
+        .map(|record| record.ttl)
         .min()
         .unwrap_or(0)
 }

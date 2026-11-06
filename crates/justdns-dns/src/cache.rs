@@ -184,7 +184,7 @@ impl CachedEntry {
                     .iter()
                     .cloned()
                     .map(|mut record| {
-                        record.set_ttl(ttl);
+                        record.ttl = ttl;
                         record
                     })
                     .collect();
@@ -317,7 +317,7 @@ mod tests {
                 response: CachedResponse::Positive(records),
                 needs_refresh,
             }) => {
-                assert_eq!(records[0].ttl(), 200, "TTL counted down");
+                assert_eq!(records[0].ttl, 200, "TTL counted down");
                 assert!(!needs_refresh, "far from expiry, no prefetch");
             }
             other => panic!("expected a fresh positive hit, got {other:?}"),
@@ -335,7 +335,7 @@ mod tests {
                 response: CachedResponse::Positive(records),
                 needs_refresh,
             }) => {
-                assert_eq!(records[0].ttl(), 25);
+                assert_eq!(records[0].ttl, 25);
                 assert!(needs_refresh, "near expiry should prefetch");
             }
             other => panic!("expected a fresh positive hit, got {other:?}"),
@@ -353,11 +353,7 @@ mod tests {
                 response: CachedResponse::Positive(records),
                 needs_refresh,
             }) => {
-                assert_eq!(
-                    records[0].ttl(),
-                    STALE_TTL,
-                    "stale answer gets the short TTL"
-                );
+                assert_eq!(records[0].ttl, STALE_TTL, "stale answer gets the short TTL");
                 assert!(needs_refresh, "stale always triggers a refresh");
             }
             other => panic!("expected a stale positive hit, got {other:?}"),

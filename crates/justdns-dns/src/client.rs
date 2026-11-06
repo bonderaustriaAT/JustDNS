@@ -11,17 +11,21 @@
 
 use std::sync::Arc;
 
-use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
+use hickory_proto::ProtoError;
+use hickory_proto::op::{
+    DnsRequestOptions, DnsResponse, Message, MessageType, Query, ResponseCode,
+};
 use hickory_proto::rr::{Name, Record, RecordType};
-use hickory_proto::xfer::{DnsHandle, DnsRequestOptions, DnsResponse, FirstAnswer};
-use hickory_proto::{ProtoError, ProtoErrorKind};
-use hickory_resolver::config::{NameServerConfigGroup, ResolverOpts};
-use hickory_resolver::name_server::{NameServerPool, TokioConnectionProvider};
+use hickory_resolver::config::{NameServerConfig, ResolverOpts};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::net::xfer::FirstAnswer;
+use hickory_resolver::net::{DnsError, DnsHandle, NetError};
+use hickory_resolver::{NameServerPool, PoolContext, TlsConfig};
 
 use crate::upstream::{Transport, Upstream};
 
 pub struct UpstreamClient {
-    pool: NameServerPool<TokioConnectionProvider>,
+    pool: NameServerPool<TokioRuntimeProvider>,
     /// A short label identifying this resolver (its certificate name, or plain
     /// IP), computed once so each answer can be attributed to it in the query
     /// log without re-deriving it per query.
@@ -32,26 +36,34 @@ impl UpstreamClient {
     pub fn new(upstream: &Upstream) -> Self {
         // `trust_negative_responses` only matters when a pool spreads a query
         // across several servers; each client holds one upstream, so it has no
-        // effect here and we leave it at the group defaults.
-        let ips = [upstream.address];
-        let servers = match &upstream.transport {
-            Transport::Plain => NameServerConfigGroup::from_ips_clear(&ips, upstream.port, true),
+        // effect here and we leave it at the config defaults.
+        let ip = upstream.address;
+        let mut config = match &upstream.transport {
+            Transport::Plain => NameServerConfig::udp_and_tcp(ip),
             Transport::Dot { server_name } => {
-                NameServerConfigGroup::from_ips_tls(&ips, upstream.port, server_name.clone(), true)
+                NameServerConfig::tls(ip, Arc::from(server_name.as_str()))
             }
-            Transport::Doh { server_name } => NameServerConfigGroup::from_ips_https(
-                &ips,
-                upstream.port,
-                server_name.clone(),
-                true,
-            ),
+            Transport::Doh { server_name } => {
+                NameServerConfig::https(ip, Arc::from(server_name.as_str()), None)
+            }
         };
+        // The transport constructors default to each protocol's standard port;
+        // apply the upstream's configured port to every connection so a custom
+        // port (and the ephemeral ports the tests bind to) is honoured.
+        for connection in &mut config.connections {
+            connection.port = upstream.port;
+        }
 
-        let pool = NameServerPool::from_config(
-            servers,
+        let context = Arc::new(PoolContext::new(
             ResolverOpts::default(),
-            TokioConnectionProvider::default(),
-        );
+            // Building the default client TLS config (ring provider + webpki
+            // roots) is deterministic; it only fails if the crypto provider is
+            // missing, which the `tls-ring` feature compiles in, so a failure
+            // here is a fatal misconfiguration rather than a runtime condition.
+            TlsConfig::new().expect("ring TLS client config initialises"),
+        ));
+
+        let pool = NameServerPool::from_config([config], context, TokioRuntimeProvider::new());
 
         Self {
             pool,
@@ -75,13 +87,12 @@ impl UpstreamClient {
         let mut options = DnsRequestOptions::default();
         options.recursion_desired = true;
 
-        let result = self
+        let error = match self
             .pool
             .lookup(Query::query(name.clone(), record_type), options)
             .first_answer()
-            .await;
-
-        let error = match result {
+            .await
+        {
             Ok(response) => return Ok(response),
             Err(error) => error,
         };
@@ -93,21 +104,25 @@ impl UpstreamClient {
         // into SERVFAIL. Genuine failures (SERVFAIL, REFUSED, transport errors)
         // reach here too but keep their error, so racing still prefers a working
         // upstream over a failing one.
-        if let ProtoErrorKind::NoRecordsFound {
-            response_code,
-            authorities,
-            ..
-        } = error.kind()
-        {
+        if let NetError::Dns(DnsError::NoRecordsFound(no_records)) = &error {
             if matches!(
-                response_code,
+                no_records.response_code,
                 ResponseCode::NXDomain | ResponseCode::NoError
             ) {
-                return negative_response(name, record_type, *response_code, authorities);
+                return negative_response(
+                    name,
+                    record_type,
+                    no_records.response_code,
+                    &no_records.authorities,
+                );
             }
         }
 
-        Err(error)
+        // Upstream transport failures are hickory-net's own error type; fold
+        // them into the crate's `ProtoError` boundary so the `Resolve` trait
+        // stays transport-agnostic. The pipeline only ever maps an error to
+        // SERVFAIL, so the message text is all that need survive the conversion.
+        Err(ProtoError::from(error.to_string()))
     }
 }
 
@@ -120,12 +135,12 @@ fn negative_response(
     response_code: ResponseCode,
     authorities: &Option<Arc<[Record]>>,
 ) -> Result<DnsResponse, ProtoError> {
-    let mut message = Message::new();
-    message.set_message_type(MessageType::Response);
-    message.set_response_code(response_code);
+    let mut message = Message::query();
+    message.metadata.message_type = MessageType::Response;
+    message.metadata.response_code = response_code;
     message.add_query(Query::query(name, record_type));
     if let Some(authorities) = authorities {
-        message.add_name_servers(authorities.iter().cloned());
+        message.add_authorities(authorities.iter().cloned());
     }
     DnsResponse::from_message(message)
 }
@@ -156,13 +171,13 @@ mod tests {
             let (len, src) = socket.recv_from(&mut buf).await.unwrap();
             let request = Message::from_vec(&buf[..len]).unwrap();
 
-            let mut response = Message::new();
-            response.set_id(request.id());
-            response.set_message_type(MessageType::Response);
-            response.set_response_code(ResponseCode::NoError);
-            response.set_recursion_desired(true);
-            response.set_recursion_available(true);
-            if let Some(query) = request.queries().first() {
+            let mut response = Message::query();
+            response.metadata.id = request.id;
+            response.metadata.message_type = MessageType::Response;
+            response.metadata.response_code = ResponseCode::NoError;
+            response.metadata.recursion_desired = true;
+            response.metadata.recursion_available = true;
+            if let Some(query) = request.queries.first() {
                 response.add_query(query.clone());
                 response.add_answer(Record::from_rdata(
                     query.name().clone(),
@@ -191,16 +206,16 @@ mod tests {
             let (len, src) = socket.recv_from(&mut buf).await.unwrap();
             let request = Message::from_vec(&buf[..len]).unwrap();
 
-            let mut response = Message::new();
-            response.set_id(request.id());
-            response.set_message_type(MessageType::Response);
-            response.set_response_code(code);
-            response.set_recursion_desired(true);
-            response.set_recursion_available(true);
-            if let Some(query) = request.queries().first() {
+            let mut response = Message::query();
+            response.metadata.id = request.id;
+            response.metadata.message_type = MessageType::Response;
+            response.metadata.response_code = code;
+            response.metadata.recursion_desired = true;
+            response.metadata.recursion_available = true;
+            if let Some(query) = request.queries.first() {
                 response.add_query(query.clone());
                 if with_soa {
-                    response.add_name_server(Record::from_rdata(
+                    response.add_authority(Record::from_rdata(
                         query.name().clone(),
                         30,
                         RData::SOA(SOA::new(
@@ -240,8 +255,8 @@ mod tests {
             .await
             .expect("query failed");
 
-        assert_eq!(response.response_code(), ResponseCode::NoError);
-        assert_eq!(response.answers()[0].data().as_a(), Some(&A(ANSWER)));
+        assert_eq!(response.response_code, ResponseCode::NoError);
+        assert_eq!(response.answers[0].data, RData::A(A(ANSWER)));
     }
 
     #[tokio::test]
@@ -253,13 +268,13 @@ mod tests {
             .await
             .expect("NXDOMAIN must come back as a response, not an error");
 
-        assert_eq!(response.response_code(), ResponseCode::NXDomain);
-        assert!(response.answers().is_empty());
+        assert_eq!(response.response_code, ResponseCode::NXDomain);
+        assert!(response.answers.is_empty());
         assert!(
             response
-                .name_servers()
+                .authorities
                 .iter()
-                .any(|record| record.data().as_soa().is_some()),
+                .any(|record| matches!(&record.data, RData::SOA(_))),
             "the SOA authority should be preserved for negative caching"
         );
     }
@@ -274,7 +289,7 @@ mod tests {
             .await
             .expect("NODATA must come back as a response, not an error");
 
-        assert_eq!(response.response_code(), ResponseCode::NoError);
-        assert!(response.answers().is_empty());
+        assert_eq!(response.response_code, ResponseCode::NoError);
+        assert!(response.answers.is_empty());
     }
 }

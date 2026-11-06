@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arc_swap::ArcSwap;
 use hickory_proto::ProtoError;
+use hickory_proto::op::DnsResponse;
 use hickory_proto::rr::{Name, RecordType};
-use hickory_proto::xfer::DnsResponse;
 
 use crate::client::UpstreamClient;
 use crate::upstream::{UpstreamConfig, UpstreamMode};
@@ -314,9 +314,9 @@ mod tests {
                 return Err(ProtoError::from("mock failure"));
             }
 
-            let mut message = Message::new();
-            message.set_message_type(MessageType::Response);
-            message.set_response_code(ResponseCode::NoError);
+            let mut message = Message::query();
+            message.metadata.message_type = MessageType::Response;
+            message.metadata.response_code = ResponseCode::NoError;
             message.add_answer(Record::from_rdata(name, 60, RData::A(A(self.marker))));
             let label: Arc<str> = Arc::from(self.marker.to_string());
             Ok(Resolved::new(
@@ -327,7 +327,10 @@ mod tests {
     }
 
     fn marker_of(resolved: &Resolved) -> Ipv4Addr {
-        resolved.response.answers()[0].data().as_a().unwrap().0
+        let RData::A(a) = &resolved.response.answers[0].data else {
+            panic!("expected an A record");
+        };
+        a.0
     }
 
     fn query(name: &str) -> Name {

@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use hickory_proto::op::DnsResponse;
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, CNAME};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
-use hickory_proto::xfer::DnsResponse;
 use justdns_filter::PolicyEngine;
 use justdns_rewrite::Rewriter;
 
@@ -157,16 +157,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
     pub async fn handle(&self, request: &Message, client: IpAddr) -> Message {
         let start = Instant::now();
 
-        let mut response = Message::new();
-        response.set_id(request.id());
-        response.set_message_type(MessageType::Response);
-        response.set_op_code(request.op_code());
-        response.set_recursion_desired(request.recursion_desired());
-        response.set_recursion_available(true);
+        let mut response = Message::query();
+        response.metadata.id = request.id;
+        response.metadata.message_type = MessageType::Response;
+        response.metadata.op_code = request.op_code;
+        response.metadata.recursion_desired = request.recursion_desired;
+        response.metadata.recursion_available = true;
 
-        let Some(query) = request.queries().first().cloned() else {
+        let Some(query) = request.queries.first().cloned() else {
             // No question to answer, so nothing meaningful to record either.
-            response.set_response_code(ResponseCode::FormErr);
+            response.metadata.response_code = ResponseCode::FormErr;
             return response;
         };
         response.add_query(query.clone());
@@ -178,10 +178,10 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 client,
                 name: query.name().to_string(),
                 record_type: u16::from(query.query_type()),
-                response_code: u16::from(response.response_code()),
+                response_code: u16::from(response.response_code),
                 source: answered.source,
                 duration: start.elapsed(),
-                answers: u16::try_from(response.answers().len()).unwrap_or(u16::MAX),
+                answers: u16::try_from(response.answers.len()).unwrap_or(u16::MAX),
                 addresses: answer_addresses(&response),
                 resolver: answered.resolver.as_deref().map(str::to_owned),
             });
@@ -212,7 +212,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 if self.options.block_null_ip.load(Ordering::Relaxed) {
                     self.answer_blocked_null_ip(query, response);
                 } else {
-                    response.set_response_code(ResponseCode::NXDomain);
+                    response.metadata.response_code = ResponseCode::NXDomain;
                 }
                 return Answered::local(AnswerSource::Blocked);
             }
@@ -222,7 +222,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         if query.query_type() == RecordType::AAAA
             && !self.options.ipv6_enabled.load(Ordering::Relaxed)
         {
-            response.set_response_code(ResponseCode::NoError);
+            response.metadata.response_code = ResponseCode::NoError;
             return Answered::local(AnswerSource::Local);
         }
 
@@ -258,8 +258,8 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             .await
         {
             Ok(resolved) => {
-                response.set_response_code(resolved.response.response_code());
-                for record in resolved.response.answers() {
+                response.metadata.response_code = resolved.response.response_code;
+                for record in &resolved.response.answers {
                     response.add_answer(record.clone());
                 }
                 self.cache
@@ -268,7 +268,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 resolved.resolver
             }
             Err(_) => {
-                response.set_response_code(ResponseCode::ServFail);
+                response.metadata.response_code = ResponseCode::ServFail;
                 None
             }
         };
@@ -311,7 +311,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
     /// The client then fails to connect to the blocked host at once, which apps
     /// and video players handle more gracefully than a retried NXDOMAIN.
     fn answer_blocked_null_ip(&self, query: &Query, response: &mut Message) {
-        response.set_response_code(ResponseCode::NoError);
+        response.metadata.response_code = ResponseCode::NoError;
         let name = query.name().clone();
         match query.query_type() {
             RecordType::A => {
@@ -337,7 +337,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
     /// any other type, or a family with no address, is NODATA (NOERROR with no
     /// answers). Either way the name is owned locally and never forwarded.
     fn answer_rewrite(&self, query: &Query, response: &mut Message, ips: &[IpAddr]) {
-        response.set_response_code(ResponseCode::NoError);
+        response.metadata.response_code = ResponseCode::NoError;
         let name = query.name().clone();
         match query.query_type() {
             RecordType::A => {
@@ -382,19 +382,19 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             .await
         {
             Ok(resolved) => {
-                response.set_response_code(resolved.response.response_code());
+                response.metadata.response_code = resolved.response.response_code;
                 response.add_answer(Record::from_rdata(
                     query.name().clone(),
                     REWRITE_TTL,
                     RData::CNAME(CNAME(target)),
                 ));
-                for record in resolved.response.answers() {
+                for record in &resolved.response.answers {
                     response.add_answer(record.clone());
                 }
                 resolved.resolver
             }
             Err(_) => {
-                response.set_response_code(ResponseCode::ServFail);
+                response.metadata.response_code = ResponseCode::ServFail;
                 None
             }
         };
@@ -407,9 +407,9 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
 /// addresses. Used to record what a query actually resolved to in the query log.
 fn answer_addresses(response: &Message) -> Vec<IpAddr> {
     response
-        .answers()
+        .answers
         .iter()
-        .filter_map(|record| match record.data() {
+        .filter_map(|record| match &record.data {
             RData::A(a) => Some(IpAddr::V4(a.0)),
             RData::AAAA(aaaa) => Some(IpAddr::V6(aaaa.0)),
             _ => None,
@@ -421,14 +421,14 @@ fn answer_addresses(response: &Message) -> Vec<IpAddr> {
 /// entry at the smallest record TTL, or a negative entry at the negative TTL.
 /// Shared by the synchronous miss path and the background refresh.
 fn entry_from_response(upstream: &DnsResponse) -> CachedEntry {
-    let answers = upstream.answers();
+    let answers = &upstream.answers;
     if answers.is_empty() {
         CachedEntry::negative(
-            upstream.response_code(),
+            upstream.response_code,
             Duration::from_secs(negative_ttl(upstream)),
         )
     } else {
-        let ttl = answers.iter().map(|record| record.ttl()).min().unwrap_or(0);
+        let ttl = answers.iter().map(|record| record.ttl).min().unwrap_or(0);
         CachedEntry::positive(answers.to_vec(), Duration::from_secs(u64::from(ttl)))
     }
 }
@@ -436,13 +436,13 @@ fn entry_from_response(upstream: &DnsResponse) -> CachedEntry {
 fn apply_cached(response: &mut Message, hit: CachedResponse) {
     match hit {
         CachedResponse::Positive(records) => {
-            response.set_response_code(ResponseCode::NoError);
+            response.metadata.response_code = ResponseCode::NoError;
             for record in records {
                 response.add_answer(record);
             }
         }
         CachedResponse::Negative(code) => {
-            response.set_response_code(code);
+            response.metadata.response_code = code;
         }
     }
 }
@@ -451,9 +451,12 @@ fn apply_cached(response: &mut Message, hit: CachedResponse) {
 /// section when present, otherwise a short default, and never above the cap.
 fn negative_ttl(message: &Message) -> u64 {
     message
-        .name_servers()
+        .authorities
         .iter()
-        .find_map(|record| record.data().as_soa().map(|soa| u64::from(soa.minimum())))
+        .find_map(|record| match &record.data {
+            RData::SOA(soa) => Some(u64::from(soa.minimum)),
+            _ => None,
+        })
         .unwrap_or(DEFAULT_NEGATIVE_TTL)
         .min(MAX_NEGATIVE_TTL)
 }
@@ -502,10 +505,10 @@ mod tests {
     }
 
     use hickory_proto::ProtoError;
+    use hickory_proto::op::DnsResponse;
     use hickory_proto::op::Query;
     use hickory_proto::rr::rdata::{A, AAAA, SOA};
     use hickory_proto::rr::{Name, RData, Record};
-    use hickory_proto::xfer::DnsResponse;
 
     use crate::upstream::UpstreamMode;
 
@@ -548,19 +551,19 @@ mod tests {
             _record_type: RecordType,
         ) -> Result<Resolved, ProtoError> {
             self.calls.fetch_add(1, Ordering::Relaxed);
-            let mut message = Message::new();
-            message.set_message_type(MessageType::Response);
+            let mut message = Message::query();
+            message.metadata.message_type = MessageType::Response;
             match &self.reply {
                 Reply::A(ip) => {
-                    message.set_response_code(ResponseCode::NoError);
+                    message.metadata.response_code = ResponseCode::NoError;
                     message.add_answer(Record::from_rdata(name, self.ttl, RData::A(A(*ip))));
                 }
                 Reply::Aaaa(ip) => {
-                    message.set_response_code(ResponseCode::NoError);
+                    message.metadata.response_code = ResponseCode::NoError;
                     message.add_answer(Record::from_rdata(name, self.ttl, RData::AAAA(AAAA(*ip))));
                 }
                 Reply::Empty(code) => {
-                    message.set_response_code(*code);
+                    message.metadata.response_code = *code;
                 }
                 Reply::Fail => return Err(ProtoError::from("mock failure")),
             }
@@ -582,9 +585,9 @@ mod tests {
     }
 
     fn request(name: &str, record_type: RecordType) -> Message {
-        let mut message = Message::new();
-        message.set_id(4242);
-        message.set_recursion_desired(true);
+        let mut message = Message::query();
+        message.metadata.id = 4242;
+        message.metadata.recursion_desired = true;
         message.add_query(Query::query(Name::from_ascii(name).unwrap(), record_type));
         message
     }
@@ -598,15 +601,15 @@ mod tests {
         let req = request("example.com.", RecordType::A);
 
         let first = pipe.handle(&req, CLIENT).await;
-        assert_eq!(first.id(), 4242);
-        assert_eq!(first.response_code(), ResponseCode::NoError);
+        assert_eq!(first.id, 4242);
+        assert_eq!(first.response_code, ResponseCode::NoError);
         assert_eq!(
-            first.answers()[0].data().as_a(),
-            Some(&A(Ipv4Addr::new(93, 184, 216, 34)))
+            first.answers[0].data,
+            RData::A(A(Ipv4Addr::new(93, 184, 216, 34)))
         );
 
         let second = pipe.handle(&req, CLIENT).await;
-        assert_eq!(second.answers().len(), 1);
+        assert_eq!(second.answers.len(), 1);
         assert_eq!(
             calls.load(Ordering::Relaxed),
             1,
@@ -632,7 +635,7 @@ mod tests {
         // Second query is answered straight from the stale entry, and a refresh
         // is spawned behind it.
         let stale = pipe.handle(&req, CLIENT).await;
-        assert_eq!(stale.answers().len(), 1, "stale answer is still served");
+        assert_eq!(stale.answers.len(), 1, "stale answer is still served");
 
         // The background refresh reaches upstream once more (call 2).
         for _ in 0..200 {
@@ -654,7 +657,7 @@ mod tests {
         let response = pipe
             .handle(&request("example.com.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(response.response_code(), ResponseCode::ServFail);
+        assert_eq!(response.response_code, ResponseCode::ServFail);
     }
 
     #[tokio::test]
@@ -666,7 +669,7 @@ mod tests {
         let req = request("nope.example.", RecordType::A);
 
         let first = pipe.handle(&req, CLIENT).await;
-        assert_eq!(first.response_code(), ResponseCode::NXDomain);
+        assert_eq!(first.response_code, ResponseCode::NXDomain);
 
         pipe.handle(&req, CLIENT).await;
         assert_eq!(
@@ -686,8 +689,8 @@ mod tests {
             .handle(&request("example.com.", RecordType::AAAA), CLIENT)
             .await;
 
-        assert_eq!(response.response_code(), ResponseCode::NoError);
-        assert!(response.answers().is_empty());
+        assert_eq!(response.response_code, ResponseCode::NoError);
+        assert!(response.answers.is_empty());
         assert_eq!(
             calls.load(Ordering::Relaxed),
             0,
@@ -705,7 +708,7 @@ mod tests {
             .handle(&request("example.com.", RecordType::AAAA), CLIENT)
             .await;
 
-        assert_eq!(response.answers().len(), 1);
+        assert_eq!(response.answers.len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
@@ -721,8 +724,8 @@ mod tests {
         let blocked = pipe
             .handle(&request("sub.ads.example.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(blocked.response_code(), ResponseCode::NXDomain);
-        assert!(blocked.answers().is_empty());
+        assert_eq!(blocked.response_code, ResponseCode::NXDomain);
+        assert!(blocked.answers.is_empty());
         assert_eq!(
             calls.load(Ordering::Relaxed),
             0,
@@ -733,8 +736,8 @@ mod tests {
         let allowed = pipe
             .handle(&request("example.com.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(allowed.response_code(), ResponseCode::NoError);
-        assert_eq!(allowed.answers().len(), 1);
+        assert_eq!(allowed.response_code, ResponseCode::NoError);
+        assert_eq!(allowed.answers.len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
@@ -756,8 +759,8 @@ mod tests {
         let blocked = pipe
             .handle(&request("sub.ads.example.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(blocked.response_code(), ResponseCode::NoError);
-        assert_eq!(blocked.answers().len(), 1);
+        assert_eq!(blocked.response_code, ResponseCode::NoError);
+        assert_eq!(blocked.answers.len(), 1);
         assert_eq!(
             answer_addresses(&blocked),
             vec![IpAddr::V4(Ipv4Addr::UNSPECIFIED)],
@@ -769,7 +772,7 @@ mod tests {
         let blocked_v6 = pipe
             .handle(&request("ads.example.", RecordType::AAAA), CLIENT)
             .await;
-        assert_eq!(blocked_v6.response_code(), ResponseCode::NoError);
+        assert_eq!(blocked_v6.response_code, ResponseCode::NoError);
         assert_eq!(
             answer_addresses(&blocked_v6),
             vec![IpAddr::V6(Ipv6Addr::UNSPECIFIED)],
@@ -804,10 +807,10 @@ mod tests {
         let answered = pipe
             .handle(&request("nas.home.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(answered.response_code(), ResponseCode::NoError);
+        assert_eq!(answered.response_code, ResponseCode::NoError);
         assert_eq!(
-            answered.answers()[0].data().as_a(),
-            Some(&A(Ipv4Addr::new(192, 168, 20, 5)))
+            answered.answers[0].data,
+            RData::A(A(Ipv4Addr::new(192, 168, 20, 5)))
         );
         assert_eq!(calls.load(Ordering::Relaxed), 0, "rewrite must not forward");
 
@@ -816,15 +819,15 @@ mod tests {
         let aaaa = pipe
             .handle(&request("nas.home.", RecordType::AAAA), CLIENT)
             .await;
-        assert_eq!(aaaa.response_code(), ResponseCode::NoError);
-        assert!(aaaa.answers().is_empty());
+        assert_eq!(aaaa.response_code, ResponseCode::NoError);
+        assert!(aaaa.answers.is_empty());
         assert_eq!(calls.load(Ordering::Relaxed), 0);
 
         // A name without a rewrite still forwards.
         let other = pipe
             .handle(&request("example.com.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(other.answers().len(), 1);
+        assert_eq!(other.answers.len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
@@ -843,20 +846,23 @@ mod tests {
         let response = pipe
             .handle(&request("www.google.com.", RecordType::A), CLIENT)
             .await;
-        assert_eq!(response.response_code(), ResponseCode::NoError);
+        assert_eq!(response.response_code, ResponseCode::NoError);
 
         // The answer carries a CNAME to the safe-search host plus its address.
-        let cname = response
-            .answers()
-            .iter()
-            .find_map(|r| r.data().as_cname().map(|c| c.0.to_ascii()));
+        let cname = response.answers.iter().find_map(|r| match &r.data {
+            RData::CNAME(c) => Some(c.0.to_ascii()),
+            _ => None,
+        });
         assert_eq!(
             cname.as_deref(),
             Some("forcesafesearch.google.com."),
             "CNAME to the safe-search host"
         );
         assert!(
-            response.answers().iter().any(|r| r.data().as_a().is_some()),
+            response
+                .answers
+                .iter()
+                .any(|r| matches!(&r.data, RData::A(_))),
             "address record included"
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1, "target was resolved once");
@@ -874,9 +880,9 @@ mod tests {
         // Plain A answer, no CNAME rewrite.
         assert!(
             response
-                .answers()
+                .answers
                 .iter()
-                .all(|r| r.data().as_cname().is_none()),
+                .all(|r| !matches!(&r.data, RData::CNAME(_))),
             "no safe-search CNAME when the flag is off"
         );
         assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -885,10 +891,10 @@ mod tests {
     #[tokio::test]
     async fn missing_question_is_formerr() {
         let (pipe, _calls) = pipeline(Reply::Fail, PipelineOptions::default());
-        let mut req = Message::new();
-        req.set_id(7);
+        let mut req = Message::query();
+        req.metadata.id = 7;
         let response = pipe.handle(&req, CLIENT).await;
-        assert_eq!(response.response_code(), ResponseCode::FormErr);
+        assert_eq!(response.response_code, ResponseCode::FormErr);
     }
 
     #[tokio::test]
@@ -960,8 +966,8 @@ mod tests {
 
     #[test]
     fn negative_ttl_prefers_soa_minimum() {
-        let mut with_soa = Message::new();
-        with_soa.add_name_server(Record::from_rdata(
+        let mut with_soa = Message::query();
+        with_soa.add_authority(Record::from_rdata(
             Name::from_ascii("example.").unwrap(),
             300,
             RData::SOA(SOA::new(
@@ -975,6 +981,6 @@ mod tests {
             )),
         ));
         assert_eq!(negative_ttl(&with_soa), 30);
-        assert_eq!(negative_ttl(&Message::new()), DEFAULT_NEGATIVE_TTL);
+        assert_eq!(negative_ttl(&Message::query()), DEFAULT_NEGATIVE_TTL);
     }
 }

@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.2.4] - 2026-11-06
+
+- Wartung: **Sicherheitsaktualisierung der Upstream-DNS-Bibliothek.** JustDNS nutzt
+  die Bibliothek hickory-dns, um mit den Resolvern zu sprechen, an die es
+  weiterleitet — auch über DoT und DoH. Sie wurde aktualisiert, um drei gemeldete
+  Sicherheitsprobleme zu schließen: eines, bei dem ein fehlgeschlagener
+  DNSSEC-Prüfvorgang verborgen statt gemeldet werden konnte, eines, bei dem
+  unzusammenhängende Einträge einer Antwort verfolgt werden konnten, und eines, bei
+  dem eine präparierte Antwort beim Zusammenbauen einer Antwort die CPU auslasten
+  konnte. An der Bedienung von JustDNS ändert sich nichts.
+
 ## [0.2.3] - 2026-11-06
 
 - Neu: **Resolver-Antwortzeiten.** Die **Übersicht** zeigt jetzt, wie gut jeder

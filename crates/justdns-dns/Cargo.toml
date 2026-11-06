@@ -10,8 +10,8 @@ justdns-filter = { path = "../justdns-filter" }
 justdns-rewrite = { path = "../justdns-rewrite" }
 arc-swap = "1.7.1"
 futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
-hickory-proto = "0.25.2"
-hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }
+hickory-proto = "0.26.2"
+hickory-resolver = { version = "0.26.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots"] }
 moka = { version = "0.12.16", features = ["future"] }
 tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "io-util", "fs"] }
 tracing = "0.1"

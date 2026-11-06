@@ -119,7 +119,7 @@ where
         return Some(encoded);
     }
 
-    truncated(response).to_vec().ok()
+    response.truncate().to_vec().ok()
 }
 
 /// Serve DNS-over-TLS (RFC 7858) on `addr`: a TLS-wrapped, length-framed TCP
@@ -198,16 +198,6 @@ where
     }
 }
 
-/// Strip a response down to its header and question with the TC bit set, so a
-/// client retries the query over TCP.
-fn truncated(mut response: Message) -> Message {
-    response.set_truncated(true);
-    response.take_answers();
-    response.take_name_servers();
-    response.take_additionals();
-    response
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,10 +207,10 @@ mod tests {
     const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
     use hickory_proto::ProtoError;
+    use hickory_proto::op::DnsResponse;
     use hickory_proto::op::{MessageType, Query, ResponseCode};
     use hickory_proto::rr::rdata::A;
     use hickory_proto::rr::{Name, RData, Record, RecordType};
-    use hickory_proto::xfer::DnsResponse;
 
     use crate::cache::DnsCache;
     use crate::router::{Resolved, Router};
@@ -236,9 +226,9 @@ mod tests {
             name: Name,
             _record_type: RecordType,
         ) -> Result<Resolved, ProtoError> {
-            let mut message = Message::new();
-            message.set_message_type(MessageType::Response);
-            message.set_response_code(ResponseCode::NoError);
+            let mut message = Message::query();
+            message.metadata.message_type = MessageType::Response;
+            message.metadata.response_code = ResponseCode::NoError;
             for index in 0..self.answers {
                 message.add_answer(Record::from_rdata(
                     name.clone(),
@@ -256,9 +246,9 @@ mod tests {
     }
 
     fn request_bytes(record_type: RecordType) -> Vec<u8> {
-        let mut message = Message::new();
-        message.set_id(1234);
-        message.set_recursion_desired(true);
+        let mut message = Message::query();
+        message.metadata.id = 1234;
+        message.metadata.recursion_desired = true;
         message.add_query(Query::query(
             Name::from_ascii("example.com.").unwrap(),
             record_type,
@@ -273,9 +263,9 @@ mod tests {
             .await
             .expect("a reply");
         let decoded = Message::from_vec(&reply).unwrap();
-        assert_eq!(decoded.id(), 1234);
-        assert_eq!(decoded.answers().len(), 1);
-        assert!(!decoded.truncated());
+        assert_eq!(decoded.id, 1234);
+        assert_eq!(decoded.answers.len(), 1);
+        assert!(!decoded.truncation);
     }
 
     #[tokio::test]
@@ -287,9 +277,9 @@ mod tests {
             .expect("a reply");
         assert!(reply.len() <= 512);
         let decoded = Message::from_vec(&reply).unwrap();
-        assert!(decoded.truncated());
-        assert!(decoded.answers().is_empty());
-        assert_eq!(decoded.id(), 1234);
+        assert!(decoded.truncation);
+        assert!(decoded.answers.is_empty());
+        assert_eq!(decoded.id, 1234);
     }
 
     #[tokio::test]
@@ -313,8 +303,8 @@ mod tests {
         client.read_exact(&mut reply).await.unwrap();
 
         let decoded = Message::from_vec(&reply).unwrap();
-        assert_eq!(decoded.id(), 1234);
-        assert_eq!(decoded.answers().len(), 1);
+        assert_eq!(decoded.id, 1234);
+        assert_eq!(decoded.answers.len(), 1);
 
         // Closing the client ends the connection cleanly.
         drop(client);
