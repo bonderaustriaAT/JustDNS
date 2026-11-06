@@ -30,7 +30,12 @@ runners pull with `force_pull` off):
 docker build -t 192.168.20.143:3000/bonderosa/ci-base:latest ci-base
 ```
 
-Or push to the registry once (needs a one-time `docker login` to the registry):
+Or publish it to the registry. The easiest way is the **`CI base image`
+workflow** (`.gitea/workflows/ci-base.yml`): run it from the Actions tab
+(`workflow_dispatch`), and it also runs automatically when this `Dockerfile`
+changes on `main`. It logs in with the same `REGISTRY_TOKEN` secret as the
+release-image workflow and pushes `ci-base:latest`. To push by hand instead
+(needs a one-time `docker login` to the registry):
 
 ```sh
 docker login 192.168.20.143:3000
@@ -39,3 +44,10 @@ docker push 192.168.20.143:3000/bonderosa/ci-base:latest
 
 Rebuild and reload (or repush) whenever the toolchain in the `Dockerfile`
 changes — day to day it stays put and the runners reuse it.
+
+A registry copy is a safety net, not a replacement for the local image: the
+runners pull with `force_pull` off, so they keep using a local `ci-base:latest`
+when it exists and only re-pull from the registry when it is missing. For that
+re-pull to work the runner must be able to read the image — either the
+`bonderosa/ci-base` package is public (anonymous pull), or the runner has a
+one-time `docker login` to `192.168.20.143:3000`.
