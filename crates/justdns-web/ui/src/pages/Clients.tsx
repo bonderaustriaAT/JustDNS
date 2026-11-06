@@ -10,6 +10,7 @@ import {
   type ClientsView,
   type DeviceKind,
   type DevicePolicy,
+  type DomainCount,
   type Group,
   type ListObject,
   type PolicyDelta,
@@ -143,6 +144,8 @@ export function Clients() {
 
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<ClientRow | null>(null);
+  // Which row has its top-domains panel open, keyed by target. One at a time.
+  const [domainsFor, setDomainsFor] = useState<string | null>(null);
 
   // The device list can grow long, so it collapses by default — the groups
   // panel sits above it and stays reachable without scrolling past every device.
@@ -359,6 +362,22 @@ export function Clients() {
                       </span>
                     </span>
                     <span className={styles.actions}>
+                      {!row.isRange && (
+                        <button
+                          type="button"
+                          className={styles.action}
+                          aria-expanded={domainsFor === key}
+                          onClick={() =>
+                            setDomainsFor((cur) => (cur === key ? null : key))
+                          }
+                          title={t("clients.topDomainsTitle")}
+                          aria-label={t("clients.topDomainsAria", {
+                            name: row.name ?? row.target,
+                          })}
+                        >
+                          {t("clients.topDomains")}
+                        </button>
+                      )}
                       {row.known ? (
                         <>
                           <button
@@ -390,6 +409,9 @@ export function Clients() {
                         </button>
                       )}
                     </span>
+                    {domainsFor === key ? (
+                      <ClientTopDomains client={row.target} />
+                    ) : null}
                   </>
                 )}
               </li>
@@ -417,6 +439,55 @@ export function Clients() {
           }
           onCancel={() => setConfirming(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/** The domains a single client looked up most over the last 24 hours, shown
+ *  inline under its row. Fetched when the panel opens; a never-seen client shows
+ *  an empty note. The stored name is fully qualified (trailing dot), trimmed for
+ *  display here. */
+function ClientTopDomains({ client }: { client: string }) {
+  const { t, locale } = useI18n();
+  const nf = useRef(new Intl.NumberFormat(locale));
+  nf.current = new Intl.NumberFormat(locale);
+  const [rows, setRows] = useState<DomainCount[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setFailed(false);
+    setRows(null);
+    api
+      .topDomains(client, 10, controller.signal)
+      .then(setRows)
+      .catch(() => {
+        if (!controller.signal.aborted) setFailed(true);
+      });
+    return () => controller.abort();
+  }, [client]);
+
+  return (
+    <div className={styles.topDomains}>
+      <span className={styles.topDomainsHead}>{t("clients.topDomainsTitle")}</span>
+      {failed ? (
+        <p className={styles.topDomainsEmpty}>{t("clients.topDomainsFailed")}</p>
+      ) : rows === null ? (
+        <p className={styles.topDomainsEmpty}>{t("common.loading")}</p>
+      ) : rows.length === 0 ? (
+        <p className={styles.topDomainsEmpty}>{t("clients.topDomainsEmpty")}</p>
+      ) : (
+        <ol className={styles.topDomainsList}>
+          {rows.map((row) => (
+            <li key={row.domain} className={styles.topDomainsRow}>
+              <span className={styles.topDomainsName}>{row.domain.replace(/\.$/, "")}</span>
+              <span className={styles.topDomainsCount}>
+                {t("clients.queries", { n: nf.current.format(row.count) })}
+              </span>
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );

@@ -19,6 +19,17 @@ zeigen. Ein Gerät zu benennen ist außerdem der erste Schritt, um ihm eigene
 
 So liest sich die Seite wie „Was ist gerade in meinem Netzwerk“.
 
+## Die meistgefragten Domains eines Geräts
+
+Bei jeder Zeile — ob benanntes Gerät oder gesehener Client — gibt es die
+Schaltfläche **Top-Domains**. Sie klappt direkt unter der Zeile die **meistgefragten
+Domains der letzten 24 Stunden** für genau dieses Gerät auf, die häufigste zuerst,
+jeweils mit der Anzahl der Abfragen. So siehst du auf einen Blick, womit ein Gerät am
+meisten spricht — etwa um ein auffälliges IoT-Gerät einzuordnen oder zu prüfen, was
+auf dem Tablet der Kinder am häufigsten nachgefragt wird. Hat ein Gerät in den letzten
+24 Stunden nichts gefragt, bleibt die Liste leer. (Für einen **CIDR-Bereich** gibt es
+die Schaltfläche nicht — die Top-Domains werden je exakter Client-Adresse geführt.)
+
 ## Ein Gerät benennen
 
 1. Klick **Benennen** bei einem unbenannten Client (das füllt seine Adresse vor), oder

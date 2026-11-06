@@ -39,6 +39,14 @@ export interface DayStats {
   top_clients: ClientCount[];
 }
 
+/** One domain a client looked up and how often, over the last 24 hours. The
+ *  `domain` is fully qualified as the query log stores it (trailing dot); the UI
+ *  trims it for display. */
+export interface DomainCount {
+  domain: string;
+  count: number;
+}
+
 export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 
 /// The speed/privacy profile: a single switch that picks the resolvers and how
@@ -431,6 +439,12 @@ export const api = {
   stats: (signal?: AbortSignal) => getJson<Stats>("/api/stats", signal),
   statsDay: (signal?: AbortSignal) => getJson<DayStats>("/api/stats/day", signal),
   activity: (signal?: AbortSignal) => getJson<ActivityBucket[]>("/api/activity", signal),
+  /** The domains a single client looked up most over the last 24 hours, most
+   *  lookups first. A never-seen client yields an empty list. */
+  topDomains: (client: string, limit = 10, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ client, limit: String(limit) });
+    return getJson<DomainCount[]>(`/api/stats/top-domains?${params}`, signal);
+  },
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());

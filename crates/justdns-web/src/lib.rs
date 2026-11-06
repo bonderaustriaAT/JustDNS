@@ -30,7 +30,7 @@ use justdns_dns::tls::TlsManager;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
 use justdns_rewrite::{Alias, Rewrite, RewriteError, RewriteStore, RewritesView};
-use justdns_store::{ActivityBucket, QueryEvent, Store};
+use justdns_store::{ActivityBucket, DomainCount, QueryEvent, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -185,6 +185,7 @@ fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/stats", get(stats))
         .route("/api/stats/day", get(stats_day))
+        .route("/api/stats/top-domains", get(top_domains))
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
@@ -1504,6 +1505,37 @@ async fn activity(State(store): State<Store>) -> Json<Vec<ActivityBucket>> {
     Json(store.activity())
 }
 
+/// How many top domains the per-client view asks for by default, and the most it
+/// will return at once.
+const DEFAULT_TOP_DOMAINS: usize = 10;
+const MAX_TOP_DOMAINS: usize = 50;
+
+#[derive(Deserialize)]
+struct TopDomainsParams {
+    /// The client address to rank domains for.
+    client: String,
+    /// How many to return (defaults to [`DEFAULT_TOP_DOMAINS`], capped at
+    /// [`MAX_TOP_DOMAINS`]).
+    limit: Option<usize>,
+}
+
+/// The domains a single client looked up most over the last day, most lookups
+/// first. Takes the client address as a query parameter; an unparseable or
+/// never-seen client simply yields an empty list.
+async fn top_domains(
+    State(store): State<Store>,
+    Query(params): Query<TopDomainsParams>,
+) -> Json<Vec<DomainCount>> {
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_TOP_DOMAINS)
+        .min(MAX_TOP_DOMAINS);
+    match params.client.trim().parse() {
+        Ok(client) => Json(store.top_domains_for_client(client, limit)),
+        Err(_) => Json(Vec::new()),
+    }
+}
+
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
@@ -1764,6 +1796,46 @@ mod tests {
         assert!(body.contains("\"cache_hits\":1"), "{body}");
         assert!(body.contains("\"active_clients\":2"), "{body}");
         assert!(body.contains("\"blocked\":0"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn top_domains_ranks_a_single_clients_lookups() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let client = Ipv4Addr::new(10, 0, 0, 1);
+        store.record(sample(client, "news.example.", QuerySource::Upstream));
+        store.record(sample(client, "news.example.", QuerySource::Cache));
+        store.record(sample(client, "ads.example.", QuerySource::Upstream));
+        // Another client's lookup must not appear in .1's ranking.
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 2),
+            "other.example.",
+            QuerySource::Upstream,
+        ));
+
+        let response = get(store, "/api/stats/top-domains?client=10.0.0.1").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_of(response).await;
+        assert!(body.contains("\"domain\":\"news.example.\""), "{body}");
+        assert!(body.contains("\"count\":2"), "{body}");
+        assert!(body.contains("ads.example."), "{body}");
+        assert!(
+            !body.contains("other.example."),
+            "other client leaked: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn top_domains_unknown_client_is_empty() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "news.example.",
+            QuerySource::Upstream,
+        ));
+        // A never-seen client (and a missing/garbled one) yields an empty list.
+        let response = get(store, "/api/stats/top-domains?client=10.0.0.9").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_of(response).await, "[]");
     }
 
     #[tokio::test]

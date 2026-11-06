@@ -19,6 +19,16 @@ Open **Devices**. You see two kinds of rows:
 
 This makes the page read like "what's on my network right now".
 
+## A device's most-looked-up domains
+
+Every row — a named device or a seen client — has a **Top domains** button. It opens,
+right under the row, the **most-looked-up domains of the last 24 hours** for that one
+device, busiest first, each with its lookup count. It's a quick way to see what a
+device talks to most — to make sense of a chatty IoT gadget, say, or to check what the
+kids' tablet asks for most. If a device made no queries in the last 24 hours, the list
+is empty. (A **CIDR range** has no such button — top domains are kept per exact client
+address.)
+
 ## Name a device
 
 1. Click **Name this** on an unnamed client (this pre-fills its address), or type an

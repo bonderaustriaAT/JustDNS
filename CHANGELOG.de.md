@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.2.2] - 2026-11-06
+
+- Neu: **Top-Domains pro Gerät.** Auf der Seite **Geräte** öffnet die Schaltfläche
+  **Top-Domains** bei jeder Zeile die meistgefragten Domains der letzten 24 Stunden
+  für genau dieses Gerät, die häufigste zuerst und mit Anzahl. So siehst du auf einen
+  Blick, womit ein einzelnes Gerät am meisten spricht. Die Auswertung übersteht wie
+  die übrigen Statistiken einen Neustart.
+
 ## [0.2.1] - 2026-11-05
 
 - Geändert: **die Verschlüsselungs-Einstellungen sind jetzt an einem Ort.**

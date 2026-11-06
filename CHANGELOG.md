@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.2.2] - 2026-11-06
+
+- New: **top domains per device.** On the **Devices** page, every row now has a
+  **Top domains** button that opens the most-looked-up domains of the last 24
+  hours for that one device, busiest first and with counts — so you can see at a
+  glance what a single device talks to most. The figures survive a restart like
+  the rest of the statistics.
+
 ## [0.2.1] - 2026-11-05
 
 - Changed: **the encryption settings are now in one place.** "Encrypted client

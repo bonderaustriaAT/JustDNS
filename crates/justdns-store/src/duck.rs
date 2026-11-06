@@ -199,6 +199,31 @@ impl DuckStore {
                 }
             }
 
+            // Seed per-client, per-domain counts for the per-client top-domains
+            // view. Ordering by count puts the busiest domains first so they win
+            // the per-client cap when a client visited more distinct names in an
+            // hour than are kept.
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, client, name, COUNT(*)
+                 FROM queries WHERE at_ms >= ?
+                 GROUP BY hour, client, name ORDER BY hour, client, COUNT(*) DESC"
+            ))?;
+            let rows = stmt.query_map([cutoff], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    count(row, 3)?,
+                ))
+            })?;
+            for row in rows {
+                let (hour, client, name, count) = row?;
+                if let Some(&i) = index.get(&hour) {
+                    let client = client.parse().unwrap_or(UNKNOWN_CLIENT);
+                    buckets[i].add_domain(client, &name, count);
+                }
+            }
+
             // Seed the per-hour latency histogram from every query, binned
             // exactly as the hot view bins a live answer (see `latency_bin`), so
             // the day's median and p95 survive a restart.
@@ -451,6 +476,58 @@ mod tests {
         assert_eq!(hour.latency_hist[4], 1, "10 ms in the <=16 ms bucket");
         assert_eq!(hour.clients.get(&client_a), Some(&2));
         assert_eq!(hour.clients.get(&client_b), Some(&1));
+    }
+
+    #[test]
+    fn day_buckets_seed_per_client_domain_counts() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let client_a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
+        let client_b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 20));
+        let mk = |at_ms, client, name: &str| QueryEvent {
+            at_ms,
+            client,
+            name: name.to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source: QuerySource::Upstream,
+            duration_ms: 1,
+            answers: 1,
+            addresses: Vec::new(),
+        };
+        let store = DuckStore::open_in_memory().unwrap();
+        store
+            .insert_batch(&[
+                mk(5, client_a, "news.example."),
+                mk(6, client_a, "news.example."),
+                mk(7, client_a, "ads.example."),
+                mk(8, client_b, "shop.example."),
+            ])
+            .unwrap();
+
+        let buckets = store.day_buckets().unwrap();
+        assert_eq!(buckets.len(), 1, "all four fall in hour 0");
+        let domains = &buckets[0].client_domains;
+        // client_a's two distinct domains are seeded with their counts.
+        assert_eq!(
+            domains.get(&client_a).and_then(|d| d.get("news.example.")),
+            Some(&2)
+        );
+        assert_eq!(
+            domains.get(&client_a).and_then(|d| d.get("ads.example.")),
+            Some(&1)
+        );
+        // client_b's single domain, kept apart from client_a.
+        assert_eq!(
+            domains.get(&client_b).and_then(|d| d.get("shop.example.")),
+            Some(&1)
+        );
+        assert!(
+            domains
+                .get(&client_b)
+                .and_then(|d| d.get("news.example."))
+                .is_none()
+        );
     }
 
     #[test]

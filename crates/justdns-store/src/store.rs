@@ -16,7 +16,9 @@ use tracing::warn;
 
 use crate::duck::{DuckStore, StoreError};
 use crate::event::QueryEvent;
-use crate::recorder::{ActivityBucket, ClientActivity, ClientCount, DayStats, Recorder, Stats};
+use crate::recorder::{
+    ActivityBucket, ClientActivity, ClientCount, DayStats, DomainCount, Recorder, Stats,
+};
 
 /// Force a flush to DuckDB once this many events have accumulated.
 const FLUSH_BATCH: usize = 128;
@@ -102,6 +104,12 @@ impl Store {
     /// The busiest clients over the last day, most queries first, up to `n`.
     pub fn top_clients(&self, n: usize) -> Vec<ClientCount> {
         self.recorder.top_clients(n)
+    }
+
+    /// The domains `client` looked up most over the last day, most lookups first,
+    /// up to `n`. Empty when the client made no recorded lookups in the window.
+    pub fn top_domains_for_client(&self, client: std::net::IpAddr, n: usize) -> Vec<DomainCount> {
+        self.recorder.top_domains_for_client(client, n)
     }
 
     /// Every client seen over the last day, with its query count and when it was

@@ -26,6 +26,12 @@ const ACTIVITY_HOURS: usize = 24;
 /// see many clients; past this cap an hour stops taking on new ones, so the
 /// per-hour tally stays bounded. On a home LAN the real count is far below it.
 const MAX_CLIENTS_PER_HOUR: usize = 1024;
+/// Most distinct domains tracked per client per hour, for the per-client
+/// top-domains view. A client that visits more distinct names in one hour stops
+/// taking on new ones past this cap, so the per-hour map stays bounded even on a
+/// busy client; the domains it visits most still win, since rehydration seeds the
+/// busiest first. On a home LAN the real count is far below it.
+const MAX_DOMAINS_PER_CLIENT_HOUR: usize = 200;
 
 /// Response code for a server failure.
 const RCODE_SERVFAIL: u16 = 2;
@@ -151,6 +157,17 @@ pub struct ClientCount {
     pub count: u64,
 }
 
+/// One domain and how many times a client looked it up over the kept hours. The
+/// name is kept exactly as the query log stores it (fully qualified, with its
+/// trailing dot); presenting it is the reader's job.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DomainCount {
+    /// The queried name.
+    pub domain: String,
+    /// How many times this client looked it up across the kept hours.
+    pub count: u64,
+}
+
 /// One client's recent footprint, for the devices view: how many queries it made
 /// over the kept hours and when it was last seen. The last-seen time is precise
 /// for a client still in the recent ring; for one seen earlier in the day it
@@ -185,6 +202,11 @@ pub(crate) struct HourBucket {
     /// median stays near zero while the p95 still shows the slow tail.
     pub(crate) latency_hist: [u64; LATENCY_BINS],
     pub(crate) clients: HashMap<IpAddr, u64>,
+    /// Per-client domain counts: for each client, how many times it looked up
+    /// each name this hour. Feeds the per-client top-domains view. Bounded by
+    /// [`MAX_CLIENTS_PER_HOUR`] distinct clients and
+    /// [`MAX_DOMAINS_PER_CLIENT_HOUR`] distinct domains per client.
+    pub(crate) client_domains: HashMap<IpAddr, HashMap<String, u64>>,
 }
 
 impl HourBucket {
@@ -197,6 +219,7 @@ impl HourBucket {
             duration_sum_ms: 0,
             latency_hist: [0; LATENCY_BINS],
             clients: HashMap::new(),
+            client_domains: HashMap::new(),
         }
     }
 
@@ -221,6 +244,31 @@ impl HourBucket {
             *existing += count;
         } else if self.clients.len() < MAX_CLIENTS_PER_HOUR {
             self.clients.insert(client, count);
+        }
+    }
+
+    /// Count one lookup of `name` by `client` (live path).
+    fn bump_domain(&mut self, client: IpAddr, name: &str) {
+        self.add_domain(client, name, 1);
+    }
+
+    /// Add `count` lookups of `name` for `client`, respecting both caps: a client
+    /// not yet tracked is dropped once the hour already holds
+    /// [`MAX_CLIENTS_PER_HOUR`] of them, and within a tracked client a new domain
+    /// is dropped once it already holds [`MAX_DOMAINS_PER_CLIENT_HOUR`]. Used by
+    /// [`Self::bump_domain`] (count 1, live) and by rehydration, which seeds
+    /// already-aggregated per-client, per-domain counts from the durable log.
+    pub(crate) fn add_domain(&mut self, client: IpAddr, name: &str, count: u64) {
+        if !self.client_domains.contains_key(&client)
+            && self.client_domains.len() >= MAX_CLIENTS_PER_HOUR
+        {
+            return;
+        }
+        let domains = self.client_domains.entry(client).or_default();
+        if let Some(existing) = domains.get_mut(name) {
+            *existing += count;
+        } else if domains.len() < MAX_DOMAINS_PER_CLIENT_HOUR {
+            domains.insert(name.to_owned(), count);
         }
     }
 }
@@ -300,6 +348,7 @@ impl Recorder {
             blocked,
             event.duration_ms,
             event.client,
+            &event.name,
         );
 
         state.recent.push_back(event);
@@ -402,6 +451,30 @@ impl Recorder {
         ranked
     }
 
+    /// The domains `client` looked up most over the kept hours, most lookups
+    /// first, up to `n`. Counts are summed across the hourly buckets; ties are
+    /// broken by name so the order is stable. Empty when the client has no
+    /// recorded lookups in the kept window.
+    pub fn top_domains_for_client(&self, client: IpAddr, n: usize) -> Vec<DomainCount> {
+        let state = self.state.lock().expect("recorder lock poisoned");
+        let mut totals: HashMap<String, u64> = HashMap::new();
+        for bucket in &state.activity {
+            if let Some(domains) = bucket.client_domains.get(&client) {
+                for (domain, &count) in domains {
+                    *totals.entry(domain.clone()).or_insert(0) += count;
+                }
+            }
+        }
+        let mut ranked: Vec<DomainCount> = totals
+            .into_iter()
+            .map(|(domain, count)| DomainCount { domain, count })
+            .collect();
+        // Most lookups first; ties broken by name so the order is stable.
+        ranked.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.domain.cmp(&b.domain)));
+        ranked.truncate(n);
+        ranked
+    }
+
     /// Every client seen over the kept hours, with its query count and when it
     /// was last seen. The count is summed across the hourly buckets (the same
     /// source as [`Self::top_clients`]); the last-seen time is the exact newest
@@ -458,6 +531,7 @@ fn bump_activity(
     blocked: bool,
     duration_ms: u32,
     client: IpAddr,
+    name: &str,
 ) {
     let hour = at_ms - at_ms.rem_euclid(HOUR_MS);
 
@@ -486,6 +560,7 @@ fn bump_activity(
     }
     bucket.add_latency(u64::from(duration_ms));
     bucket.bump_client(client);
+    bucket.bump_domain(client, name);
 }
 
 #[cfg(test)]
@@ -802,5 +877,64 @@ mod tests {
         assert_eq!(activity[1].client, IpAddr::V4(b));
         assert_eq!(activity[1].count, 1);
         assert_eq!(activity[1].last_seen_ms, 30);
+    }
+
+    /// A query event for `client` looking up `name` at `at_ms`.
+    fn domain_event(at_ms: i64, client: Ipv4Addr, name: &str) -> QueryEvent {
+        QueryEvent {
+            at_ms,
+            client: IpAddr::V4(client),
+            name: name.to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source: QuerySource::Upstream,
+            duration_ms: 1,
+            answers: 1,
+            addresses: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn top_domains_for_client_ranks_by_count_then_name() {
+        let recorder = Recorder::new(100);
+        let a = Ipv4Addr::new(10, 0, 0, 1);
+        let b = Ipv4Addr::new(10, 0, 0, 2);
+        // a: news (3, spread across two hours), ads (2), shop (2 — loses tie by name).
+        recorder.record(domain_event(1, a, "news.example."));
+        recorder.record(domain_event(2, a, "news.example."));
+        recorder.record(domain_event(HOUR_MS + 1, a, "news.example."));
+        recorder.record(domain_event(3, a, "ads.example."));
+        recorder.record(domain_event(4, a, "ads.example."));
+        recorder.record(domain_event(5, a, "shop.example."));
+        recorder.record(domain_event(6, a, "shop.example."));
+        // A different client's lookups must not leak into a's ranking.
+        recorder.record(domain_event(7, b, "other.example."));
+
+        let top = recorder.top_domains_for_client(IpAddr::V4(a), 2);
+        assert_eq!(
+            top,
+            vec![
+                DomainCount {
+                    domain: "news.example.".to_owned(),
+                    count: 3,
+                },
+                DomainCount {
+                    domain: "ads.example.".to_owned(),
+                    count: 2,
+                },
+            ]
+        );
+
+        // The other client sees only its own domain.
+        let other = recorder.top_domains_for_client(IpAddr::V4(b), 10);
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].domain, "other.example.");
+
+        // A client with no recorded lookups gets an empty list.
+        assert!(
+            recorder
+                .top_domains_for_client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)), 10)
+                .is_empty()
+        );
     }
 }
