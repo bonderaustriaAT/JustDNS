@@ -42,6 +42,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # The runner's /tmp is a tiny tmpfs; the C++ compiler writes DuckDB's
+      # huge intermediate assembly (.s) there and fills it ("No space left on
+      # device"), while the .o output on the workspace volume has room. Point
+      # the compiler's temp at the workspace so the build has space.
+      - name: Build temp on the workspace volume (small /tmp otherwise fills up)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.build-tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/.build-tmp" >> "$GITHUB_ENV"
+
       - name: Format
         run: cargo fmt --all --check
 
