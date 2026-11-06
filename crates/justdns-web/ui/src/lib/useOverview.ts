@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { api, type ClientCount, type QueryRow } from "./api";
+import { api, type ClientCount, type QueryRow, type ResolverStat } from "./api";
 import { displayName, recordTypeLabel, sourceLabel } from "./dns";
 import { useI18n, type Lang } from "./i18n";
 
@@ -46,6 +46,9 @@ export interface OverviewData {
   day: DayFigures;
   /** Busiest clients over the last 24h, most queries first. */
   topClients: ClientCount[];
+  /** Upstream resolvers that answered over the last 24h, busiest first, with
+   *  their response-time figures. Empty on a cache-only instance. */
+  resolvers: ResolverStat[];
 }
 
 export interface OverviewState {
@@ -101,11 +104,12 @@ export function useOverview(): OverviewState {
 
     async function load() {
       try {
-        const [stats, statsDay, activity, queries] = await Promise.all([
+        const [stats, statsDay, activity, queries, resolvers] = await Promise.all([
           api.stats(controller.signal),
           api.statsDay(controller.signal),
           api.activity(controller.signal),
           api.queries(RECENT_LIMIT, "", controller.signal),
+          api.resolverStats(controller.signal),
         ]);
         if (!active) return;
 
@@ -142,6 +146,7 @@ export function useOverview(): OverviewState {
               p95DurationMs: statsDay.p95_duration_ms,
             },
             topClients: statsDay.top_clients,
+            resolvers,
           },
           error: null,
           loading: false,

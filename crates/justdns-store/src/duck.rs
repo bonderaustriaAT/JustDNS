@@ -33,19 +33,22 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
     source        VARCHAR NOT NULL,
     duration_ms   BIGINT  NOT NULL,
     answers       INTEGER NOT NULL,
-    addresses     VARCHAR DEFAULT ''
+    addresses     VARCHAR DEFAULT '',
+    resolver      VARCHAR DEFAULT ''
 );";
 
-/// Schema upgrades for a log written by an older build. `addresses` (the IPs a
-/// query resolved to) was added after the first release, so an existing file
-/// gains the column with an empty default; its old rows then read back as having
-/// no recorded addresses. The column is nullable because DuckDB will not add a
-/// NOT NULL column with `IF NOT EXISTS`; every write still sets it.
-const MIGRATIONS: &str =
-    "ALTER TABLE queries ADD COLUMN IF NOT EXISTS addresses VARCHAR DEFAULT '';";
+/// Schema upgrades for a log written by an older build, applied in order. Each
+/// column added after the first release gains an empty default on an existing
+/// file, so its old rows read back as having no value. `addresses` holds the IPs
+/// a query resolved to; `resolver` holds the upstream that answered (empty for a
+/// cache, block or local answer). Both are nullable because DuckDB will not add
+/// a NOT NULL column with `IF NOT EXISTS`; every write still sets them.
+const MIGRATIONS: &str = "\
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS addresses VARCHAR DEFAULT '';
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS resolver VARCHAR DEFAULT '';";
 
-const SELECT_COLUMNS: &str =
-    "at_ms, client, name, record_type, response_code, source, duration_ms, answers, addresses";
+const SELECT_COLUMNS: &str = "at_ms, client, name, record_type, response_code, source, \
+    duration_ms, answers, addresses, resolver";
 
 /// Errors from the DuckDB query log.
 #[derive(Debug, thiserror::Error)]
@@ -86,6 +89,7 @@ impl DuckStore {
         for event in events {
             let client = event.client.to_string();
             let addresses = join_addresses(&event.addresses);
+            let resolver = event.resolver.as_deref().unwrap_or("");
             appender.append_row(params![
                 event.at_ms,
                 client,
@@ -96,6 +100,7 @@ impl DuckStore {
                 i64::from(event.duration_ms),
                 i32::from(event.answers),
                 addresses,
+                resolver,
             ])?;
         }
         appender.flush()?;
@@ -244,6 +249,54 @@ impl DuckStore {
                     }
                 }
             }
+
+            // Seed per-resolver answer counts and summed handling time for the
+            // per-resolver response-time view. Only upstream answers carry a
+            // resolver, so rows without one are skipped; ordering by count puts
+            // the busiest resolvers first so they win the per-hour cap.
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, resolver, COUNT(*),
+                        CAST(COALESCE(SUM(duration_ms), 0) AS BIGINT)
+                 FROM queries WHERE at_ms >= ? AND resolver <> ''
+                 GROUP BY hour, resolver ORDER BY hour, COUNT(*) DESC"
+            ))?;
+            let rows = stmt.query_map([cutoff], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    count(row, 2)?,
+                    count(row, 3)?,
+                ))
+            })?;
+            for row in rows {
+                let (hour, resolver, count, duration_sum) = row?;
+                if let Some(&i) = index.get(&hour) {
+                    buckets[i].seed_resolver(&resolver, count, duration_sum);
+                }
+            }
+
+            // Seed each resolver's latency histogram, binned exactly as the hot
+            // view bins a live answer, so the per-resolver median and p95 survive
+            // a restart. Reuses the same `bin_case` as the overall histogram.
+            let mut stmt = self.conn.prepare(&format!(
+                "SELECT at_ms - (at_ms % {HOUR_MS}) AS hour, resolver, {bin_case} AS bin, COUNT(*)
+                 FROM queries WHERE at_ms >= ? AND resolver <> ''
+                 GROUP BY hour, resolver, bin"
+            ))?;
+            let rows = stmt.query_map([cutoff], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    count(row, 3)?,
+                ))
+            })?;
+            for row in rows {
+                let (hour, resolver, bin, count) = row?;
+                if let (Some(&i), Ok(bin)) = (index.get(&hour), usize::try_from(bin)) {
+                    buckets[i].seed_resolver_bin(&resolver, bin, count);
+                }
+            }
         }
 
         Ok(buckets)
@@ -281,6 +334,9 @@ fn row_to_event(row: &duckdb::Row<'_>) -> duckdb::Result<QueryEvent> {
         duration_ms: u32::try_from(row.get::<_, i64>(6)?).unwrap_or_default(),
         answers: u16::try_from(row.get::<_, i32>(7)?).unwrap_or_default(),
         addresses: parse_addresses(&row.get::<_, Option<String>>(8)?.unwrap_or_default()),
+        resolver: row
+            .get::<_, Option<String>>(9)?
+            .filter(|label| !label.is_empty()),
     })
 }
 
@@ -321,6 +377,7 @@ mod tests {
             duration_ms: 4,
             answers: 2,
             addresses: vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
+            resolver: None,
         }
     }
 
@@ -452,6 +509,7 @@ mod tests {
             duration_ms,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -494,6 +552,7 @@ mod tests {
             duration_ms: 1,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -528,6 +587,75 @@ mod tests {
                 .and_then(|d| d.get("news.example."))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn day_buckets_seed_per_resolver_stats() {
+        let client = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
+        let mk = |at_ms, resolver: Option<&str>, duration_ms, source| QueryEvent {
+            at_ms,
+            client,
+            name: "example.com.".to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source,
+            duration_ms,
+            answers: 1,
+            addresses: Vec::new(),
+            resolver: resolver.map(str::to_owned),
+        };
+        let store = DuckStore::open_in_memory().unwrap();
+        store
+            .insert_batch(&[
+                mk(1, Some("dns.quad9.net"), 10, QuerySource::Upstream),
+                mk(2, Some("dns.quad9.net"), 20, QuerySource::Upstream),
+                mk(
+                    3,
+                    Some("protective.joindns4.eu"),
+                    100,
+                    QuerySource::Upstream,
+                ),
+                // A cache hit carries no resolver and must not seed anything.
+                mk(4, None, 0, QuerySource::Cache),
+            ])
+            .unwrap();
+
+        let buckets = store.day_buckets().unwrap();
+        assert_eq!(buckets.len(), 1, "all fall in hour 0");
+        let resolvers = &buckets[0].resolvers;
+        assert_eq!(
+            resolvers.len(),
+            2,
+            "only the two upstreams, not the cache hit"
+        );
+
+        let quad9 = resolvers.get("dns.quad9.net").expect("quad9 seeded");
+        assert_eq!(quad9.count, 2);
+        assert_eq!(quad9.duration_sum_ms, 30, "10 + 20 ms summed");
+        // 10 ms → <=16 bucket, 20 ms → <=32 bucket.
+        assert_eq!(quad9.latency_hist[4], 1, "10 ms in the <=16 ms bucket");
+        assert_eq!(quad9.latency_hist[5], 1, "20 ms in the <=32 ms bucket");
+
+        let dns4eu = resolvers
+            .get("protective.joindns4.eu")
+            .expect("dns4eu seeded");
+        assert_eq!(dns4eu.count, 1);
+        assert_eq!(dns4eu.duration_sum_ms, 100);
+        assert_eq!(dns4eu.latency_hist[7], 1, "100 ms in the <=128 ms bucket");
+    }
+
+    #[test]
+    fn resolver_round_trips_through_the_log() {
+        let store = DuckStore::open_in_memory().unwrap();
+        let mut upstream = event(1, QuerySource::Upstream, 0);
+        upstream.resolver = Some("dns.quad9.net".to_owned());
+        let cached = event(2, QuerySource::Cache, 0); // no resolver
+        store.insert_batch(&[upstream, cached]).unwrap();
+
+        let recent = store.recent(10).unwrap();
+        // Newest first: the cache hit has no resolver, the upstream one does.
+        assert_eq!(recent[0].resolver, None);
+        assert_eq!(recent[1].resolver.as_deref(), Some("dns.quad9.net"));
     }
 
     #[test]

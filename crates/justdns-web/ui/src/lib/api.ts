@@ -47,6 +47,18 @@ export interface DomainCount {
   count: number;
 }
 
+/** One upstream resolver's performance over the last 24 hours: how many answers
+ *  it gave and its handling-time figures. Only forwarded queries count — cache
+ *  hits, blocks and local answers never reach a resolver. */
+export interface ResolverStat {
+  /** The resolver's label — its DoT/DoH certificate name, or plain IP. */
+  resolver: string;
+  count: number;
+  avg_duration_ms: number;
+  median_duration_ms: number;
+  p95_duration_ms: number;
+}
+
 export type UpstreamMode = "racing" | "fallback" | "balanced" | "rules";
 
 /// The speed/privacy profile: a single switch that picks the resolvers and how
@@ -445,6 +457,10 @@ export const api = {
     const params = new URLSearchParams({ client, limit: String(limit) });
     return getJson<DomainCount[]>(`/api/stats/top-domains?${params}`, signal);
   },
+  /** The upstream resolvers that answered over the last 24 hours, busiest first,
+   *  each with its handling-time figures. Empty on a cache-only instance. */
+  resolverStats: (signal?: AbortSignal) =>
+    getJson<ResolverStat[]>("/api/stats/resolvers", signal),
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());

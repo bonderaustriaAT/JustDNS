@@ -72,6 +72,34 @@ impl Default for PipelineOptions {
     }
 }
 
+/// How a query was answered: where the answer came from and, when it came from
+/// an upstream, which resolver gave it. Carried out of [`Pipeline::answer`] so
+/// [`Pipeline::handle`] can record both on the query.
+struct Answered {
+    source: AnswerSource,
+    resolver: Option<Arc<str>>,
+}
+
+impl Answered {
+    /// An answer produced without a tracked upstream resolver (cache, block,
+    /// rewrite, local).
+    fn local(source: AnswerSource) -> Self {
+        Self {
+            source,
+            resolver: None,
+        }
+    }
+
+    /// An upstream answer attributed to `resolver` (which may be `None` if the
+    /// lookup failed before any resolver answered).
+    fn upstream(resolver: Option<Arc<str>>) -> Self {
+        Self {
+            source: AnswerSource::Upstream,
+            resolver,
+        }
+    }
+}
+
 pub struct Pipeline<R> {
     cache: DnsCache,
     /// The resolver a cache miss is forwarded to. Held as `Arc<R>` rather than a
@@ -143,7 +171,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         };
         response.add_query(query.clone());
 
-        let source = self.answer(&query, &mut response, client).await;
+        let answered = self.answer(&query, &mut response, client).await;
 
         if let Some(observer) = &self.observer {
             observer.observe(QueryRecord {
@@ -151,10 +179,11 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 name: query.name().to_string(),
                 record_type: u16::from(query.query_type()),
                 response_code: u16::from(response.response_code()),
-                source,
+                source: answered.source,
                 duration: start.elapsed(),
                 answers: u16::try_from(response.answers().len()).unwrap_or(u16::MAX),
                 addresses: answer_addresses(&response),
+                resolver: answered.resolver.as_deref().map(str::to_owned),
             });
         }
 
@@ -163,14 +192,14 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
 
     /// Fill `response` with the answer to `query` for `client` and report where
     /// it came from. The client decides which filtering policy applies.
-    async fn answer(&self, query: &Query, response: &mut Message, client: IpAddr) -> AnswerSource {
+    async fn answer(&self, query: &Query, response: &mut Message, client: IpAddr) -> Answered {
         // A local rewrite is the strongest, most explicit intent the user can
         // express, so it is answered first — before the block check and any
         // lookup — and owns the name for every record type.
         if let Some(rewriter) = &self.rewriter {
             if let Some(ips) = rewriter.lookup(&query.name().to_string()) {
                 self.answer_rewrite(query, response, &ips);
-                return AnswerSource::Rewrite;
+                return Answered::local(AnswerSource::Rewrite);
             }
         }
 
@@ -185,7 +214,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 } else {
                     response.set_response_code(ResponseCode::NXDomain);
                 }
-                return AnswerSource::Blocked;
+                return Answered::local(AnswerSource::Blocked);
             }
         }
 
@@ -194,7 +223,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             && !self.options.ipv6_enabled.load(Ordering::Relaxed)
         {
             response.set_response_code(ResponseCode::NoError);
-            return AnswerSource::Local;
+            return Answered::local(AnswerSource::Local);
         }
 
         // Safe search: force the big search engines to their filtered endpoint
@@ -220,27 +249,31 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if needs_refresh {
                 self.spawn_refresh(key, query.name().clone(), query.query_type());
             }
-            return AnswerSource::Cache;
+            return Answered::local(AnswerSource::Cache);
         }
 
-        match self
+        let resolver = match self
             .router
             .resolve(query.name().clone(), query.query_type())
             .await
         {
-            Ok(upstream) => {
-                response.set_response_code(upstream.response_code());
-                for record in upstream.answers() {
+            Ok(resolved) => {
+                response.set_response_code(resolved.response.response_code());
+                for record in resolved.response.answers() {
                     response.add_answer(record.clone());
                 }
-                self.cache.insert(key, entry_from_response(&upstream)).await;
+                self.cache
+                    .insert(key, entry_from_response(&resolved.response))
+                    .await;
+                resolved.resolver
             }
             Err(_) => {
                 response.set_response_code(ResponseCode::ServFail);
+                None
             }
-        }
+        };
 
-        AnswerSource::Upstream
+        Answered::upstream(resolver)
     }
 
     /// Refresh `key` from upstream in the background and store the fresh answer,
@@ -261,9 +294,9 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         let router = self.router.clone();
         let refreshing = self.refreshing.clone();
         tokio::spawn(async move {
-            if let Ok(upstream) = router.resolve(name, record_type).await {
+            if let Ok(resolved) = router.resolve(name, record_type).await {
                 cache
-                    .insert(key.clone(), entry_from_response(&upstream))
+                    .insert(key.clone(), entry_from_response(&resolved.response))
                     .await;
             }
             refreshing
@@ -342,28 +375,30 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         query: &Query,
         response: &mut Message,
         target: Name,
-    ) -> AnswerSource {
-        match self
+    ) -> Answered {
+        let resolver = match self
             .router
             .resolve(target.clone(), query.query_type())
             .await
         {
-            Ok(upstream) => {
-                response.set_response_code(upstream.response_code());
+            Ok(resolved) => {
+                response.set_response_code(resolved.response.response_code());
                 response.add_answer(Record::from_rdata(
                     query.name().clone(),
                     REWRITE_TTL,
                     RData::CNAME(CNAME(target)),
                 ));
-                for record in upstream.answers() {
+                for record in resolved.response.answers() {
                     response.add_answer(record.clone());
                 }
+                resolved.resolver
             }
             Err(_) => {
                 response.set_response_code(ResponseCode::ServFail);
+                None
             }
-        }
-        AnswerSource::Upstream
+        };
+        Answered::upstream(resolver)
     }
 }
 
@@ -432,7 +467,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::observer::{AnswerSource, QueryObserver, QueryRecord};
-    use crate::router::Router;
+    use crate::router::{Resolved, Router};
 
     const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
 
@@ -485,6 +520,7 @@ mod tests {
         reply: Reply,
         ttl: u32,
         calls: Arc<AtomicUsize>,
+        resolver: Option<Arc<str>>,
     }
 
     impl Mock {
@@ -493,6 +529,7 @@ mod tests {
                 reply,
                 ttl: 120,
                 calls: Arc::new(AtomicUsize::new(0)),
+                resolver: Some(Arc::from("mock-resolver")),
             }
         }
 
@@ -509,7 +546,7 @@ mod tests {
             &self,
             name: Name,
             _record_type: RecordType,
-        ) -> Result<DnsResponse, ProtoError> {
+        ) -> Result<Resolved, ProtoError> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             let mut message = Message::new();
             message.set_message_type(MessageType::Response);
@@ -527,7 +564,10 @@ mod tests {
                 }
                 Reply::Fail => return Err(ProtoError::from("mock failure")),
             }
-            DnsResponse::from_message(message)
+            Ok(Resolved::new(
+                DnsResponse::from_message(message)?,
+                self.resolver.clone(),
+            ))
         }
     }
 
@@ -875,6 +915,11 @@ mod tests {
             vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
             "records what the query resolved to"
         );
+        assert_eq!(
+            seen[0].resolver.as_deref(),
+            Some("mock-resolver"),
+            "an upstream answer records the resolver that gave it"
+        );
     }
 
     #[tokio::test]
@@ -906,6 +951,10 @@ mod tests {
         assert_eq!(
             seen[0].addresses,
             vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))]
+        );
+        assert_eq!(
+            seen[0].resolver, None,
+            "a locally answered query has no upstream resolver"
         );
     }
 

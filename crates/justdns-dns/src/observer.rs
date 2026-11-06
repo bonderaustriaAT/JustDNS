@@ -44,6 +44,11 @@ pub struct QueryRecord {
     /// The IPv4/IPv6 addresses the query resolved to, in answer order. Empty for
     /// a block, a NODATA answer, or a non-address record type.
     pub addresses: Vec<IpAddr>,
+    /// A short label for the upstream resolver that answered — the DoT/DoH
+    /// certificate name or the plain IP — when the answer came from one (source
+    /// [`AnswerSource::Upstream`]); `None` for a cache, block, rewrite or other
+    /// local answer.
+    pub resolver: Option<String>,
 }
 
 /// Something that records handled queries. Implementations must not block for

@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.2.3] - 2026-11-06
+
+- Neu: **Resolver-Antwortzeiten.** Die **Übersicht** zeigt jetzt, wie gut jeder
+  Upstream-Resolver, an den du weiterleitest, abschneidet — mit Namen aufgeführt, der
+  aktivste zuerst, mit der **Median**-Antwortzeit (für das 95. Perzentil über die
+  Zeile fahren) und wie viele Antworten er in den letzten 24 Stunden gegeben hat. Es
+  zählen nur weitergeleitete Abfragen, du erkennst also auf einen Blick, welcher
+  Resolver tatsächlich antwortet und ob einer dauerhaft langsamer ist als die anderen.
+  Die Werte überstehen wie die übrigen Statistiken einen Neustart.
+
 ## [0.2.2] - 2026-11-06
 
 - Neu: **Top-Domains pro Gerät.** Auf der Seite **Geräte** öffnet die Schaltfläche

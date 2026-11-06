@@ -159,9 +159,10 @@
   color: var(--text-muted);
 }
 
-/* A titled block (the last-24h figures, the busiest clients). */
+/* A titled block (the last-24h figures, the busiest clients, the resolvers). */
 .day,
-.clients {
+.clients,
+.resolvers {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -262,6 +263,59 @@
 
 /* A small muted second line under a figure — the median/p95 beneath the mean. */
 .statNote {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Resolver response times: the resolver label, its median answer time, and the
+   answer count beneath — hairlines between rows, no cards. */
+.resolverList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resolverRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name time"
+    "name count";
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.resolverRow:first-child {
+  border-block-start: none;
+}
+
+.resolverName {
+  grid-area: name;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resolverTime {
+  grid-area: time;
+  justify-self: end;
+  align-self: end;
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.resolverCount {
+  grid-area: count;
+  justify-self: end;
+  align-self: start;
   color: var(--text-muted);
   font-size: var(--step--2);
   font-variant-numeric: tabular-nums;

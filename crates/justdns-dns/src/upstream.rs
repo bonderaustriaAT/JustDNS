@@ -70,6 +70,17 @@ impl Upstream {
         }
     }
 
+    /// A short, human-readable label identifying this resolver, for the
+    /// per-resolver response-time statistics: the TLS certificate name for an
+    /// encrypted upstream (what the user recognises, e.g. `dns.quad9.net`), or
+    /// the plain IP address otherwise.
+    pub fn label(&self) -> String {
+        match &self.transport {
+            Transport::Plain => self.address.to_string(),
+            Transport::Dot { server_name } | Transport::Doh { server_name } => server_name.clone(),
+        }
+    }
+
     /// The same resolver with encryption turned on or off: over DoT (keeping its
     /// certificate name) when `encrypt` is set and a name is known, plaintext on
     /// port 53 otherwise. A plaintext upstream with no certificate name cannot be

@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.2.3] - 2026-11-06
+
+- New: **resolver response times.** The **Overview** now shows how each upstream
+  resolver you forward to is performing — listed by name, busiest first, with the
+  **median** answer time (hover for the 95th percentile) and how many answers it
+  gave over the last 24 hours. Only forwarded lookups count, so you can tell at a
+  glance which resolver is actually answering and whether one is consistently
+  slower than the others. The figures survive a restart like the rest of the
+  statistics.
+
 ## [0.2.2] - 2026-11-06
 
 - New: **top domains per device.** On the **Devices** page, every row now has a

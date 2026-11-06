@@ -30,7 +30,7 @@ use justdns_dns::tls::TlsManager;
 use justdns_filter::Blocker;
 use justdns_lists::{ListError, ListKind, ListStore, ListsView, RefreshOutcome, UserLists};
 use justdns_rewrite::{Alias, Rewrite, RewriteError, RewriteStore, RewritesView};
-use justdns_store::{ActivityBucket, DomainCount, QueryEvent, Store};
+use justdns_store::{ActivityBucket, DomainCount, QueryEvent, ResolverStat, Store};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
@@ -186,6 +186,7 @@ fn router(state: AppState) -> Router {
         .route("/api/stats", get(stats))
         .route("/api/stats/day", get(stats_day))
         .route("/api/stats/top-domains", get(top_domains))
+        .route("/api/stats/resolvers", get(resolvers))
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/settings", get(get_settings).put(put_settings))
@@ -1536,6 +1537,18 @@ async fn top_domains(
     }
 }
 
+/// How many resolvers the response-time view returns. A home setup forwards to a
+/// handful; this is a generous ceiling.
+const TOP_RESOLVERS: usize = 20;
+
+/// The upstream resolvers that answered over the last day, busiest first, each
+/// with its answer count and handling-time figures (mean, median, p95). Only
+/// forwarded queries count — cache hits, blocks and local answers never reach a
+/// resolver — so the list is empty on a cache-only or freshly started instance.
+async fn resolvers(State(store): State<Store>) -> Json<Vec<ResolverStat>> {
+    Json(store.resolver_stats(TOP_RESOLVERS))
+}
+
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
@@ -1754,6 +1767,7 @@ mod tests {
             duration_ms: 5,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         }
     }
 
@@ -1834,6 +1848,53 @@ mod tests {
         ));
         // A never-seen client (and a missing/garbled one) yields an empty list.
         let response = get(store, "/api/stats/top-domains?client=10.0.0.9").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_of(response).await, "[]");
+    }
+
+    #[tokio::test]
+    async fn resolvers_reports_per_upstream_counts() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let answered = |resolver: &str| {
+            let mut event = sample(
+                Ipv4Addr::new(10, 0, 0, 1),
+                "example.com.",
+                QuerySource::Upstream,
+            );
+            event.resolver = Some(resolver.to_owned());
+            event
+        };
+        store.record(answered("dns.quad9.net"));
+        store.record(answered("dns.quad9.net"));
+        store.record(answered("protective.joindns4.eu"));
+        // A cache hit carries no resolver and must not appear.
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "example.com.",
+            QuerySource::Cache,
+        ));
+
+        let response = get(store, "/api/stats/resolvers").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_of(response).await;
+        // Busiest resolver first, with its count; both upstreams present.
+        assert!(body.contains("\"resolver\":\"dns.quad9.net\""), "{body}");
+        assert!(body.contains("\"count\":2"), "{body}");
+        assert!(body.contains("protective.joindns4.eu"), "{body}");
+        let quad9 = body.find("dns.quad9.net").unwrap();
+        let dns4eu = body.find("protective.joindns4.eu").unwrap();
+        assert!(quad9 < dns4eu, "busiest resolver listed first: {body}");
+    }
+
+    #[tokio::test]
+    async fn resolvers_empty_without_upstream_answers() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "example.com.",
+            QuerySource::Cache,
+        ));
+        let response = get(store, "/api/stats/resolvers").await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body_of(response).await, "[]");
     }

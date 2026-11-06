@@ -17,7 +17,8 @@ use tracing::warn;
 use crate::duck::{DuckStore, StoreError};
 use crate::event::QueryEvent;
 use crate::recorder::{
-    ActivityBucket, ClientActivity, ClientCount, DayStats, DomainCount, Recorder, Stats,
+    ActivityBucket, ClientActivity, ClientCount, DayStats, DomainCount, Recorder, ResolverStat,
+    Stats,
 };
 
 /// Force a flush to DuckDB once this many events have accumulated.
@@ -112,6 +113,13 @@ impl Store {
         self.recorder.top_domains_for_client(client, n)
     }
 
+    /// The upstream resolvers that answered over the last day, busiest first, up
+    /// to `n`, each with its answer count and handling-time figures. Empty when
+    /// no query was forwarded to an upstream in the window.
+    pub fn resolver_stats(&self, n: usize) -> Vec<ResolverStat> {
+        self.recorder.resolver_stats(n)
+    }
+
     /// Every client seen over the last day, with its query count and when it was
     /// last seen (most recently seen first). Feeds the devices view.
     pub fn client_activity(&self) -> Vec<ClientActivity> {
@@ -175,6 +183,7 @@ mod tests {
             duration_ms: 3,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         }
     }
 

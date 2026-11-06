@@ -22,23 +22,49 @@ use hickory_proto::xfer::DnsResponse;
 use crate::client::UpstreamClient;
 use crate::upstream::{UpstreamConfig, UpstreamMode};
 
+/// A resolved answer together with which resolver produced it.
+///
+/// The [`Resolve`] layer reports this so the query log can attribute an upstream
+/// answer to the resolver that gave it — the basis of the per-resolver
+/// response-time statistics. `resolver` is a short, human-readable label (the
+/// DoT/DoH certificate name, or the plain IP) and is `None` when the answer did
+/// not come from a tracked upstream (a test double, say).
+#[derive(Clone, Debug)]
+pub struct Resolved {
+    pub response: DnsResponse,
+    pub resolver: Option<Arc<str>>,
+}
+
+impl Resolved {
+    /// An answer attributed to `resolver` (or to nothing, with `None`).
+    pub fn new(response: DnsResponse, resolver: Option<Arc<str>>) -> Self {
+        Self { response, resolver }
+    }
+
+    /// An answer whose resolver is not tracked.
+    pub fn anonymous(response: DnsResponse) -> Self {
+        Self {
+            response,
+            resolver: None,
+        }
+    }
+}
+
 /// Anything that can answer a single query. Implemented by
-/// [`UpstreamClient`] for real traffic and by test doubles.
+/// [`UpstreamClient`] for real traffic and by test doubles. The answer carries
+/// the resolver that produced it (see [`Resolved`]).
 pub trait Resolve {
     fn resolve(
         &self,
         name: Name,
         record_type: RecordType,
-    ) -> impl Future<Output = Result<DnsResponse, ProtoError>> + Send;
+    ) -> impl Future<Output = Result<Resolved, ProtoError>> + Send;
 }
 
 impl Resolve for UpstreamClient {
-    async fn resolve(
-        &self,
-        name: Name,
-        record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
-        self.query(name, record_type).await
+    async fn resolve(&self, name: Name, record_type: RecordType) -> Result<Resolved, ProtoError> {
+        let response = self.query(name, record_type).await?;
+        Ok(Resolved::new(response, Some(self.label())))
     }
 }
 
@@ -127,11 +153,7 @@ impl Router<UpstreamClient> {
 /// [`Resolve`] is expected — the pipeline holds one directly, and a
 /// [`SharedRouter`] wraps one for live reconfiguration.
 impl<R: Resolve + Sync> Resolve for Router<R> {
-    async fn resolve(
-        &self,
-        name: Name,
-        record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
+    async fn resolve(&self, name: Name, record_type: RecordType) -> Result<Resolved, ProtoError> {
         match self.mode {
             UpstreamMode::Racing => self.race(&self.pool, name, record_type).await,
             UpstreamMode::Fallback => self.sequential(&self.pool, name, record_type).await,
@@ -152,19 +174,19 @@ impl<R: Resolve + Sync> Router<R> {
         pool: &[R],
         name: Name,
         record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
+    ) -> Result<Resolved, ProtoError> {
         if pool.is_empty() {
             return Err(ProtoError::from("no upstreams configured"));
         }
 
         let futures = pool.iter().map(|resolver| {
             Box::pin(resolver.resolve(name.clone(), record_type))
-                as Pin<Box<dyn Future<Output = Result<DnsResponse, ProtoError>> + Send + '_>>
+                as Pin<Box<dyn Future<Output = Result<Resolved, ProtoError>> + Send + '_>>
         });
 
         futures_util::future::select_ok(futures)
             .await
-            .map(|(response, _)| response)
+            .map(|(resolved, _)| resolved)
     }
 
     /// Query resolvers in order, moving on only when one fails.
@@ -173,11 +195,11 @@ impl<R: Resolve + Sync> Router<R> {
         pool: &[R],
         name: Name,
         record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
+    ) -> Result<Resolved, ProtoError> {
         let mut last_error = ProtoError::from("no upstreams configured");
         for resolver in pool {
             match resolver.resolve(name.clone(), record_type).await {
-                Ok(response) => return Ok(response),
+                Ok(resolved) => return Ok(resolved),
                 Err(error) => last_error = error,
             }
         }
@@ -185,11 +207,7 @@ impl<R: Resolve + Sync> Router<R> {
     }
 
     /// Pick the next resolver round-robin so load spreads across the pool.
-    async fn balanced(
-        &self,
-        name: Name,
-        record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
+    async fn balanced(&self, name: Name, record_type: RecordType) -> Result<Resolved, ProtoError> {
         if self.pool.is_empty() {
             return Err(ProtoError::from("no upstreams configured"));
         }
@@ -232,11 +250,7 @@ impl SharedRouter {
 }
 
 impl Resolve for SharedRouter {
-    async fn resolve(
-        &self,
-        name: Name,
-        record_type: RecordType,
-    ) -> Result<DnsResponse, ProtoError> {
+    async fn resolve(&self, name: Name, record_type: RecordType) -> Result<Resolved, ProtoError> {
         self.current().resolve(name, record_type).await
     }
 }
@@ -291,7 +305,7 @@ mod tests {
             &self,
             name: Name,
             _record_type: RecordType,
-        ) -> Result<DnsResponse, ProtoError> {
+        ) -> Result<Resolved, ProtoError> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             if let Some(delay) = self.delay {
                 tokio::time::sleep(delay).await;
@@ -304,12 +318,16 @@ mod tests {
             message.set_message_type(MessageType::Response);
             message.set_response_code(ResponseCode::NoError);
             message.add_answer(Record::from_rdata(name, 60, RData::A(A(self.marker))));
-            DnsResponse::from_message(message)
+            let label: Arc<str> = Arc::from(self.marker.to_string());
+            Ok(Resolved::new(
+                DnsResponse::from_message(message)?,
+                Some(label),
+            ))
         }
     }
 
-    fn marker_of(response: &DnsResponse) -> Ipv4Addr {
-        response.answers()[0].data().as_a().unwrap().0
+    fn marker_of(resolved: &Resolved) -> Ipv4Addr {
+        resolved.response.answers()[0].data().as_a().unwrap().0
     }
 
     fn query(name: &str) -> Name {
@@ -438,5 +456,35 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn reports_which_resolver_answered() {
+        // Racing: the faster upstream wins and its label rides out with the
+        // answer. Each mock labels itself with its marker address.
+        let racing = Router::new(
+            UpstreamMode::Racing,
+            vec![
+                Mock::ok(Ipv4Addr::new(1, 1, 1, 1)).slow(Duration::from_millis(50)),
+                Mock::ok(Ipv4Addr::new(2, 2, 2, 2)),
+            ],
+        );
+        let resolved = racing
+            .resolve(query("example.com."), RecordType::A)
+            .await
+            .unwrap();
+        assert_eq!(resolved.resolver.as_deref(), Some("2.2.2.2"));
+
+        // Rule-based: the routed resolver's label is the one reported.
+        let routed = Router::new(
+            UpstreamMode::RuleBased,
+            vec![Mock::ok(Ipv4Addr::new(1, 1, 1, 1))],
+        )
+        .with_route(query("example.com."), Mock::ok(Ipv4Addr::new(9, 9, 9, 9)));
+        let resolved = routed
+            .resolve(query("host.example.com."), RecordType::A)
+            .await
+            .unwrap();
+        assert_eq!(resolved.resolver.as_deref(), Some("9.9.9.9"));
     }
 }

@@ -31,6 +31,7 @@ impl QueryObserver for StoreObserver {
             duration_ms: u32::try_from(record.duration.as_millis()).unwrap_or(u32::MAX),
             answers: record.answers,
             addresses: record.addresses,
+            resolver: record.resolver,
         });
     }
 }

@@ -223,7 +223,7 @@ mod tests {
     use hickory_proto::xfer::DnsResponse;
 
     use crate::cache::DnsCache;
-    use crate::router::Router;
+    use crate::router::{Resolved, Router};
     use crate::upstream::UpstreamMode;
 
     struct Mock {
@@ -235,7 +235,7 @@ mod tests {
             &self,
             name: Name,
             _record_type: RecordType,
-        ) -> Result<DnsResponse, ProtoError> {
+        ) -> Result<Resolved, ProtoError> {
             let mut message = Message::new();
             message.set_message_type(MessageType::Response);
             message.set_response_code(ResponseCode::NoError);
@@ -246,7 +246,7 @@ mod tests {
                     RData::A(A(Ipv4Addr::new(10, 0, 0, index as u8))),
                 ));
             }
-            DnsResponse::from_message(message)
+            Ok(Resolved::anonymous(DnsResponse::from_message(message)?))
         }
     }
 

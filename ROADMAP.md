@@ -48,7 +48,7 @@ The phases run roughly from near-term to long-term.
   block lists and allow/block rules on top of the global default, the way AdGuard
   Home does — the biggest single step toward real household control. Rules stack
   (global → group → device); managed on the "Devices" page.
-- [ ] **Deeper statistics.** Average response time per resolver (which upstream
+- [x] **Deeper statistics.** Average response time per resolver (which upstream
   answered and how fast), and the top domains per client.
 
 ## Phase 3 — Time & access _(planned)_

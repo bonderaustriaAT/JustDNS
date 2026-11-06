@@ -54,7 +54,7 @@ langfristig.
   wie bei AdGuard Home — der größte einzelne Schritt zu echter Haushaltskontrolle.
   Die Regeln stapeln sich (global → Gruppe → Gerät); verwaltet auf der Seite
   „Geräte“.
-- [ ] **Tiefere Statistik.** Durchschnittliche Antwortzeit je Resolver (welcher
+- [x] **Tiefere Statistik.** Durchschnittliche Antwortzeit je Resolver (welcher
   Upstream geantwortet hat und wie schnell) und die Top-Domains je Client.
 
 ## Phase 3 — Zeit & Zugang _(geplant)_

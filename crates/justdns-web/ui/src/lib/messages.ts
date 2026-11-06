@@ -75,6 +75,10 @@ const de = {
   "overview.topClients": "Aktivste Clients",
   "overview.share": "Anteil",
   "overview.noClients": "Noch keine Clients erfasst.",
+  "overview.resolvers": "Resolver-Antwortzeiten",
+  "overview.resolverAnswers": "{n} Antworten",
+  "overview.resolverP95Title": "95. Perzentil: {n} ms",
+  "overview.noResolvers": "Noch keine Upstream-Antworten erfasst.",
 
   // Activity chart.
   "chart.summary": "Anfragen pro Stunde, letzte {n} Stunden. Höchstwert {max}.",
@@ -641,6 +645,10 @@ const en: Catalog = {
   "overview.topClients": "Busiest clients",
   "overview.share": "Share",
   "overview.noClients": "No clients recorded yet.",
+  "overview.resolvers": "Resolver response times",
+  "overview.resolverAnswers": "{n} answers",
+  "overview.resolverP95Title": "95th percentile: {n} ms",
+  "overview.noResolvers": "No upstream answers recorded yet.",
 
   "chart.summary": "Queries per hour, last {n} hours. Peak {max}.",
   "chart.caption": "Queries per hour, last {n} hours",

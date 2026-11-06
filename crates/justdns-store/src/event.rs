@@ -74,4 +74,9 @@ pub struct QueryEvent {
     /// a block, a NODATA answer, or a non-address record type.
     #[serde(default)]
     pub addresses: Vec<IpAddr>,
+    /// A short label for the upstream resolver that answered — the DoT/DoH
+    /// certificate name or the plain IP — when the answer came from one; absent
+    /// otherwise. Older logs written before this field read back as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver: Option<String>,
 }

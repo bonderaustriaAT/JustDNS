@@ -32,6 +32,10 @@ const MAX_CLIENTS_PER_HOUR: usize = 1024;
 /// busy client; the domains it visits most still win, since rehydration seeds the
 /// busiest first. On a home LAN the real count is far below it.
 const MAX_DOMAINS_PER_CLIENT_HOUR: usize = 200;
+/// Most distinct resolvers tracked per hour, for the per-resolver response-time
+/// view. A home setup forwards to a handful; the cap only guards against a
+/// misconfiguration or a log full of stray labels blowing the per-hour map up.
+const MAX_RESOLVERS_PER_HOUR: usize = 64;
 
 /// Response code for a server failure.
 const RCODE_SERVFAIL: u16 = 2;
@@ -168,6 +172,43 @@ pub struct DomainCount {
     pub count: u64,
 }
 
+/// One upstream resolver and how it performed over the kept hours: how many
+/// answers it gave and its handling-time figures. Only queries forwarded to an
+/// upstream count; cache hits, blocks and local answers never reach a resolver.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ResolverStat {
+    /// The resolver's label (its DoT/DoH certificate name, or plain IP).
+    pub resolver: String,
+    /// Answers it gave across the kept hours.
+    pub count: u64,
+    /// Mean handling time of those answers, in milliseconds.
+    pub avg_duration_ms: f64,
+    /// Median (50th percentile) handling time, in milliseconds.
+    pub median_duration_ms: f64,
+    /// 95th-percentile handling time, in milliseconds — the slow tail.
+    pub p95_duration_ms: f64,
+}
+
+/// Per-resolver tallies accumulated in one hour: how many answers it gave, their
+/// summed handling time (for the mean) and their latency distribution (for the
+/// median and p95, merged across hours the same way the day figures are).
+#[derive(Clone, Debug)]
+pub(crate) struct ResolverAccum {
+    pub(crate) count: u64,
+    pub(crate) duration_sum_ms: u64,
+    pub(crate) latency_hist: [u64; LATENCY_BINS],
+}
+
+impl ResolverAccum {
+    pub(crate) fn new() -> Self {
+        Self {
+            count: 0,
+            duration_sum_ms: 0,
+            latency_hist: [0; LATENCY_BINS],
+        }
+    }
+}
+
 /// One client's recent footprint, for the devices view: how many queries it made
 /// over the kept hours and when it was last seen. The last-seen time is precise
 /// for a client still in the recent ring; for one seen earlier in the day it
@@ -207,6 +248,11 @@ pub(crate) struct HourBucket {
     /// [`MAX_CLIENTS_PER_HOUR`] distinct clients and
     /// [`MAX_DOMAINS_PER_CLIENT_HOUR`] distinct domains per client.
     pub(crate) client_domains: HashMap<IpAddr, HashMap<String, u64>>,
+    /// Per-resolver tallies for this hour: for each upstream resolver that
+    /// answered, its answer count, summed handling time and latency histogram.
+    /// Feeds the per-resolver response-time view. Bounded by
+    /// [`MAX_RESOLVERS_PER_HOUR`] distinct resolvers.
+    pub(crate) resolvers: HashMap<String, ResolverAccum>,
 }
 
 impl HourBucket {
@@ -220,6 +266,7 @@ impl HourBucket {
             latency_hist: [0; LATENCY_BINS],
             clients: HashMap::new(),
             client_domains: HashMap::new(),
+            resolvers: HashMap::new(),
         }
     }
 
@@ -269,6 +316,52 @@ impl HourBucket {
             *existing += count;
         } else if domains.len() < MAX_DOMAINS_PER_CLIENT_HOUR {
             domains.insert(name.to_owned(), count);
+        }
+    }
+
+    /// Record one upstream answer from `resolver` taking `duration_ms` (live
+    /// path): bump its count and summed handling time, and place the latency in
+    /// its histogram. Respects the per-hour resolver cap — a new resolver is
+    /// dropped once the hour already holds [`MAX_RESOLVERS_PER_HOUR`].
+    fn bump_resolver(&mut self, resolver: &str, duration_ms: u64) {
+        let bin = latency_bin(duration_ms);
+        if let Some(accum) = self.resolvers.get_mut(resolver) {
+            accum.count += 1;
+            accum.duration_sum_ms += duration_ms;
+            accum.latency_hist[bin] += 1;
+        } else if self.resolvers.len() < MAX_RESOLVERS_PER_HOUR {
+            let mut accum = ResolverAccum::new();
+            accum.count = 1;
+            accum.duration_sum_ms = duration_ms;
+            accum.latency_hist[bin] = 1;
+            self.resolvers.insert(resolver.to_owned(), accum);
+        }
+    }
+
+    /// Seed `resolver`'s aggregated answer count and summed handling time from
+    /// the durable log (rehydration), respecting the per-hour cap. The histogram
+    /// is seeded separately by [`Self::seed_resolver_bin`]; ordering the seed by
+    /// count puts the busiest resolvers first so they win the cap.
+    pub(crate) fn seed_resolver(&mut self, resolver: &str, count: u64, duration_sum_ms: u64) {
+        if let Some(accum) = self.resolvers.get_mut(resolver) {
+            accum.count += count;
+            accum.duration_sum_ms += duration_sum_ms;
+        } else if self.resolvers.len() < MAX_RESOLVERS_PER_HOUR {
+            let mut accum = ResolverAccum::new();
+            accum.count = count;
+            accum.duration_sum_ms = duration_sum_ms;
+            self.resolvers.insert(resolver.to_owned(), accum);
+        }
+    }
+
+    /// Add `count` samples to `resolver`'s latency histogram bucket `bin` during
+    /// rehydration. Only touches a resolver already seeded by
+    /// [`Self::seed_resolver`], so one dropped by the cap gains no bins.
+    pub(crate) fn seed_resolver_bin(&mut self, resolver: &str, bin: usize, count: u64) {
+        if let Some(accum) = self.resolvers.get_mut(resolver) {
+            if let Some(slot) = accum.latency_hist.get_mut(bin) {
+                *slot += count;
+            }
         }
     }
 }
@@ -349,6 +442,7 @@ impl Recorder {
             event.duration_ms,
             event.client,
             &event.name,
+            event.resolver.as_deref(),
         );
 
         state.recent.push_back(event);
@@ -475,6 +569,54 @@ impl Recorder {
         ranked
     }
 
+    /// The upstream resolvers that answered over the kept hours, busiest first,
+    /// each with its answer count and handling-time figures (mean, median, p95).
+    /// Counts, sums and latency histograms are merged across the hourly buckets,
+    /// so the percentiles come out just as the day figures do. Ties are broken by
+    /// label for a stable order. Up to `n` entries; empty when no query was
+    /// forwarded in the kept window.
+    pub fn resolver_stats(&self, n: usize) -> Vec<ResolverStat> {
+        let state = self.state.lock().expect("recorder lock poisoned");
+        let mut merged: HashMap<String, ResolverAccum> = HashMap::new();
+        for bucket in &state.activity {
+            for (resolver, accum) in &bucket.resolvers {
+                let entry = merged
+                    .entry(resolver.clone())
+                    .or_insert_with(ResolverAccum::new);
+                entry.count += accum.count;
+                entry.duration_sum_ms += accum.duration_sum_ms;
+                for (bin, &sampled) in accum.latency_hist.iter().enumerate() {
+                    entry.latency_hist[bin] += sampled;
+                }
+            }
+        }
+        let mut ranked: Vec<ResolverStat> = merged
+            .into_iter()
+            .map(|(resolver, accum)| {
+                let avg = if accum.count == 0 {
+                    0.0
+                } else {
+                    accum.duration_sum_ms as f64 / accum.count as f64
+                };
+                ResolverStat {
+                    resolver,
+                    count: accum.count,
+                    avg_duration_ms: avg,
+                    median_duration_ms: percentile(&accum.latency_hist, accum.count, 0.5),
+                    p95_duration_ms: percentile(&accum.latency_hist, accum.count, 0.95),
+                }
+            })
+            .collect();
+        // Busiest first; ties broken by label so the order is stable.
+        ranked.sort_by(|a, b| {
+            b.count
+                .cmp(&a.count)
+                .then_with(|| a.resolver.cmp(&b.resolver))
+        });
+        ranked.truncate(n);
+        ranked
+    }
+
     /// Every client seen over the kept hours, with its query count and when it
     /// was last seen. The count is summed across the hourly buckets (the same
     /// source as [`Self::top_clients`]); the last-seen time is the exact newest
@@ -532,6 +674,7 @@ fn bump_activity(
     duration_ms: u32,
     client: IpAddr,
     name: &str,
+    resolver: Option<&str>,
 ) {
     let hour = at_ms - at_ms.rem_euclid(HOUR_MS);
 
@@ -561,6 +704,9 @@ fn bump_activity(
     bucket.add_latency(u64::from(duration_ms));
     bucket.bump_client(client);
     bucket.bump_domain(client, name);
+    if let Some(resolver) = resolver {
+        bucket.bump_resolver(resolver, u64::from(duration_ms));
+    }
 }
 
 #[cfg(test)]
@@ -580,6 +726,7 @@ mod tests {
             duration_ms: 3,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         }
     }
 
@@ -728,6 +875,7 @@ mod tests {
             duration_ms,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         }
     }
 
@@ -891,6 +1039,7 @@ mod tests {
             duration_ms: 1,
             answers: 1,
             addresses: Vec::new(),
+            resolver: None,
         }
     }
 
@@ -936,5 +1085,59 @@ mod tests {
                 .top_domains_for_client(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)), 10)
                 .is_empty()
         );
+    }
+
+    /// An upstream query answered by `resolver` in `duration_ms`.
+    fn resolver_event(at_ms: i64, resolver: &str, duration_ms: u32) -> QueryEvent {
+        QueryEvent {
+            at_ms,
+            client: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            name: "example.com.".to_owned(),
+            record_type: 1,
+            response_code: 0,
+            source: QuerySource::Upstream,
+            duration_ms,
+            answers: 1,
+            addresses: Vec::new(),
+            resolver: Some(resolver.to_owned()),
+        }
+    }
+
+    #[test]
+    fn resolver_stats_rank_by_count_and_summarise_latency() {
+        let recorder = Recorder::new(100);
+        // quad9: 3 answers (spread across two hours), dns4eu: 1 answer.
+        recorder.record(resolver_event(1, "dns.quad9.net", 10));
+        recorder.record(resolver_event(2, "dns.quad9.net", 20));
+        recorder.record(resolver_event(HOUR_MS + 1, "dns.quad9.net", 30));
+        recorder.record(resolver_event(3, "protective.joindns4.eu", 100));
+        // A non-upstream answer carries no resolver and must not appear.
+        recorder.record(event(4, QuerySource::Cache, 0));
+
+        let stats = recorder.resolver_stats(10);
+        assert_eq!(stats.len(), 2, "only the two resolvers, no cache entry");
+
+        // Busiest first.
+        assert_eq!(stats[0].resolver, "dns.quad9.net");
+        assert_eq!(stats[0].count, 3);
+        // Mean of 10, 20, 30 ms, summed across both hours.
+        assert!((stats[0].avg_duration_ms - 20.0).abs() < 1e-9, "{stats:?}");
+
+        assert_eq!(stats[1].resolver, "protective.joindns4.eu");
+        assert_eq!(stats[1].count, 1);
+        assert!((stats[1].avg_duration_ms - 100.0).abs() < 1e-9);
+        // The single 100 ms sample lands in (64, 128] → p95 within that band.
+        assert!(
+            stats[1].p95_duration_ms > 64.0 && stats[1].p95_duration_ms <= 128.0,
+            "p95 reflects the 100 ms answer: {}",
+            stats[1].p95_duration_ms
+        );
+    }
+
+    #[test]
+    fn resolver_stats_empty_without_upstream_answers() {
+        let recorder = Recorder::new(10);
+        recorder.record(event(1, QuerySource::Cache, 0));
+        assert!(recorder.resolver_stats(10).is_empty());
     }
 }

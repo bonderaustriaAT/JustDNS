@@ -22,6 +22,10 @@ use crate::upstream::{Transport, Upstream};
 
 pub struct UpstreamClient {
     pool: NameServerPool<TokioConnectionProvider>,
+    /// A short label identifying this resolver (its certificate name, or plain
+    /// IP), computed once so each answer can be attributed to it in the query
+    /// log without re-deriving it per query.
+    label: Arc<str>,
 }
 
 impl UpstreamClient {
@@ -49,7 +53,16 @@ impl UpstreamClient {
             TokioConnectionProvider::default(),
         );
 
-        Self { pool }
+        Self {
+            pool,
+            label: Arc::from(upstream.label()),
+        }
+    }
+
+    /// The label identifying this resolver, attached to each answer it gives so
+    /// the query log can attribute it.
+    pub(crate) fn label(&self) -> Arc<str> {
+        self.label.clone()
     }
 
     /// Forward a single query and return the upstream's raw response, TTLs and

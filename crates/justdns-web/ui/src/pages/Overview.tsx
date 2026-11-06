@@ -178,6 +178,34 @@ export function Overview() {
         )}
       </section>
 
+      <section className={styles.resolvers}>
+        <h2 className={styles.sectionTitle}>{t("overview.resolvers")}</h2>
+        {data.resolvers.length === 0 ? (
+          <p className={styles.caption}>{t("overview.noResolvers")}</p>
+        ) : (
+          <ul className={styles.resolverList}>
+            {data.resolvers.map((entry) => (
+              <li
+                key={entry.resolver}
+                className={styles.resolverRow}
+                title={t("overview.resolverP95Title", {
+                  n: nf1.format(entry.p95_duration_ms),
+                })}
+              >
+                <span className={styles.resolverName}>{entry.resolver}</span>
+                <span className={styles.resolverTime}>
+                  {nf1.format(entry.median_duration_ms)}&thinsp;
+                  <span className={styles.unit}>ms</span>
+                </span>
+                <span className={styles.resolverCount}>
+                  {t("overview.resolverAnswers", { n: nf.format(entry.count) })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section className={styles.recent}>
         <h2 className={styles.recentTitle}>{t("overview.recentTitle")}</h2>
         {data.recent.length === 0 ? (
