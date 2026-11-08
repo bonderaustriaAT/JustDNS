@@ -1,0 +1,17 @@
+/target/
+**/*.rs.bk
+
+# Web UI
+crates/justdns-web/ui/node_modules/
+crates/justdns-web/ui/dist/
+
+# Runtime data
+*.db
+*.db-wal
+*.db-shm
+*.duckdb
+/backups/
+
+# Local
+.env
+.DS_Store

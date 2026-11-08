@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: 2026 JustDNS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# cargo-deny configuration for JustDNS.
+#
+# Checked in CI by `cargo deny check` (see .gitea/workflows/audit.yml): it scans
+# the dependency tree for known security advisories, disallowed licenses,
+# duplicate/banned crates and untrusted sources. CodeQL does not cover
+# dependency CVEs, so this is our gate for crate-level vulnerabilities.
+#
+# Schema: cargo-deny v2 (cargo-deny >= 0.18).
+
+# ---------------------------------------------------------------------------
+# Security advisories (RustSec database).
+# ---------------------------------------------------------------------------
+# Vulnerabilities fail the build; yanked crates fail. Unmaintained/unsound
+# advisories are NOT a hard gate here (`unmaintained = "none"`): cargo-deny v2
+# treats any in-scope unmaintained advisory as an error, which would break CI
+# the moment an unrelated transitive crate is archived upstream. cargo-audit
+# runs alongside this check (see the workflow) and still surfaces unmaintained
+# crates as a non-fatal warning, so the signal is not lost. (The one direct
+# offender, rustls-pemfile / RUSTSEC-2025-0134, has since been replaced by
+# rustls-pki-types' own PemObject API.)
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "none"
+yanked = "deny"
+# No advisories are currently ignored. hickory-proto is on 0.26.2 (see
+# crates/justdns-dns), which clears both earlier advisories against the 0.25.x
+# line — RUSTSEC-2026-0119 (O(n^2) name-compression) and RUSTSEC-2026-0118
+# (NSEC3 closest-encloser loop) — so the gate fails on any new, unfixed
+# vulnerability rather than silently ignoring one.
+ignore = []
+
+# ---------------------------------------------------------------------------
+# Licenses.
+# ---------------------------------------------------------------------------
+# JustDNS itself is AGPL-3.0-or-later. The list below is every SPDX license
+# that actually appears in the resolved dependency tree (verified with
+# `cargo deny check licenses`); the bundled DuckDB/arrow C++ tree in particular
+# pulls in a spread of permissive licenses. All are permissive or
+# weak-copyleft-via-OR and compatible with shipping an AGPL binary. Crates with
+# an `OR` expression (e.g. `MIT OR Apache-2.0 OR LGPL-2.1-or-later`) are
+# satisfied by the permissive branch, so copyleft-only licenses are not allowed.
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "AGPL-3.0-or-later", # JustDNS's own crates
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+
+# ---------------------------------------------------------------------------
+# Bans (duplicate versions, specific crates, build-time tooling).
+# ---------------------------------------------------------------------------
+# Multiple versions of the same crate are common in a large tree (and mostly
+# outside our control via transitive deps), so they are a warning, not an error.
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+# ---------------------------------------------------------------------------
+# Sources. Only crates from the official crates.io registry are allowed.
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

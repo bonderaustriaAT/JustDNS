@@ -1,0 +1,604 @@
+/* App shell: a grouped left sidebar beside the content on desktop; on phones the
+   sidebar becomes a slide-in drawer behind a hamburger, with a bottom tab bar for
+   the most-used pages. */
+
+.shell {
+  --sidebar-w: 256px;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-block-size: 100dvh;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: sticky;
+  inset-block-start: 0;
+  block-size: 100dvh;
+  overflow-y: auto;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--line);
+  /* A slim, quiet scrollbar instead of the OS default: the collapsible sections
+     keep the list short enough that it rarely scrolls at all, and when it does
+     the bar should not shout. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.sidebar::-webkit-scrollbar {
+  inline-size: 8px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebarInner {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 100%;
+  gap: var(--space-5);
+  padding: calc(var(--space-4) + env(safe-area-inset-top)) var(--space-3) var(--space-4);
+}
+
+.sidebarHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.mark {
+  inline-size: 13px;
+  block-size: 13px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 22%, transparent);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--step-1);
+  letter-spacing: -0.02em;
+}
+
+.instance {
+  padding-inline-start: var(--space-2);
+  border-inline-start: 1px solid var(--line-strong);
+  margin-inline-start: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Close button sits in the drawer head on mobile only. */
+.closeDrawer {
+  display: none;
+  margin-inline-start: auto;
+  padding: var(--space-1);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.closeDrawer svg {
+  inline-size: 22px;
+  block-size: 22px;
+  display: block;
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+}
+
+/* The handful of top-level links, and each collapsible section, stack their
+   rows with the same tight rhythm; the sections themselves are spaced apart by
+   the `.groups` gap. */
+.navTop,
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* A section's pages, revealed when its header is open. A quiet guide line and a
+   small indent tie them to the header without the heavy offset a full submenu
+   needs — the icons still line up as a column of their own. */
+.groupItems {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-block-start: 3px;
+  margin-inline-start: calc(var(--space-2) + 9px);
+  padding-inline-start: var(--space-2);
+  border-inline-start: 1px solid var(--line);
+}
+
+.navItem,
+.navItemActive {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  /* A touch more vertical room than the old rows: with the sections folded the
+     list is short, so each entry can breathe (was "zu eng"). */
+  padding: calc(var(--space-2) + 2px) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  text-align: start;
+  background: none;
+  border: none;
+  cursor: pointer;
+  /* Allow a long label to wrap to a second line instead of being clipped with an
+     ellipsis — some names ("System & Diagnose", "Hochverfügbarkeit", and longer
+     translations) do not fit the indented group column on one line. */
+  white-space: normal;
+}
+
+.navItem:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+}
+
+.navItemActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  box-shadow: inset 2px 0 0 var(--signal);
+  text-decoration: none;
+}
+
+.navItem:focus-visible,
+.navItemActive:focus-visible,
+.navSub:focus-visible,
+.navSubActive:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.navIcon {
+  display: inline-flex;
+  flex: none;
+}
+
+.navIcon svg {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.navText {
+  flex: 1;
+  min-inline-size: 0;
+  /* Wrap rather than truncate; break an over-long single word only as a last
+     resort so nothing is ever cut off. */
+  overflow-wrap: break-word;
+}
+
+/* The pending-count pill on the Freigaben row: a small signal-coloured badge that
+   draws the eye to a new request without shouting. */
+.navBadge {
+  flex: none;
+  min-inline-size: 1.25rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--signal);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.35rem;
+  text-align: center;
+}
+
+.subNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* Indent to line up under the parent label, past the icon. */
+  margin-inline-start: calc(var(--space-2) + 18px + var(--space-2));
+}
+
+.navSub,
+.navSubActive {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.navSub:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+}
+
+.navSubActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  box-shadow: inset 2px 0 0 var(--signal);
+  text-decoration: none;
+}
+
+.caret {
+  margin-inline-start: auto;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.caret[data-open] {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    transition: none;
+  }
+}
+
+/* ── Content column + top bar ────────────────────────────────────────────── */
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  padding-inline: var(--space-4);
+  padding-block-start: calc(var(--space-3) + env(safe-area-inset-top));
+  border-block-end: 1px solid var(--line);
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-inline-start: auto;
+}
+
+/* The hamburger and the in-bar brand are mobile-only; on desktop the sidebar
+   carries the brand and the bar holds only the language and account controls. */
+.hamburger,
+.topBrand {
+  display: none;
+}
+
+.hamburger {
+  padding: var(--space-1);
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.hamburger svg {
+  inline-size: 24px;
+  block-size: 24px;
+  display: block;
+}
+
+.hamburger:focus-visible,
+.closeDrawer:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* Language switcher: two snug buttons sharing one outline, the active one filled
+   so the choice reads at a glance. */
+.langSwitch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.langButton {
+  font: inherit;
+  font-size: var(--step--2);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.langButton + .langButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.langButton:hover {
+  color: var(--text);
+}
+
+.langButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+.langButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .langButton {
+    transition: none;
+  }
+}
+
+/* ── Account menu (top bar) ──────────────────────────────────────────────── */
+
+.menu {
+  position: relative;
+  display: flex;
+}
+
+.accountButton {
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.accountButton:hover {
+  color: var(--text);
+}
+
+.accountButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.user {
+  font-size: var(--step--1);
+}
+
+.menuList {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  min-inline-size: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 28px -14px rgb(0 0 0 / 0.55);
+  z-index: 20;
+}
+
+.menuItem,
+.menuItemActive {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  text-align: start;
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menuItem:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+}
+
+.menuItemActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  text-decoration: none;
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+/* ── Main content ────────────────────────────────────────────────────────── */
+
+.main {
+  padding: var(--space-6) var(--space-5);
+  max-inline-size: 1240px;
+  inline-size: 100%;
+  margin-inline: auto;
+}
+
+/* A quiet notice at the top of an editor page the current role may only read. */
+.readOnlyBanner {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-block-end: var(--space-5);
+}
+
+/* Quiet version line at the foot of every page. */
+.footer {
+  margin-block-start: var(--space-6);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  text-align: center;
+}
+
+.version {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+/* ── Drawer scrim (mobile) ───────────────────────────────────────────────── */
+
+.scrim {
+  display: none;
+}
+
+/* ── Mobile tab bar (hidden on desktop) ──────────────────────────────────── */
+
+.tabbar {
+  display: none;
+}
+
+/* ── Phones ──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .shell {
+    display: block;
+  }
+
+  /* Sidebar becomes an off-canvas drawer. */
+  .sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 40;
+    inline-size: min(82%, 320px);
+    border-inline-end: 1px solid var(--line-strong);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+
+  .sidebar[data-open] {
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar {
+      transition: none;
+    }
+  }
+
+  .closeDrawer {
+    display: inline-flex;
+  }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 35;
+    background: color-mix(in srgb, #000 55%, transparent);
+  }
+
+  /* Top bar shows the hamburger and brand; the sidebar is hidden off-canvas. */
+  .hamburger,
+  .topBrand {
+    display: flex;
+  }
+
+  .main {
+    padding-block-start: var(--space-5);
+    /* Room so content and the version footer clear the fixed tab bar. */
+    padding-block-end: calc(var(--space-6) + 1.75rem + env(safe-area-inset-bottom));
+  }
+
+  .tabbar {
+    display: flex;
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    z-index: 20;
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+    padding-block-start: var(--space-1);
+    padding-block-end: calc(var(--space-1) + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(12px);
+    border-block-start: 1px solid var(--line);
+  }
+
+  .tab,
+  .tabActive {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-block-size: 46px;
+    padding-block: var(--space-1);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.66rem;
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+
+  .tabLabel {
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tab:hover {
+    color: var(--text);
+  }
+
+  .tabActive {
+    color: var(--signal);
+  }
+
+  .tabIcon {
+    display: inline-flex;
+  }
+
+  .tab svg,
+  .tabActive svg {
+    inline-size: 22px;
+    block-size: 22px;
+  }
+}
+
+@media (max-width: 400px) {
+  .user {
+    display: none;
+  }
+}

@@ -1,0 +1,224 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+  line-height: 1.5;
+}
+
+.summary {
+  flex: none;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-block-start: 2px;
+}
+
+.banner {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+/* Controls: the category chips take the row, the search box trails on the far
+   side and drops below them when the row runs short. */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.filter:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.filter[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal-strong);
+}
+
+.filterCount {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.search {
+  flex: 0 1 15rem;
+  min-inline-size: 10rem;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+/* One service, in two rows: the brand tile and the full name on top, the
+   category and the switch below — so the name always gets the whole card width
+   and never breaks. The active card gets the green accent spine. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.card[data-active] {
+  border-color: color-mix(in srgb, var(--signal) 50%, var(--line));
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+/* The service tile. With a vendored brand logo it is a neutral tile carrying the
+   monochrome mark (AdGuard-style); without one it falls back to a brand-coloured
+   initial (colours set inline per service). */
+.glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.glyph[data-logo] {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.card[data-active] .glyph[data-logo] {
+  color: var(--signal-strong);
+}
+
+.logo {
+  inline-size: 1.45rem;
+  block-size: 1.45rem;
+  display: block;
+}
+
+/* The full name on one line; it has the whole card width here, so it never
+   wraps. Ellipsis is only a safety net for an extreme viewport. */
+.cardTitle {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  font-size: var(--step-0);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardBottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.categoryTag {
+  min-inline-size: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  padding: 3px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+@media (max-width: 640px) {
+  .header {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .summary {
+    white-space: normal;
+  }
+}

@@ -1,0 +1,286 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.intro {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  line-height: 1.5;
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+/* --- Empty state --- */
+
+.empty {
+  padding: var(--space-5) var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: var(--step-1);
+  color: var(--text);
+}
+
+.emptyHint {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* --- Queue --- */
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+  align-items: start;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  /* The one coloured edge on an otherwise quiet card marks the queue of things
+     waiting on the admin, without shouting. */
+  border-inline-start: 3px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* The requested domain is the point of each card, so it leads in the display
+   face at a size nothing else on the card competes with. */
+.domain {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.badge {
+  flex: none;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: color-mix(in srgb, var(--slate) 16%, transparent);
+  color: var(--text-muted);
+}
+
+.badge[data-category="malware"] {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.badge[data-category="ads"] {
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+  color: var(--signal-strong);
+}
+
+.badge[data-category="custom"] {
+  background: color-mix(in srgb, var(--rewrite) 16%, transparent);
+  color: var(--rewrite);
+}
+
+.meta {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+
+.metaRow dt {
+  color: var(--text-muted);
+}
+
+.metaRow dd {
+  margin: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.absolute {
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.reason {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: 2px solid var(--line-strong);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.reason[data-empty] {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* --- Scope picker --- */
+
+.scopeBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.scopeLabel {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.segment {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segment:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.segment[data-active] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.segment:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.scopeHint {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* --- Actions --- */
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.release,
+.reject {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--step--1);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.release {
+  background: var(--signal);
+  color: #fff;
+}
+
+.release:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.reject {
+  background: none;
+  border-color: var(--line-strong);
+  color: var(--text-muted);
+}
+
+.reject:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.release:disabled,
+.reject:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.release:focus-visible,
+.reject:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .metaRow {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

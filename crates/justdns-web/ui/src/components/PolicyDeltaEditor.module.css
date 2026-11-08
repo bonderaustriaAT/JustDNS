@@ -1,0 +1,156 @@
+/* SPDX-FileCopyrightText: 2026 JustDNS contributors
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+/* The shared policy-delta editor: per-list inherit/on/off switches and the two
+   ad-hoc domain boxes. Used by the devices/groups page and by schedules. */
+.policy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--field) 50%, transparent);
+}
+
+.policyLabel {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  text-transform: none;
+}
+
+.policyLists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.policyList {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.policyListName {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: var(--step--1);
+  color: var(--text);
+  min-inline-size: 0;
+}
+
+.policyInherited {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+}
+
+/* Shown when a scope has only the two built-in objects, pointing at where more
+   block lists come from so the short list is not read as a hard limit. */
+.listsEmptyHint {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  margin-block-start: var(--space-1);
+  max-inline-size: var(--measure);
+}
+
+/* A three-way segmented switch (inherit / on / off), styled like the settings
+   profile switch so the two read as one control family. */
+.listSwitch {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.listSegment {
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--field);
+  border: none;
+  border-inline-start: 1px solid var(--line-strong);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.listSegment:first-child {
+  border-inline-start: none;
+}
+
+.listSegment:hover:not([data-active]) {
+  color: var(--text);
+}
+
+.listSegment[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+}
+
+.listSegment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.policyDomains {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.policyDomain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.domainBox {
+  font: inherit;
+  font-size: var(--step--1);
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  resize: vertical;
+}
+
+.domainBox:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+/* The read-only "active here" summary: the net block lists after inheritance. */
+.effective {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.effectiveNone {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.effectiveChip {
+  font-size: var(--step--2);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+
+/* On narrow screens the two domain boxes stack. */
+@media (max-width: 34rem) {
+  .policyDomains {
+    grid-template-columns: 1fr;
+  }
+}

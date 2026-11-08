@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: 2026 JustDNS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The official JustDNS install. It bundles two containers:
+#
+#   justdns  — the resolver and web UI (the only thing exposed to the network).
+#   updater  — a tiny sidecar that performs one-click updates. It is the ONLY
+#              container with the Docker socket, and it has no ports and no
+#              inbound network: it just watches a request file on the shared data
+#              volume, runs the pull/recreate the UI asks for, and then prunes old
+#              images (keeping the new one and its predecessor). The DNS process
+#              never touches the socket.
+#
+# First run:
+#   cp .env.example .env     # then edit JUSTDNS_IMAGE/JUSTDNS_TAG if needed
+#   docker compose up -d
+#
+# After this, updates are one click in the dashboard (System page). The UI writes
+# the target version; the updater rewrites JUSTDNS_TAG in .env and recreates the
+# justdns service. The updater itself keeps running, so it can report progress.
+name: justdns
+
+services:
+  justdns:
+    image: ${JUSTDNS_IMAGE:-ghcr.io/bonderaustriaat/justdns}:${JUSTDNS_TAG:-latest}
+    container_name: justdns
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "8080:8080/tcp"
+      # Custom block page (off until enabled in the dashboard). Needed so a
+      # blocked domain — or your own block-page hostname — actually reaches the
+      # page instead of a refused connection. Tip: `network_mode: host` makes
+      # these (and the LAN-IP detection) simplest, at the cost of container
+      # network isolation.
+      - "80:80/tcp"
+      - "443:443/tcp"
+      # Encrypted client DNS (off until enabled in the dashboard).
+      - "853:853/tcp"
+      - "8443:8443/tcp"
+    volumes:
+      - justdns-data:/data
+    environment:
+      # Where the data volume is mounted; the update request/status files live
+      # under <data>/update. Matches the image default, set here for clarity.
+      JUSTDNS_DATA_DIR: /data
+      # Persist devices, schedules and the audit trail on the data volume.
+      JUSTDNS_CLIENTS_PATH: /data/clients.json
+      JUSTDNS_SCHEDULES_PATH: /data/schedules.json
+      JUSTDNS_AUDIT_PATH: /data/audit.log
+      # Validate DNSSEC on upstream answers.
+      JUSTDNS_DNSSEC: "true"
+      # Prometheus scrape token — put JUSTDNS_METRICS_TOKEN=… in .env to enable
+      # GET /metrics. Empty (the default) leaves the endpoint off (404). Passed
+      # through on every update, so it survives a one-click update.
+      JUSTDNS_METRICS_TOKEN: ${JUSTDNS_METRICS_TOKEN:-}
+      # Which repository the UI checks for releases (public GitHub tags). The
+      # image default already points here; override only for a fork.
+      # JUSTDNS_UPDATE_REPO: bonderaustriaAT/JustDNS
+
+  updater:
+    image: ${JUSTDNS_UPDATER_IMAGE:-ghcr.io/bonderaustriaat/justdns-updater}:${JUSTDNS_UPDATER_TAG:-latest}
+    container_name: justdns-updater
+    restart: unless-stopped
+    environment:
+      # The image the sidecar pulls and recreates. Only the *version* ever comes
+      # from the app; the repository is fixed here, so the app can never make the
+      # sidecar pull or delete an arbitrary image.
+      JUSTDNS_IMAGE: ${JUSTDNS_IMAGE:-ghcr.io/bonderaustriaat/justdns}
+      JUSTDNS_SERVICE: justdns
+      JUSTDNS_COMPOSE_FILE: /project/docker-compose.yml
+      JUSTDNS_ENV_FILE: /project/.env
+      JUSTDNS_DATA_DIR: /data
+      # Must match this project's name so the recreate targets the running
+      # container rather than spawning an orphan.
+      COMPOSE_PROJECT_NAME: justdns
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - justdns-data:/data
+      # The compose file + .env, so the sidecar can recreate the service and pin
+      # the new tag. Mount the directory that holds this file.
+      - ./:/project
+
+volumes:
+  # The name is pinned (no compose project prefix), so a fresh install creates
+  # `justdns-data` and an existing `docker run` install (which used exactly this
+  # name) is adopted with all its data intact rather than replaced by an empty
+  # volume.
+  justdns-data:
+    name: justdns-data

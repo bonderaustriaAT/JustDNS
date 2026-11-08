@@ -1,0 +1,520 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5, 2rem);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+}
+
+.intro {
+  max-inline-size: var(--measure);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.sectionTitle {
+  font-size: var(--step-0);
+  letter-spacing: -0.01em;
+  margin-block-end: var(--space-3);
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: var(--step-1);
+  padding-block: var(--space-4);
+  max-inline-size: var(--measure);
+}
+
+/* Runtime-status tiles: a responsive grid of small labelled cards. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: var(--space-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  min-inline-size: 0;
+}
+
+/* A tile reporting a problem (a failed feed refresh) carries a red edge. */
+.tile[data-tone="danger"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.tileLabel {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.tileValue {
+  font-family: var(--font-mono);
+  font-size: var(--step-1);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileSub {
+  font-size: var(--step--2, 0.78rem);
+  color: var(--text-muted);
+}
+
+/* Listener row inside the Services tile: a dot, a name and its state. */
+.listeners {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin-block-start: 2px;
+}
+
+.listener {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: var(--step--1);
+}
+
+.listenerDot {
+  inline-size: 0.55rem;
+  block-size: 0.55rem;
+  border-radius: 999px;
+  background: var(--text-muted);
+  align-self: center;
+  flex: none;
+}
+
+.listener[data-up] .listenerDot {
+  background: var(--signal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 22%, transparent);
+}
+
+.listenerLabel {
+  font-family: var(--font-mono);
+}
+
+.listenerState {
+  color: var(--text-muted);
+  font-size: var(--step--2, 0.78rem);
+}
+
+.listener[data-up] .listenerState {
+  color: var(--signal-strong);
+}
+
+/* Verbosity control: raise what the engine emits, not just what is shown. A
+   calm bordered strip so it reads as a setting, distinct from the log toolbar. */
+.verbosity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.verbosityText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.verbosityLabel {
+  font-size: var(--step-0);
+}
+
+.verbosityHint {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  max-inline-size: var(--measure);
+}
+
+.verbosityError {
+  font-size: var(--step--1);
+  color: var(--danger);
+}
+
+/* A small spinner that rides inside the active verbosity segment and the log
+   "applying" chip while the engine takes the new level. */
+.segSpinner {
+  display: inline-block;
+  inline-size: 0.72em;
+  block-size: 0.72em;
+  margin-inline-end: 0.45em;
+  vertical-align: -0.1em;
+  border: 2px solid color-mix(in srgb, var(--signal) 30%, transparent);
+  border-block-start-color: var(--signal);
+  border-radius: 50%;
+  animation: segspin 0.7s linear infinite;
+}
+
+@keyframes segspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Title + "applying" chip on the diagnostic log header. */
+.logTitleWrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.logBusyChip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--step--1);
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+}
+
+/* A thin indeterminate sweep across the top of the log while the level applies.
+   Honours reduced-motion by falling back to a static tinted bar. */
+.logBusyBar {
+  block-size: 2px;
+  margin-block-end: var(--space-2);
+  background: transparent;
+  overflow: hidden;
+}
+
+.logBusyBar[data-on] {
+  background: color-mix(in srgb, var(--signal) 18%, transparent);
+}
+
+.logBusyBar[data-on]::after {
+  content: "";
+  display: block;
+  block-size: 2px;
+  inline-size: 38%;
+  background: var(--signal);
+  animation: logsweep 1s ease-in-out infinite;
+}
+
+@keyframes logsweep {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(330%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segSpinner {
+    animation-duration: 1.6s;
+  }
+  .logBusyBar[data-on]::after {
+    animation: none;
+    inline-size: 100%;
+  }
+}
+
+/* Log toolbar: level segments, search and the download button. */
+.logHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segment {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: 0.35rem 0.75rem;
+  background: var(--surface);
+  border: none;
+  border-inline-start: 1px solid var(--line-strong);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.segment:first-child {
+  border-inline-start: none;
+}
+
+.segment[data-active] {
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+  color: var(--text);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.category {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: 0.35rem 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.category:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.search {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: 0.35rem 0.6rem;
+  min-inline-size: 12rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.download {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: 0.35rem 0.75rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.download:hover:not(:disabled) {
+  background: var(--surface-sunken);
+}
+
+.download:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.download:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The error banner: a solid red strip, shown while any error is visible. */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-block-end: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.alertIcon {
+  inline-size: 1.4rem;
+  block-size: 1.4rem;
+  flex: none;
+  color: var(--danger);
+  margin-block-start: 1px;
+}
+
+.alertText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.alertTitle {
+  color: var(--text);
+  font-size: var(--step-0);
+}
+
+.alertHint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* The log stream. Monospace, newest first, one grid shared by header and rows. */
+.list {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.columns,
+.row {
+  display: grid;
+  grid-template-columns: 8.5rem 5.5rem minmax(7rem, 12rem) minmax(0, 1fr);
+  column-gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+}
+
+.columns {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  background: var(--surface-sunken);
+  border-block-end: 1px solid var(--line-strong);
+}
+
+.row {
+  border-block-start: 1px solid var(--line);
+  font-size: var(--step--1);
+}
+
+.row:first-of-type {
+  border-block-start: none;
+}
+
+/* An error row carries a red edge and faint wash so it catches the eye while
+   scrolling; a warning gets a softer amber edge. */
+.row[data-level="error"] {
+  box-shadow: inset 2px 0 0 var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.row[data-level="warn"] {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.time {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.levelCell {
+  min-inline-size: 0;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 15%, transparent);
+}
+
+.badge[data-level="error"] {
+  --tone: #fff;
+  background: var(--danger);
+  font-weight: 600;
+}
+.badge[data-level="warn"] {
+  --tone: var(--warn);
+}
+.badge[data-level="info"] {
+  --tone: var(--rewrite);
+}
+.badge[data-level="debug"],
+.badge[data-level="trace"] {
+  --tone: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
+.source {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message {
+  font-family: var(--font-mono);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.fields {
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .logHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .search {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+  }
+
+  /* Collapse the four-column grid to time+level on one line, source and
+     message wrapping beneath, so a narrow screen stays readable. */
+  .columns {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "time level"
+      "source source"
+      "message message";
+    row-gap: 2px;
+  }
+
+  .time {
+    grid-area: time;
+  }
+
+  .levelCell {
+    grid-area: level;
+    justify-self: end;
+  }
+
+  .source {
+    grid-area: source;
+  }
+
+  .message {
+    grid-area: message;
+  }
+}

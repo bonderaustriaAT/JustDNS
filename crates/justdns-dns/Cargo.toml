@@ -1,0 +1,44 @@
+[package]
+name = "justdns-dns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+justdns-filter = { path = "../justdns-filter" }
+justdns-rewrite = { path = "../justdns-rewrite" }
+arc-swap = "1.7.1"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# `dnssec-ring` pulls in the ring-backed DNSSEC validator (DNSKEY/DS/RRSIG,
+# NSEC/NSEC3) and the compiled-in root trust anchors, matching the `ring` crypto
+# provider the rest of this crate already pins — no aws-lc C toolchain.
+hickory-proto = { version = "0.26.2", features = ["dnssec-ring"] }
+hickory-resolver = { version = "0.26.2", default-features = false, features = ["tokio", "tls-ring", "https-ring", "webpki-roots", "dnssec-ring"] }
+moka = { version = "0.12.16", features = ["future"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "io-util", "fs"] }
+tracing = "0.1"
+# Server-side TLS for the DoT/DoH client endpoints. We pin everything to the
+# `ring` crypto provider (already compiled in via hickory's tls-ring) so the
+# static release build never pulls the aws-lc C toolchain.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+# PEM parsing via rustls-pki-types' own `PemObject` API; `std` enables the `pem`
+# module (rustls-pemfile is archived — RUSTSEC-2025-0134).
+rustls-pki-types = { version = "1", features = ["std"] }
+# Read validity dates, subject and SANs out of a stored/uploaded certificate so
+# the dashboard can show expiry and the "renew" flow can refuse an expired cert.
+x509-parser = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+base64 = "0.22"
+hyper = { version = "1.12", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server", "server-auto", "tokio", "service"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "macros", "net", "time", "rt-multi-thread", "io-util"] }

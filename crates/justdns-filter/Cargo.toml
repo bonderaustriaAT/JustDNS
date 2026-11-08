@@ -1,0 +1,10 @@
+[package]
+name = "justdns-filter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+arc-swap = "1.7.1"
+justdns-clients = { path = "../justdns-clients" }

@@ -1,0 +1,306 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+}
+
+.intro {
+  max-inline-size: var(--measure);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* The Bogus alert: a solid red banner, shown only when a tampered answer has
+   been refused. */
+.alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.alertIcon {
+  inline-size: 1.4rem;
+  block-size: 1.4rem;
+  flex: none;
+  color: var(--danger);
+  margin-block-start: 1px;
+}
+
+.alertText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.alertTitle {
+  color: var(--text);
+  font-size: var(--step-0);
+}
+
+.alertHint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* Four counter cards, one per verdict. Each is a toggle that filters the table
+   to its verdict; the active one carries a tinted edge and surface. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.card[data-state="secure"] {
+  --tone: var(--signal);
+}
+.card[data-state="insecure"] {
+  --tone: var(--rewrite);
+}
+.card[data-state="bogus"] {
+  --tone: var(--danger);
+}
+.card[data-state="indeterminate"] {
+  --tone: var(--text-muted);
+}
+
+.card:hover {
+  background: var(--surface-sunken);
+}
+
+.card[data-active] {
+  border-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.cardCount {
+  font-family: var(--font-mono);
+  font-size: var(--step-2);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--tone);
+}
+
+.cardLabel {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
+}
+
+/* The line under the cards: the filter hint, or the active filter with a reset. */
+.hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-block-size: 1.5rem;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.filtered {
+  color: var(--text);
+}
+
+.clear {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--signal-strong);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.clear:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: var(--step-1);
+  padding-block: var(--space-4);
+  max-inline-size: var(--measure);
+}
+
+/* The table of recent validated queries — same grid as the query log so the two
+   read alike. */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.columns,
+.row {
+  display: grid;
+  grid-template-columns: 4.75rem minmax(6.5rem, 10rem) minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: center;
+}
+
+.columns {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  padding-block: var(--space-2);
+  border-block-end: 1px solid var(--line-strong);
+}
+
+.statusHead {
+  justify-self: end;
+}
+
+.item {
+  border-block-start: 1px solid var(--line);
+}
+
+.item:first-of-type {
+  border-block-start: none;
+}
+
+.row {
+  padding-block: var(--space-2);
+}
+
+/* A bogus row carries a red edge and a faint red wash so it stands out while
+   scrolling — the one verdict worth catching the eye. */
+.item[data-bogus] .row {
+  box-shadow: inset 2px 0 0 var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.time {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.client {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.domain {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-inline-size: 0;
+}
+
+.statusCell {
+  justify-self: end;
+}
+
+.badge {
+  font-size: 0.72rem;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 15%, transparent);
+}
+
+.badge[data-state="secure"] {
+  --tone: var(--signal-strong);
+}
+.badge[data-state="insecure"] {
+  --tone: var(--rewrite);
+}
+.badge[data-state="indeterminate"] {
+  --tone: var(--text-muted);
+  background: var(--surface-sunken);
+}
+.badge[data-state="bogus"] {
+  --tone: #fff;
+  background: var(--danger);
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .columns {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "domain domain status"
+      "time   client status";
+    column-gap: var(--space-2);
+    row-gap: 2px;
+    padding-block: var(--space-3);
+  }
+
+  .domain {
+    grid-area: domain;
+  }
+
+  .time {
+    grid-area: time;
+  }
+
+  .client {
+    grid-area: client;
+    justify-self: start;
+  }
+
+  .statusCell {
+    grid-area: status;
+    align-self: center;
+  }
+}

@@ -1,0 +1,469 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  line-height: 1.5;
+}
+
+.banner {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+/* --- Cards ------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cardHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cardTitle {
+  font-size: var(--step-1);
+}
+
+.cardLead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-inline-size: var(--measure);
+}
+
+/* --- Cadence rows ------------------------------------------------------ */
+
+.cadence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cadenceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.cadenceMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.cadenceText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cadenceName {
+  font-weight: 600;
+  font-size: var(--step-0);
+}
+
+.cadenceHint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.inlineGroup {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.inlineField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: opacity 0.15s ease;
+}
+
+.inlineField[data-dim] {
+  opacity: 0.45;
+}
+
+.inlineLabel {
+  font-size: var(--step--2, 0.72rem);
+  color: var(--text-muted);
+  text-transform: none;
+}
+
+.select {
+  font: inherit;
+  font-size: var(--step--1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  min-inline-size: 7rem;
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Generate-now footer ----------------------------------------------- */
+
+.cardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.footText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-inline-size: 0;
+}
+
+.footTitle {
+  font-weight: 600;
+}
+
+.footLead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}
+
+.footActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* --- Buttons ----------------------------------------------------------- */
+
+.button,
+.buttonGhost {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 600;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.button {
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  color: #fff;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.buttonGhost {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+}
+
+.buttonGhost:hover {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.button:focus-visible,
+.buttonGhost:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Report list ------------------------------------------------------- */
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  padding: var(--space-3) 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.listRow {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-block-end: 1px solid var(--line);
+}
+
+.listRow:last-child {
+  border-block-end: 0;
+}
+
+.period {
+  justify-self: start;
+  font-size: var(--step--1);
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--signal) 12%, var(--surface-sunken));
+  border: 1px solid color-mix(in srgb, var(--signal) 30%, var(--line));
+  color: var(--signal-strong);
+}
+
+.period[data-period="weekly"] {
+  background: color-mix(in srgb, var(--rewrite) 12%, var(--surface-sunken));
+  border-color: color-mix(in srgb, var(--rewrite) 30%, var(--line));
+  color: var(--rewrite);
+}
+
+.rowWindow {
+  font-weight: 600;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowStat,
+.rowGenerated {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Report viewer ----------------------------------------------------- */
+
+.viewHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.viewActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-3);
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.kpiValue {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.kpi[data-accent="danger"] .kpiValue {
+  color: var(--danger);
+}
+
+.kpiLabel {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.breakdownTitle {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: var(--step--1);
+}
+
+.chipLabel {
+  color: var(--text-muted);
+}
+
+.chipValue {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Top-lists --------------------------------------------------------- */
+
+.tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4);
+}
+
+.topBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.topTitle {
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.topEmpty {
+  color: var(--text-muted);
+}
+
+.topTable {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.topTh,
+.topThNum {
+  text-align: start;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-2);
+  border-block-end: 1px solid var(--line);
+}
+
+.topThNum {
+  text-align: end;
+}
+
+.topTd {
+  padding: var(--space-1) var(--space-2);
+  border-block-end: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-inline-size: 0;
+}
+
+.topTdNum {
+  padding: var(--space-1) var(--space-2);
+  border-block-end: 1px solid var(--line);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.clientName {
+  display: block;
+  font-weight: 600;
+}
+
+.clientAddr {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--step--2, 0.72rem);
+  color: var(--text-muted);
+}
+
+/* --- Responsive -------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .listRow {
+    grid-template-columns: auto 1fr;
+    grid-auto-rows: min-content;
+    gap: var(--space-1) var(--space-3);
+  }
+
+  .rowWindow {
+    grid-column: 2;
+    white-space: normal;
+  }
+
+  .rowStat,
+  .rowGenerated {
+    grid-column: 2;
+    white-space: normal;
+  }
+
+  .listRow .buttonGhost {
+    grid-column: 2;
+    justify-self: start;
+    margin-block-start: var(--space-1);
+  }
+}

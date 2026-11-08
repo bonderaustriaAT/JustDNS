@@ -1,0 +1,674 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+}
+
+.refresh {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.refresh:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--signal-strong);
+}
+
+.refresh:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.banner {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+/* The two manual editors sit side by side: allow on the left, block on the
+   right, each flagged by a coloured spine so the two never blur together. */
+.editors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* Allow vs. block are coded by an inset spine — the same device the active
+   preset card and a blocked log row use — so the two never blur together
+   without reaching for the thick side-border tell. */
+.editor[data-accent="allow"] {
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.editor[data-accent="block"] {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.editorHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.editorTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step-1);
+}
+
+.editorCount {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+}
+
+.addRow,
+.feedForm {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.input {
+  flex: 1;
+  min-inline-size: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.select {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.addButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.addButton:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.addButton:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-style: italic;
+}
+
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Each own entry is a filled, outlined row so a hand-added name stands out from
+   the card instead of reading as faint text on dark. The allow/block colour
+   already comes from the card's own accent, so the rows stay neutral. */
+.entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+/* The name sits over its optional note, so a row reads domain-first with the
+   note as quiet secondary text. */
+.entryMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.entryName {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entryNote {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.entryActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* "Notiz" opens the inline note editor for a row. Quiet by default so it never
+   competes with the name or the remove control. */
+.noteButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+
+.noteButton:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* The optional note field beside the domain in the add row. */
+.noteField {
+  flex: 1 1 12ch;
+  min-inline-size: 10ch;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.noteField:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+/* The row turns into this little form while its note is edited in place. */
+.noteEdit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.noteInput {
+  flex: 1;
+  min-inline-size: 10ch;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.noteInput:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.noteSave {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.noteSave:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.noteCancel {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.noteCancel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.noteSave:disabled,
+.noteCancel:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.remove {
+  flex: none;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.remove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.remove:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+/* Sections (presets, URL feeds). */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--line);
+}
+
+.sectionTitle {
+  font-size: var(--step-2);
+}
+
+.sectionLead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}
+
+/* Filter bar: a row of category chips that narrows the catalogue. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.filter:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.filter[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal-strong);
+}
+
+.filterCount {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  opacity: 0.75;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+
+.cardTags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.categoryTag {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.card[data-active] {
+  border-color: color-mix(in srgb, var(--signal) 50%, var(--line));
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cardTitleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cardTitle {
+  font-size: var(--step-1);
+}
+
+.kind {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.kind[data-kind="allow"] {
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+}
+
+.cardText {
+  color: var(--text);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* False-positive risk: a short meter plus the prose that explains it. */
+.risk {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.riskText {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.meter {
+  flex: none;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  block-size: fit-content;
+  margin-block-start: 2px;
+}
+
+.pip {
+  inline-size: 6px;
+  block-size: 16px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+/* The filled pips take the colour of the risk: calm green at the low end,
+   amber in the middle, red when the list is likely to over-block. */
+.meter[data-level="1"] .pip[data-on],
+.meter[data-level="2"] .pip[data-on] {
+  background: var(--signal);
+}
+
+.meter[data-level="3"] .pip[data-on] {
+  background: var(--amber);
+}
+
+.meter[data-level="4"] .pip[data-on],
+.meter[data-level="5"] .pip[data-on] {
+  background: var(--danger);
+}
+
+.status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* URL feed list. */
+.feeds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.feed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.feed:first-child {
+  border-block-start: none;
+}
+
+.feed[data-off] {
+  opacity: 0.55;
+}
+
+.feedMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.feedName {
+  font-weight: 500;
+}
+
+.feedUrl {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feedStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.78rem;
+  margin-block-start: 2px;
+}
+
+.statusOk {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusError {
+  color: var(--danger);
+}
+
+.statusPending {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.feedActions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* In-page switch between the two Block/Allow sub-pages, shown only on phones
+   where the header's dropdown is hidden. A segmented control in the app's tone. */
+.subnav {
+  display: none;
+  gap: var(--space-1);
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.subnavLink,
+.subnavActive {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-2) var(--space-2);
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.subnavActive {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+}
+
+@media (max-width: 720px) {
+  .editors {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .subnav {
+    display: flex;
+  }
+
+  /* The add-entry and subscription forms stack instead of cramming a domain
+     field, a note field and a button onto one phone-width line. */
+  .addRow,
+  .feedForm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .addButton {
+    inline-size: 100%;
+  }
+}
+
+@media (max-width: 540px) {
+  .cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

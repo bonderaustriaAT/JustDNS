@@ -1,0 +1,476 @@
+/* SPDX-FileCopyrightText: 2026 JustDNS contributors
+   SPDX-License-Identifier: AGPL-3.0-or-later */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  font-size: var(--step-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+}
+
+.banner {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+.toolbar {
+  display: flex;
+}
+
+.newButton {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.newButton:hover {
+  filter: brightness(1.05);
+}
+
+.newButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  padding: var(--space-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.entries {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.entry {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.entry[data-editing] {
+  border-color: var(--signal);
+}
+
+/* --- Collapsed row ------------------------------------------------------- */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  flex-wrap: wrap;
+}
+
+.row[data-off] {
+  opacity: 0.6;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.rowName {
+  font-size: var(--step-0);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.effectChip {
+  font-size: var(--step--2);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.effectChip[data-mode="pause"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.effectChip[data-mode="block"] {
+  color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border-color: color-mix(in srgb, var(--signal) 35%, transparent);
+}
+
+.rowMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.window {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.overnight {
+  font-family: var(--font-body);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
+}
+
+/* A compact seven-dot weekday strip, Monday-first. An "on" day is filled. */
+.days {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.dayPip {
+  inline-size: 1.4em;
+  text-align: center;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+}
+
+.dayPip[data-on] {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.target {
+  color: var(--text-muted);
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.rowButton,
+.rowDelete {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.rowButton:hover {
+  border-color: var(--signal);
+}
+
+.rowDelete:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+.rowButton:focus-visible,
+.rowDelete:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Editor -------------------------------------------------------------- */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.editorTop {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.editorTop .field {
+  flex: 1;
+  min-inline-size: 16ch;
+}
+
+.enabledField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fieldLabel {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.input,
+.select,
+.timeInput {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.timeInput {
+  font-family: var(--font-mono);
+}
+
+.input:focus-visible,
+.select:focus-visible,
+.timeInput:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dayPicker {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dayToggle {
+  font: inherit;
+  font-size: var(--step--1);
+  min-inline-size: 3.2em;
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.dayToggle:hover:not([data-active]) {
+  color: var(--text);
+}
+
+.dayToggle[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.dayToggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.times {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.timeHint {
+  flex: 1;
+  min-inline-size: 18ch;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tzNote {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.targetRow {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.targetRow .field {
+  flex: 1;
+  min-inline-size: 16ch;
+}
+
+.pickerEmpty {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-style: italic;
+  padding: var(--space-2) 0;
+}
+
+.effectSwitch {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.effectSegment {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: var(--field);
+  border: none;
+  border-inline-start: 1px solid var(--line-strong);
+  padding: var(--space-1) var(--space-4);
+  cursor: pointer;
+}
+
+.effectSegment:first-child {
+  border-inline-start: none;
+}
+
+.effectSegment:hover:not([data-active]) {
+  color: var(--text);
+}
+
+.effectSegment[data-active] {
+  color: var(--surface);
+  background: var(--signal);
+}
+
+.effectSegment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.effectDesc {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  max-inline-size: var(--measure);
+}
+
+.editorActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.save {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.save:focus-visible,
+.cancel:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.cancel {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 34rem) {
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rowActions {
+    justify-content: flex-end;
+  }
+}
