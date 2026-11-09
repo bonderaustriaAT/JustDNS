@@ -100,5 +100,8 @@ from the roster it already has, so exactly one sends and the rest skip it.
 like any other setting — every node agrees on the channel, the format and which events are
 on. The webhook URL and Telegram token are stored in `config.json` on the `/data` volume in
 clear, like the rest of the configuration; there is no separate secret store in this
-version, which is why the field is write-masked in the UI rather than round-tripped back to
-the browser as plain text.
+version. The webhook URL is a write-only secret: `GET /api/settings` returns it only to an
+**administrator**, lower roles get it blanked, and a **downloaded** backup omits it (re-enter
+it once after a restore; the node-local pre-update backup on `/data` keeps it). Link-local /
+cloud-metadata targets (such as `169.254.169.254`) are also refused as a destination, while a
+self-hosted ntfy/Gotify on your own LAN stays allowed.

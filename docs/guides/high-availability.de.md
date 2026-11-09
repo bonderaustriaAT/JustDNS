@@ -151,19 +151,29 @@ JUSTDNS_SYNC_INTERVAL=30           # Sekunden zwischen den Abgleichen (mindesten
 ### Sicherheit: Behandle den Schlüssel wie die Passwort-Datenbank
 
 Seit Benutzer mitsynchronisiert werden, trägt der Snapshot, den ein Knoten vom Partner
-holt, **alle Konten samt Passwort-Hashes und TOTP-Secrets**. Der gemeinsame Schlüssel
-ist das Einzige, was diesen Snapshot absichert — wer ihn hat, kann die gesamte
-Konten-Datenbank beider Knoten lesen und verändern (und damit auch MFA aushebeln).
-Darum:
+holt, **alle Konten samt Passwort-Hashes und TOTP-Secrets** sowie die privaten
+Zertifikatsschlüssel. Diese Nutzlast reist **verschlüsselt** — jeder Knoten leitet aus
+dem gemeinsamen Schlüssel einen symmetrischen Schlüssel ab (HKDF-SHA256) und versiegelt
+jede Peer-Antwort mit ChaCha20-Poly1305. Ein Mitleser auf der Leitung sieht also nur
+Geheimtext, und der gemeinsame Schlüssel selbst reist **nie** — ein Knoten beweist, dass
+er ihn hält, indem er eine Nutzlast schickt, die sich unter ihm öffnen lässt. Das gilt
+auch über eine offene `http`-Leitung im selben Netz. Der gemeinsame Schlüssel bleibt
+damit das Kronjuwel: Wer ihn hat, kann denselben Schlüssel ableiten, den Snapshot lesen
+und verändern (und damit auch MFA aushebeln). Darum:
 
 - **Nutze einen langen, zufälligen Schlüssel** (mindestens 16 Zeichen; der Assistent
   verlangt das). Ein kurzer oder erratbarer Schlüssel gibt die Credential-Datenbank preis.
-- **Paare nur über ein vertrauenswürdiges Netz.** Die Knoten-Verbindung sollte über
-  TLS laufen (HTTPS-Adresse des Partners); über eine offene Leitung im selben Netz
-  könnte ein Mitleser den Snapshot **und** den Schlüssel abgreifen.
+- **TLS ist jetzt optionale Härtung, keine Pflicht.** Die Nutzlast ist ohnehin
+  verschlüsselt; eine HTTPS-Adresse des Partners legt nur eine zweite Schicht darüber.
 - **Bei Verdacht auf einen kompromittierten Schlüssel:** den Schlüssel auf beiden
   Knoten wechseln **und** alle Passwörter neu setzen — der alte Schlüssel konnte die
   Hashes bereits kopiert haben.
+
+> **Beim Update beide Knoten aktualisieren.** Die Peer-Verschlüsselung ist ein
+> abgestimmter Schnitt: Ein Knoten dieser Version kann die versiegelten Nutzlasten eines
+> alten Knotens nicht öffnen und umgekehrt. Läuft ein Knoten noch auf einer älteren
+> Version, pausiert der Sync, bis beide aktualisiert sind — die Auflösung läuft die ganze
+> Zeit weiter, nur der Abgleich wartet.
 
 ## Beide Knoten bei den Clients eintragen
 
@@ -271,15 +281,21 @@ kanonische JSON-Form jeder Entität, nicht Rusts `DefaultHasher` (dessen Ausgabe
 zwischen Builds ändern kann und nie gespeichert werden darf). Nur so kann ein Knoten
 über Neustarts und Versionen hinweg „unverändert" von „bearbeitet" unterscheiden.
 
-**Die Knoten-Endpunkte authentifizieren mit dem gemeinsamen Schlüssel, nicht mit
-einem Login.** Ein Knoten hält keine Dashboard-Sitzung, also tragen `/api/ha/hello`
-und `/api/ha/snapshot` den Schlüssel als Bearer-Token, in **konstanter Zeit**
-verglichen. Sie antworten mit **404**, bis die Hochverfügbarkeit aktiv *und* ein
-Schlüssel gesetzt ist — auf einer Instanz, die die Funktion nicht nutzt, existiert die
-Sync-Fläche also gar nicht. Eine bestehende Paarung wird bewusst **nicht** verlangt
-(der Schlüssel ist die Absicherung), sonst könnten sich zwei frische Knoten nie zum
-ersten Mal verbinden. Die Verwaltungs-Endpunkte (aktivieren, Schlüssel setzen,
-verbinden, jetzt abgleichen) liegen hinter dem normalen Admin-Login.
+**Die Knoten-Endpunkte authentifizieren und verschlüsseln mit dem gemeinsamen
+Schlüssel, nicht mit einem Login.** Ein Knoten hält keine Dashboard-Sitzung. Aus dem
+gemeinsamen Schlüssel leiten beide Seiten per HKDF-SHA256 denselben AEAD-Schlüssel ab.
+Ein Aufruf trägt im Header `X-Ha-Auth` ein versiegeltes, zeitgestempeltes Token (Knoten-ID
+und eigene Adresse, verschlüsselt mit ChaCha20-Poly1305); dass es sich öffnen lässt, ist
+zugleich der Authentizitätsbeweis — der Schlüssel reist nie als Token, und ein Stempel
+außerhalb eines 60-Sekunden-Fensters wird abgewiesen, was Replays begrenzt. Die
+Antworten von `/api/ha/hello`, `/api/ha/snapshot` und `/api/ha/queries` sind ebenso
+versiegelt, sodass die Nutzlast — Zertifikatsschlüssel, Passwort-Hashes, MFA-Secrets —
+nie im Klartext über die Leitung geht. Die Endpunkte antworten mit **404**, bis die
+Hochverfügbarkeit aktiv *und* ein Schlüssel gesetzt ist — auf einer Instanz, die die
+Funktion nicht nutzt, existiert die Sync-Fläche also gar nicht. Eine bestehende Paarung
+wird bewusst **nicht** verlangt (der Schlüssel ist die Absicherung), sonst könnten sich
+zwei frische Knoten nie zum ersten Mal verbinden. Die Verwaltungs-Endpunkte (aktivieren,
+Schlüssel setzen, verbinden, jetzt abgleichen) liegen hinter dem normalen Admin-Login.
 
 **Uhren-Drift ist wichtig.** Last-Writer-Wins vertraut den Uhren, halte also beide
 Knoten per NTP synchron. Der Knoten-ID-Tiebreak verhindert Flattern, wenn zwei Stempel

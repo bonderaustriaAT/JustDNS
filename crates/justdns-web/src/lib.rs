@@ -53,6 +53,7 @@ use tokio::net::TcpListener;
 use tracing::{info, warn};
 
 mod ha;
+mod ha_crypto;
 mod metrics;
 mod notify;
 mod reports;
@@ -2691,7 +2692,7 @@ async fn export_backup(
     State(clients): State<ClientStore>,
     State(schedules): State<ScheduleStore>,
 ) -> Result<Response, (StatusCode, String)> {
-    let backup = Backup {
+    let mut backup = Backup {
         app: BACKUP_APP.to_owned(),
         kind: BACKUP_KIND.to_owned(),
         version: BACKUP_VERSION,
@@ -2704,6 +2705,11 @@ async fn export_backup(
         groups: clients.snapshot_groups(),
         schedules: schedules.snapshot(),
     };
+    // A downloaded backup leaves the server and may be stored anywhere, so the
+    // write-only webhook credential is stripped from it; the admin re-enters it
+    // after a restore. (The on-disk pre-update backup keeps it — it stays on the
+    // same `/data` volume as the live config.)
+    redact_settings_secrets(&mut backup.settings);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok((
@@ -2750,19 +2756,45 @@ async fn restore_backup(
         ));
     }
 
-    rewrites
-        .replace_all(backup.rewrites, backup.aliases)
-        .map_err(rewrite_error)?;
-    clients
-        .replace(backup.clients, backup.groups)
-        .map_err(client_error)?;
-    schedules
-        .replace(backup.schedules)
-        .map_err(schedule_error)?;
-    lists.replace(backup.lists).map_err(list_error)?;
-    config
-        .set(backup.settings)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    // Snapshot every store before touching it, so a failure partway through rolls
+    // back to the pre-restore state instead of leaving a half-applied mix (e.g. new
+    // rewrites and devices but the old lists and settings).
+    let prev_rewrites = rewrites.snapshot();
+    let prev_aliases = rewrites.alias_snapshot();
+    let prev_clients = clients.snapshot();
+    let prev_groups = clients.snapshot_groups();
+    let prev_schedules = schedules.snapshot();
+    let prev_lists = lists.snapshot();
+    let prev_settings = config.get();
+
+    let applied = (move || -> Result<(), (StatusCode, String)> {
+        rewrites
+            .replace_all(backup.rewrites, backup.aliases)
+            .map_err(rewrite_error)?;
+        clients
+            .replace(backup.clients, backup.groups)
+            .map_err(client_error)?;
+        schedules
+            .replace(backup.schedules)
+            .map_err(schedule_error)?;
+        lists.replace(backup.lists).map_err(list_error)?;
+        config
+            .set(backup.settings)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        Ok(())
+    })();
+
+    if let Err(error) = applied {
+        // Best-effort rollback to the snapshots taken above. Any store already
+        // swapped is put back; one that never changed is simply re-set to itself.
+        let _ = rewrites.replace_all(prev_rewrites, prev_aliases);
+        let _ = clients.replace(prev_clients, prev_groups);
+        let _ = schedules.replace(prev_schedules);
+        let _ = lists.replace(prev_lists);
+        let _ = config.set(prev_settings);
+        warn!(error = %error.1, "backup restore failed; rolled back");
+        return Err(error);
+    }
     record(
         &state,
         AuditEntry::success(&identity.username, "backup.restore"),
@@ -3435,48 +3467,48 @@ fn ha_broadcast_depart(state: &AppState, node_id: &str, at_ms: u64, peers: &[ha:
     }
 }
 
-/// Extract the bearer sync key from the `Authorization` header.
-fn ha_bearer(headers: &HeaderMap) -> &str {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .unwrap_or("")
-}
-
-/// Guard a peer endpoint: the HA peer API must be open (enabled + paired + key
-/// set) and the presented key must match. Returns the error response to send, or
-/// `None` when the request may proceed.
-fn ha_peer_guard(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+/// Authorize a peer request: the HA peer API must be open (enabled + key set), and
+/// the request must carry a valid sealed `X-Ha-Auth` token — proof that the caller
+/// holds the shared key, without the key ever travelling. Returns the caller's
+/// authenticated identity, or the error response to send.
+fn ha_peer_authorize(state: &AppState, headers: &HeaderMap) -> Result<ha::PeerAuth, StatusCode> {
     if !state.ha.peer_api_open() {
-        return Some(StatusCode::NOT_FOUND.into_response());
+        return Err(StatusCode::NOT_FOUND);
     }
-    if !state.ha.key_matches(ha_bearer(headers)) {
-        return Some(
-            (
-                StatusCode::UNAUTHORIZED,
-                [(header::WWW_AUTHENTICATE, "Bearer")],
-            )
-                .into_response(),
-        );
-    }
-    None
+    let token = headers
+        .get("x-ha-auth")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    state
+        .ha
+        .verify_peer_auth(token)
+        .ok_or(StatusCode::UNAUTHORIZED)
 }
 
-/// Note the caller's advertised identity from a pull's `X-Ha-Node-*` headers, so a
-/// node that only ever pulls still becomes visible to the mesh (we connect back to
-/// it from the roster). The caller holds the shared key, so this is authenticated.
-fn ha_note_caller(state: &AppState, headers: &HeaderMap) {
-    let header = |name: &str| {
-        headers
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
+/// Note the caller's authenticated identity (id + address), so a node that only ever
+/// pulls still becomes visible to the mesh (we connect back to it from the roster).
+/// The identity comes from the verified token, so it is authenticated.
+fn ha_note_caller(state: &AppState, caller: &ha::PeerAuth) {
+    if let Some(url) = &caller.self_url {
+        if !caller.node_id.is_empty() && !url.is_empty() {
+            state.ha.note_announced(&caller.node_id, url);
+        }
+    }
+}
+
+/// Seal a JSON response body under the cluster key, so a peer payload (which carries
+/// certificate keys, password hashes and MFA secrets) never leaves in clear. Returns
+/// 404 if no key is set — in which case the peer API is closed anyway.
+fn ha_sealed<T: Serialize>(state: &AppState, value: &T) -> Response {
+    let json = match serde_json::to_vec(value) {
+        Ok(json) => json,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let node_id = header("x-ha-node-id");
-    let url = header("x-ha-node-url");
-    if !node_id.is_empty() && !url.is_empty() {
-        state.ha.note_announced(node_id, url);
+    match state.ha.seal_for_peer(&json) {
+        Some(sealed) => {
+            ([(header::CONTENT_TYPE, "application/octet-stream")], sealed).into_response()
+        }
+        None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
@@ -3484,34 +3516,40 @@ fn ha_note_caller(state: &AppState, headers: &HeaderMap) {
 /// by the connect flow to validate a pairing before storing it. Also learns the
 /// caller, so seeding one direction meshes both.
 async fn ha_hello(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(deny) = ha_peer_guard(&state, &headers) {
-        return deny;
-    }
-    ha_note_caller(&state, &headers);
-    Json(ha::Hello {
-        node_id: state.ha.node_id(),
-        version: state.status.version().to_owned(),
-    })
-    .into_response()
+    let caller = match ha_peer_authorize(&state, &headers) {
+        Ok(caller) => caller,
+        Err(deny) => return deny.into_response(),
+    };
+    ha_note_caller(&state, &caller);
+    ha_sealed(
+        &state,
+        &ha::Hello {
+            node_id: state.ha.node_id(),
+            version: state.status.version().to_owned(),
+        },
+    )
 }
 
 /// Peer snapshot: this node's current collections, ledger and roster, for the peer
 /// to merge. Refreshing the ledger here keeps a served snapshot current between the
 /// local loop's cycles; the roster lets the peer discover the rest of the mesh.
 async fn ha_snapshot(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(deny) = ha_peer_guard(&state, &headers) {
-        return deny;
-    }
-    ha_note_caller(&state, &headers);
+    let caller = match ha_peer_authorize(&state, &headers) {
+        Ok(caller) => caller,
+        Err(deny) => return deny.into_response(),
+    };
+    ha_note_caller(&state, &caller);
     let (collections, ledger) = ha_refresh(&state);
-    Json(ha::SyncSnapshot {
-        node_id: state.ha.node_id(),
-        collections,
-        ledger,
-        version: state.ha.version(),
-        roster: state.ha.roster(),
-    })
-    .into_response()
+    ha_sealed(
+        &state,
+        &ha::SyncSnapshot {
+            node_id: state.ha.node_id(),
+            collections,
+            ledger,
+            version: state.ha.version(),
+            roster: state.ha.roster(),
+        },
+    )
 }
 
 /// A node telling us it has left the cluster — sent by a node that is leaving (its
@@ -3535,8 +3573,8 @@ async fn ha_depart(
     headers: HeaderMap,
     Json(request): Json<HaDepartRequest>,
 ) -> Response {
-    if let Some(deny) = ha_peer_guard(&state, &headers) {
-        return deny;
+    if let Err(deny) = ha_peer_authorize(&state, &headers) {
+        return deny.into_response();
     }
     let at_ms = if request.at_ms == 0 {
         now_ms()
@@ -3574,10 +3612,11 @@ async fn ha_queries(
     headers: HeaderMap,
     Query(params): Query<HaQueriesParams>,
 ) -> Response {
-    if let Some(deny) = ha_peer_guard(&state, &headers) {
-        return deny;
-    }
-    ha_note_caller(&state, &headers);
+    let caller = match ha_peer_authorize(&state, &headers) {
+        Ok(caller) => caller,
+        Err(deny) => return deny.into_response(),
+    };
+    ha_note_caller(&state, &caller);
     let since_ms = params.since_ms.unwrap_or(0);
     let limit = params
         .limit
@@ -3597,11 +3636,13 @@ async fn ha_queries(
                 Vec::new()
             }
         };
-    Json(HaQueriesPage {
-        node_id: state.ha.node_id(),
-        events,
-    })
-    .into_response()
+    ha_sealed(
+        &state,
+        &HaQueriesPage {
+            node_id: state.ha.node_id(),
+            events,
+        },
+    )
 }
 
 /// The HA status for the management UI (never includes the key).
@@ -3988,8 +4029,21 @@ async fn update_status(State(checker): State<Arc<UpdateChecker>>) -> Json<Update
 }
 
 /// Return the current settings so the dashboard can show them.
-async fn get_settings(State(config): State<ConfigStore>) -> Json<Settings> {
-    Json(config.get())
+async fn get_settings(identity: Identity, State(config): State<ConfigStore>) -> Json<Settings> {
+    let mut settings = config.get();
+    // The webhook URL is a write-only credential (a Slack/Discord webhook URL, or a
+    // Telegram bot token). Only an administrator — who may change it — ever receives
+    // its value; a lower-privileged reader gets it blanked.
+    if !identity.role.at_least(Role::Admin) {
+        redact_settings_secrets(&mut settings);
+    }
+    Json(settings)
+}
+
+/// Blank the write-only secret fields in a settings snapshot (currently the
+/// notification webhook URL), for any copy that leaves the admin trust boundary.
+fn redact_settings_secrets(settings: &mut Settings) {
+    settings.notifications.webhook_url = String::new();
 }
 
 /// Replace the settings. The new values take effect at once (IPv6 live); a

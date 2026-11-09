@@ -28,10 +28,17 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::warn;
+
+use crate::ha_crypto;
+
+/// How far a peer's auth timestamp may be from ours before the request is rejected
+/// as stale (replay guard). Nodes are expected to keep NTP-synced clocks.
+const PEER_AUTH_MAX_SKEW_MS: u64 = 60_000;
 
 /// One collection's entities, keyed by their stable id, as opaque JSON. The web
 /// layer serialises each real store type (a `Rewrite`, a `Device`, …) into this
@@ -535,6 +542,23 @@ pub struct Hello {
     pub version: String,
 }
 
+/// The decrypted contents of an `X-Ha-Auth` token.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthClaim {
+    ts_ms: u64,
+    node_id: String,
+    #[serde(default)]
+    self_url: Option<String>,
+}
+
+/// A peer's authenticated identity, from a verified `X-Ha-Auth` token. Holding one
+/// means the caller proved possession of the shared key.
+pub struct PeerAuth {
+    pub node_id: String,
+    pub self_url: Option<String>,
+}
+
 /// Owns this node's HA identity, pairing state and ledger, and speaks to the peer.
 /// Cheap to share behind an `Arc`; mutable state sits behind an `RwLock`. The
 /// background sync loop and the store wiring live in the web layer, which calls
@@ -634,13 +658,58 @@ impl Ha {
             .clone()
     }
 
-    /// Constant-time comparison of a presented key against the effective one, so a
-    /// peer endpoint cannot be probed by timing. Returns false when no key is set.
-    pub fn key_matches(&self, presented: &str) -> bool {
-        match self.effective_key() {
-            Some(key) => constant_time_eq(key.as_bytes(), presented.as_bytes()),
-            None => false,
+    /// The AEAD key derived from the effective sync key (`None` if no key is set).
+    fn aead_key(&self) -> Option<ring::aead::LessSafeKey> {
+        self.effective_key().map(|key| ha_crypto::derive_key(&key))
+    }
+
+    /// Seal a payload under the cluster key so it can be sent to a peer in the clear-
+    /// transport without exposing its contents. `None` when no key is set.
+    pub fn seal_for_peer(&self, plaintext: &[u8]) -> Option<Vec<u8>> {
+        self.aead_key().map(|key| ha_crypto::seal(&key, plaintext))
+    }
+
+    /// Open a payload sealed by a peer under the shared key. `None` when no key is
+    /// set or the payload does not authenticate (wrong key or tampered).
+    pub fn open_from_peer(&self, data: &[u8]) -> Option<Vec<u8>> {
+        let key = self.aead_key()?;
+        ha_crypto::open(&key, data)
+    }
+
+    /// Build the `X-Ha-Auth` header for an outbound peer call: a sealed, time-stamped
+    /// token that proves this node holds the shared key and carries its id and address
+    /// (so a node that only pulls still becomes known). The key itself never travels.
+    fn peer_auth_header(&self) -> Option<String> {
+        let (node_id, self_url) = {
+            let state = self.state.read().expect("ha state not poisoned");
+            (state.node_id.clone(), state.self_url.clone())
+        };
+        let blob = serde_json::json!({
+            "tsMs": now_ms(),
+            "nodeId": node_id,
+            "selfUrl": self_url,
+        })
+        .to_string();
+        let sealed = self.seal_for_peer(blob.as_bytes())?;
+        Some(base64::engine::general_purpose::STANDARD.encode(sealed))
+    }
+
+    /// Verify an incoming `X-Ha-Auth` header: base64-decode, open under the shared key,
+    /// and check the timestamp is fresh. Returns the caller's authenticated identity,
+    /// or `None` when the header is missing, stale, or not sealed under the key.
+    pub fn verify_peer_auth(&self, header: &str) -> Option<PeerAuth> {
+        let sealed = base64::engine::general_purpose::STANDARD
+            .decode(header.trim())
+            .ok()?;
+        let plaintext = self.open_from_peer(&sealed)?;
+        let claim: AuthClaim = serde_json::from_slice(&plaintext).ok()?;
+        if now_ms().abs_diff(claim.ts_ms) > PEER_AUTH_MAX_SKEW_MS {
+            return None;
         }
+        Some(PeerAuth {
+            node_id: claim.node_id,
+            self_url: claim.self_url,
+        })
     }
 
     /// Whether HA is switched on.
@@ -649,8 +718,9 @@ impl Ha {
     }
 
     /// Whether the peer endpoints should answer: when HA is enabled and a shared
-    /// key is set. The key (compared in constant time) is the actual gate, so this
-    /// deliberately does **not** require an existing pairing — the very first
+    /// key is set. Holding the key (proven by a payload that opens under it) is the
+    /// actual gate, so this deliberately does **not** require an existing pairing —
+    /// the very first
     /// `connect` handshake calls the partner's `/api/ha/hello` before either side
     /// has a peer, so requiring one here would make pairing impossible.
     pub fn peer_api_open(&self) -> bool {
@@ -879,12 +949,9 @@ impl Ha {
         since_ms: i64,
         limit: usize,
     ) -> Result<T, String> {
-        let key = self
-            .effective_key()
-            .ok_or_else(|| "no sync key set".to_owned())?;
         let base = endpoint(peer_url, "api/ha/queries");
         let url = format!("{base}?sinceMs={since_ms}&limit={limit}");
-        self.get_announced(&url, &key)
+        self.get_announced(&url)
     }
 
     /// Refresh a peer's known version from a snapshot it served (matched by node
@@ -971,14 +1038,14 @@ impl Ha {
     /// [`JoinMode::Join`] (auto-mesh) leaves the ledger alone. Callers that seed by
     /// hand pass Adopt or Win; the auto-mesh passes Join.
     pub fn connect(&self, url: &str, mode: JoinMode) -> Result<Hello, String> {
-        let key = self
-            .effective_key()
-            .ok_or_else(|| "set a shared key before connecting".to_owned())?;
+        if self.effective_key().is_none() {
+            return Err("set a shared key before connecting".to_owned());
+        }
         let url = url.trim().trim_end_matches('/').to_owned();
         if url.is_empty() {
             return Err("peer URL is empty".to_owned());
         }
-        let hello: Hello = self.get_announced(&endpoint(&url, "api/ha/hello"), &key)?;
+        let hello: Hello = self.get_announced(&endpoint(&url, "api/ha/hello"))?;
         if hello.node_id == self.node_id() {
             return Err("that address is this node itself".to_owned());
         }
@@ -1129,50 +1196,48 @@ impl Ha {
     /// Fetch one peer's current [`SyncSnapshot`] over `/api/ha/snapshot`,
     /// announcing ourselves so the peer meshes back to us.
     pub fn fetch_snapshot(&self, peer_url: &str) -> Result<SyncSnapshot, String> {
-        let key = self
-            .effective_key()
-            .ok_or_else(|| "no sync key set".to_owned())?;
-        self.get_announced(&endpoint(peer_url, "api/ha/snapshot"), &key)
+        self.get_announced(&endpoint(peer_url, "api/ha/snapshot"))
     }
 
-    /// GET `url` with the shared key as a bearer token, announcing this node's id
-    /// and address, and parse the JSON body, with a timeout and a size cap.
-    fn get_announced<T: DeserializeOwned>(&self, url: &str, key: &str) -> Result<T, String> {
-        let (node_id, self_url) = {
-            let state = self.state.read().expect("ha state not poisoned");
-            (state.node_id.clone(), state.self_url.clone())
-        };
-        let mut request = ureq::get(url)
+    /// GET `url` with a sealed `X-Ha-Auth` token (the shared key proves identity
+    /// without travelling), then open and parse the **encrypted** response body, with
+    /// a timeout and a size cap. Every sensitive peer payload is sealed under the
+    /// cluster key, so the sync's secrets never cross the wire in clear.
+    fn get_announced<T: DeserializeOwned>(&self, url: &str) -> Result<T, String> {
+        let auth = self
+            .peer_auth_header()
+            .ok_or_else(|| "no sync key set".to_owned())?;
+        let response = ureq::get(url)
             .timeout(PEER_TIMEOUT)
-            .set("Authorization", &format!("Bearer {key}"))
+            .set("X-Ha-Auth", &auth)
             .set("User-Agent", &format!("justdns/{}", self.version))
-            .set("X-Ha-Node-Id", &node_id);
-        if let Some(self_url) = self_url {
-            request = request.set("X-Ha-Node-Url", &self_url);
-        }
-        let response = request.call().map_err(|error| error.to_string())?;
-        let mut body = String::new();
+            .call()
+            .map_err(|error| error.to_string())?;
+        let mut sealed = Vec::new();
         response
             .into_reader()
             .take(MAX_PEER_BYTES)
-            .read_to_string(&mut body)
+            .read_to_end(&mut sealed)
             .map_err(|error| error.to_string())?;
-        serde_json::from_str(&body).map_err(|error| format!("bad peer response: {error}"))
+        let body = self
+            .open_from_peer(&sealed)
+            .ok_or_else(|| "peer response did not authenticate".to_owned())?;
+        serde_json::from_slice(&body).map_err(|error| format!("bad peer response: {error}"))
     }
 
     /// Tell a peer that a node has left (or been removed): POST its id and the
-    /// removal time to the peer's `/api/ha/depart`, authenticated with the shared
-    /// key. Best-effort — the roster tombstone still reaches any unreachable peer
-    /// through the ordinary gossip on a later cycle.
+    /// removal time to the peer's `/api/ha/depart`, authenticated with a sealed
+    /// `X-Ha-Auth` token. Best-effort — the roster tombstone still reaches any
+    /// unreachable peer through the ordinary gossip on a later cycle.
     pub fn notify_depart(&self, peer_url: &str, node_id: &str, at_ms: u64) -> Result<(), String> {
-        let key = self
-            .effective_key()
+        let auth = self
+            .peer_auth_header()
             .ok_or_else(|| "no sync key set".to_owned())?;
         let url = endpoint(peer_url, "api/ha/depart");
         let body = serde_json::json!({ "nodeId": node_id, "atMs": at_ms }).to_string();
         ureq::post(&url)
             .timeout(PEER_TIMEOUT)
-            .set("Authorization", &format!("Bearer {key}"))
+            .set("X-Ha-Auth", &auth)
             .set("User-Agent", &format!("justdns/{}", self.version))
             .set("Content-Type", "application/json")
             .send_string(&body)
@@ -1196,20 +1261,6 @@ fn endpoint(base: &str, path: &str) -> String {
         base.trim_end_matches('/'),
         path.trim_start_matches('/')
     )
-}
-
-/// Constant-time byte equality, so a secret comparison does not leak its length
-/// of agreement through timing. Unequal lengths still return false, but only
-/// after a full fixed-cost pass.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let mut diff = (a.len() ^ b.len()) as u8;
-    let len = a.len().max(b.len());
-    for index in 0..len {
-        let byte_a = a.get(index).copied().unwrap_or(0);
-        let byte_b = b.get(index).copied().unwrap_or(0);
-        diff |= byte_a ^ byte_b;
-    }
-    diff == 0
 }
 
 /// Mint a random, stable node id as 24 hex characters. No external RNG crate: it
@@ -1656,14 +1707,6 @@ mod tests {
     }
 
     #[test]
-    fn constant_time_eq_matches_only_identical() {
-        assert!(constant_time_eq(b"secret", b"secret"));
-        assert!(!constant_time_eq(b"secret", b"secreT"));
-        assert!(!constant_time_eq(b"secret", b"secret-longer"));
-        assert!(!constant_time_eq(b"", b"x"));
-    }
-
-    #[test]
     fn node_id_is_24_hex() {
         let id = random_node_id();
         assert_eq!(id.len(), 24);
@@ -1683,8 +1726,6 @@ mod tests {
             },
         );
         assert_eq!(ha.effective_key().as_deref(), Some("env-key"));
-        assert!(ha.key_matches("env-key"));
-        assert!(!ha.key_matches("wizard-key"));
         assert!(ha.key_from_env());
     }
 
@@ -1701,6 +1742,52 @@ mod tests {
         );
         assert_eq!(ha.effective_key().as_deref(), Some("wizard-key"));
         assert!(!ha.key_from_env());
+    }
+
+    fn keyed_node(node_id: &str, self_url: &str, key: &str) -> Ha {
+        ha_with(
+            temp_dir(),
+            None,
+            Persisted {
+                node_id: node_id.to_owned(),
+                self_url: Some(self_url.to_owned()),
+                sync_key: Some(key.to_owned()),
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn peer_auth_header_round_trips_under_the_shared_key() {
+        let caller = keyed_node("caller", "http://caller:8080", "cluster-key");
+        let verifier = keyed_node("verifier", "http://verifier:8080", "cluster-key");
+        let header = caller.peer_auth_header().expect("header built");
+        let auth = verifier.verify_peer_auth(&header).expect("verifies");
+        assert_eq!(auth.node_id, "caller");
+        assert_eq!(auth.self_url.as_deref(), Some("http://caller:8080"));
+    }
+
+    #[test]
+    fn peer_auth_header_from_a_foreign_key_is_rejected() {
+        let caller = keyed_node("caller", "http://caller:8080", "cluster-key");
+        let stranger = keyed_node("verifier", "http://verifier:8080", "other-key");
+        let header = caller.peer_auth_header().expect("header built");
+        assert!(stranger.verify_peer_auth(&header).is_none());
+        assert!(stranger.verify_peer_auth("not-base64!!").is_none());
+    }
+
+    #[test]
+    fn a_stale_peer_auth_token_is_rejected() {
+        let node = keyed_node("n", "http://n:8080", "cluster-key");
+        let stale = serde_json::json!({
+            "tsMs": now_ms() - PEER_AUTH_MAX_SKEW_MS - 1_000,
+            "nodeId": "n",
+            "selfUrl": "http://n:8080",
+        })
+        .to_string();
+        let sealed = node.seal_for_peer(stale.as_bytes()).expect("sealed");
+        let header = base64::engine::general_purpose::STANDARD.encode(sealed);
+        assert!(node.verify_peer_auth(&header).is_none(), "stale rejected");
     }
 
     #[test]

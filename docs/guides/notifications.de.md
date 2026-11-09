@@ -109,5 +109,9 @@ Rest es überspringt.
 sie im Cluster wie jede andere Einstellung — jede Node ist sich über Kanal, Format und
 aktive Ereignisse einig. Webhook-URL und Telegram-Token liegen im Klartext in der
 `config.json` auf dem `/data`-Volume, wie die übrige Konfiguration; einen separaten
-Secret-Store gibt es in dieser Version nicht, weshalb das Feld im UI schreibseitig maskiert
-ist, statt als Klartext an den Browser zurückzugehen.
+Secret-Store gibt es in dieser Version nicht. Die Webhook-URL ist ein schreibseitiges
+Geheimnis: `GET /api/settings` liefert sie nur einem **Administrator**, für niedrigere
+Rollen wird sie geleert, und ein **heruntergeladenes** Backup enthält sie nicht (nach einem
+Restore einmal neu eintragen; das knotenlokale Pre-Update-Backup auf `/data` behält sie). Als
+Ziel sind außerdem **Link-local-/Cloud-Metadata-Adressen** (etwa `169.254.169.254`) gesperrt;
+ein selbstgehostetes ntfy/Gotify im eigenen LAN bleibt erlaubt.

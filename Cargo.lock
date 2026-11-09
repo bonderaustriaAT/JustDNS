@@ -1593,6 +1593,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "axum-extra",
+ "base64 0.22.1",
  "chrono",
  "chrono-tz",
  "justdns-access",
@@ -1606,6 +1607,7 @@ dependencies = [
  "justdns-rewrite",
  "justdns-schedule",
  "justdns-store",
+ "ring",
  "rust-embed",
  "serde",
  "serde_json",

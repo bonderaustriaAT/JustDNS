@@ -13,6 +13,7 @@
 //! true condition, which is acceptable for an at-least-once alert.
 
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -33,6 +34,7 @@ const SPIKE_SCAN_LIMIT: usize = 20;
 /// Returns a short error string on any failure (no URL, transport error, …).
 pub fn send(cfg: &Notifications, title: &str, body: &str) -> Result<(), String> {
     let req = build_request(cfg, title, body)?;
+    guard_target(&req.url)?;
     let mut call = ureq::post(&req.url)
         .timeout(HTTP_TIMEOUT)
         .set("Content-Type", req.content_type);
@@ -42,6 +44,67 @@ pub fn send(cfg: &Notifications, title: &str, body: &str) -> Result<(), String> 
     call.send_string(&req.body)
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// Refuse a webhook target that resolves to a link-local or unspecified address.
+/// This blocks the cloud metadata endpoint (`169.254.169.254` and its IPv6
+/// equivalents) and other never-legitimate destinations, while deliberately still
+/// allowing private LAN and loopback targets — a self-hosted ntfy/Gotify on the
+/// operator's own network is the common case. A host that cannot be resolved is
+/// let through so the real request fails with its own error.
+fn guard_target(url: &str) -> Result<(), String> {
+    let Some(host) = target_host(url) else {
+        return Ok(());
+    };
+    let blocked = "webhook target is a link-local/metadata address and is not allowed";
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return if is_disallowed_ip(ip) {
+            Err(blocked.to_owned())
+        } else {
+            Ok(())
+        };
+    }
+    // A hostname may resolve to a disallowed address (e.g. metadata.google.internal
+    // → 169.254.169.254), so check every resolved address.
+    match (host.as_str(), 0u16).to_socket_addrs() {
+        Ok(addrs) => {
+            for addr in addrs {
+                if is_disallowed_ip(addr.ip()) {
+                    return Err(blocked.to_owned());
+                }
+            }
+            Ok(())
+        }
+        Err(_) => Ok(()),
+    }
+}
+
+/// Whether an address is a never-legitimate webhook destination: link-local (which
+/// includes the `169.254.169.254` cloud metadata endpoint and IPv6 `fe80::/10`) or
+/// unspecified. Loopback and private ranges are intentionally allowed.
+fn is_disallowed_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast(),
+        IpAddr::V6(v6) => v6.is_unspecified() || (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
+}
+
+/// Extract the host from a URL without a URL-parser dependency: drop the scheme,
+/// stop at the first `/`, `?` or `#`, drop any `user@`, unwrap an `[IPv6]` literal,
+/// and strip a trailing `:port`. Returns `None` when no host is present.
+fn target_host(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest
+            .split(']')
+            .next()
+            .filter(|h| !h.is_empty())
+            .map(str::to_owned);
+    }
+    let host = authority.rsplit_once(':').map_or(authority, |(h, _)| h);
+    (!host.is_empty()).then(|| host.to_owned())
 }
 
 /// The concrete HTTP request a webhook format maps to. Split out from [`send`] so
@@ -358,6 +421,38 @@ mod tests {
             webhook_format: format,
             ..Notifications::default()
         }
+    }
+
+    #[test]
+    fn target_host_parses_scheme_userinfo_port_and_ipv6() {
+        assert_eq!(
+            target_host("https://ntfy.sh/justdns").as_deref(),
+            Some("ntfy.sh")
+        );
+        assert_eq!(
+            target_host("http://user:pw@10.0.0.5:8080/push").as_deref(),
+            Some("10.0.0.5")
+        );
+        assert_eq!(
+            target_host("http://[fe80::1]:80/").as_deref(),
+            Some("fe80::1")
+        );
+        assert_eq!(
+            target_host("https://169.254.169.254/latest").as_deref(),
+            Some("169.254.169.254")
+        );
+    }
+
+    #[test]
+    fn guard_blocks_metadata_and_linklocal_but_allows_lan_and_loopback() {
+        // Cloud metadata / link-local / unspecified are refused.
+        assert!(guard_target("http://169.254.169.254/latest/meta-data").is_err());
+        assert!(guard_target("http://[fe80::1]/x").is_err());
+        assert!(guard_target("http://0.0.0.0/x").is_err());
+        // A self-hosted ntfy/Gotify on the LAN or loopback is allowed.
+        assert!(guard_target("http://192.168.20.9:8080/justdns").is_ok());
+        assert!(guard_target("http://10.1.2.3/hook").is_ok());
+        assert!(guard_target("http://127.0.0.1:8080/hook").is_ok());
     }
 
     #[test]

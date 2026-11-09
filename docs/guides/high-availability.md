@@ -138,17 +138,26 @@ JUSTDNS_SYNC_INTERVAL=30           # seconds between sync cycles (minimum 5)
 ### Security: treat the key like the password database
 
 Now that users are synced, the snapshot a node pulls from its partner carries **every
-account, password hash and TOTP secret**. The shared key is the only thing guarding
-that snapshot — whoever holds it can read and change the whole account database on
-both nodes (and so defeat MFA). So:
+account, password hash and TOTP secret**, plus the private certificate keys. That
+payload travels **encrypted** — each node derives a symmetric key from the shared key
+(HKDF-SHA256) and seals every peer response with ChaCha20-Poly1305. A sniffer on the
+wire sees only ciphertext, and the shared key itself **never** travels — a node proves
+it holds the key by sending a payload that opens under it. This holds even over an open
+`http` link on the same network. The shared key is therefore still the crown jewel:
+whoever holds it can derive the same key, read and change the snapshot (and so defeat
+MFA). So:
 
 - **Use a long, random key** (at least 16 characters; the wizard requires it). A short
   or guessable key hands over the credential database.
-- **Pair only over a network you trust.** The node-to-node link should run over TLS
-  (an HTTPS address for the partner); over an open link on the same network a sniffer
-  could lift the snapshot **and** the key.
+- **TLS is now optional hardening, not a requirement.** The payload is encrypted either
+  way; an HTTPS address for the partner only lays a second layer over it.
 - **If you suspect the key is compromised:** change the key on both nodes **and** reset
   every password — the old key could already have copied the hashes.
+
+> **Upgrade both nodes together.** The peer encryption is a coordinated cut: a node on
+> this version cannot open the sealed payloads of an old node, and vice versa. If one
+> node still runs an older version, sync pauses until both are upgraded — resolution
+> keeps running the whole time, only the reconciliation waits.
 
 ## Pointing your clients at both
 
@@ -245,13 +254,19 @@ canonical JSON, not Rust's `DefaultHasher` (whose output can change between buil
 and must never be persisted). That is what lets a node tell "unchanged" from "edited"
 across restarts and versions.
 
-**The peer endpoints authenticate with the shared key, not a login.** A node holds
-no dashboard session, so `/api/ha/hello` and `/api/ha/snapshot` carry the key as a
-bearer token, compared in **constant time**. They answer **404** until HA is enabled
-*and* a key is set, so the sync surface does not exist on an instance that is not
-using the feature. An existing pairing is deliberately **not** required (the key is
-the guard), or two fresh nodes could never connect the first time. The management
-endpoints (enable, set key, connect, sync now) sit behind the normal admin login.
+**The peer endpoints authenticate and encrypt with the shared key, not a login.** A
+node holds no dashboard session. From the shared key both sides derive the same AEAD
+key (HKDF-SHA256). A call carries an `X-Ha-Auth` header holding a sealed, time-stamped
+token (node id and own address, encrypted with ChaCha20-Poly1305); that it opens is
+itself the proof of authenticity — the key never travels as a token, and a stamp
+outside a 60-second window is rejected, which bounds replays. The responses from
+`/api/ha/hello`, `/api/ha/snapshot` and `/api/ha/queries` are sealed the same way, so
+the payload — certificate keys, password hashes, MFA secrets — never crosses the wire
+in clear. The endpoints answer **404** until HA is enabled *and* a key is set, so the
+sync surface does not exist on an instance that is not using the feature. An existing
+pairing is deliberately **not** required (the key is the guard), or two fresh nodes
+could never connect the first time. The management endpoints (enable, set key, connect,
+sync now) sit behind the normal admin login.
 
 **Clock drift matters.** Last-writer-wins trusts the clocks, so keep both nodes on
 NTP. A node-id tiebreak keeps things from flapping when two stamps land on the exact
