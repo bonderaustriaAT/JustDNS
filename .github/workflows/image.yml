@@ -1,0 +1,85 @@
+# Build the container images and publish them to the GitHub Container Registry
+# (ghcr.io) on a release tag. This is the only place JustDNS images are built:
+# the in-app update checks public GitHub tags, and this publishes the matching
+# app image and the updater sidecar to ghcr.io so any install can pull them.
+# Deployments point JUSTDNS_IMAGE / JUSTDNS_UPDATER_IMAGE here (the compose
+# default). GitHub's hosted runners build reliably with a shared layer cache;
+# the LAN Gitea registry no longer builds images.
+name: Image (ghcr.io)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # ghcr requires an all-lowercase namespace.
+  IMAGE: ghcr.io/bonderaustriaat/justdns
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        # Creating a brand-new package under an organization is denied for the
+        # built-in GITHUB_TOKEN, so we log in with a classic PAT (scope
+        # write:packages) kept as the repo secret GHCR_PAT. The username is the
+        # token owner, i.e. whoever pushed the tag.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT }}
+
+      - name: Set up Buildx
+        # A persistent BuildKit builder, so layers (above all the cargo-chef
+        # dependency layer) can be exported to and restored from the cache.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Work out the image tags
+        # Always :latest; on a release tag also :vX.Y.Z.
+        id: tags
+        run: |
+          TAGS="$IMAGE:latest"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAGS="$TAGS,$IMAGE:${{ github.ref_name }}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push JustDNS
+        # Layer cache makes repeat builds fast: the heavy dependency layer (DuckDB's
+        # bundled C++) is reused, only changed crates rebuild. The primary cache is a
+        # registry image (`:buildcache`) because releases are days apart and the
+        # GitHub Actions cache is evicted after 7 days (and capped at 10 GB) — too
+        # short for this big cache, which is why cold ~17 min builds kept recurring.
+        # The registry cache has no such expiry; the gha cache stays as a fast
+        # in-between-runs secondary. Only a real release tag publishes the image; a
+        # manual run just builds and warms the caches without overwriting :latest.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: APP_VERSION=${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}
+          push: ${{ github.ref_type == 'tag' }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache
+            type=gha,scope=justdns
+          cache-to: |
+            type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+            type=gha,scope=justdns,mode=max
+
+      - name: Build and push the updater sidecar
+        # Version-neutral; always :latest. Same publish rule as above.
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/updater
+          tags: ${{ env.IMAGE }}-updater:latest
+          push: ${{ github.ref_type == 'tag' }}
+          cache-from: type=gha,scope=updater
+          cache-to: type=gha,mode=max,scope=updater

@@ -1,0 +1,456 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The bento grid: every block is a card. One column on phones; on wider
+   screens the busiest-clients and resolver cards pair up, everything else
+   spans the full width. */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+@media (min-width: 720px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .hero,
+  .live,
+  .day,
+  .recent {
+    grid-column: 1 / -1;
+  }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Protection status, kept above the grid as a quiet live signal. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--signal-strong);
+  font-weight: 500;
+}
+
+.dot {
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);
+  animation: dotPulse 2.2s ease-out infinite;
+}
+
+@keyframes dotPulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--signal) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 20%, transparent);
+    animation: dotBreathe 2.8s ease-in-out infinite;
+  }
+}
+
+@keyframes dotBreathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.caption {
+  color: var(--text-muted);
+  font-size: var(--step-1);
+}
+
+/* Hero card: the all-time total, with a scope tag so it never reads as a
+   24-hour figure, and the lifetime context stats below it. */
+.hero {
+  gap: var(--space-2);
+}
+
+.heroHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.scopeTag {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px var(--space-2);
+}
+
+.figure {
+  font-size: var(--step-hero);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.95;
+}
+
+.heroChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: var(--space-2) 0 0;
+}
+
+.heroChips div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.heroChips dt {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.heroChips dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Live query rate card: the moving figure, a quiet unit switch, and the
+   24-hour activity sparkline beneath. */
+.live {
+  gap: var(--space-3);
+}
+
+.liveRateHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.rateValue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--step-4);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.rateUnit {
+  font-size: var(--step-1);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.unit {
+  font-size: var(--step-1);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* A compact segmented control, mirroring the header's language switch. */
+.rateSwitch {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex: none;
+}
+
+.rateButton {
+  font: inherit;
+  font-size: var(--step--2);
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.rateButton + .rateButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.rateButton:hover {
+  color: var(--text);
+}
+
+.rateButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rateButton {
+    transition: none;
+  }
+}
+
+/* Last 24 hours: a titled label above three small stat tiles. */
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dayTiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tile dt {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.tile dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionTitle {
+  font-size: var(--step-1);
+}
+
+/* Busiest clients: IP, a share bar, then the count and its percentage. */
+.clientList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.clientRow {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.clientIp {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientBar {
+  block-size: 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.clientBarFill {
+  display: block;
+  block-size: 100%;
+  border-radius: 999px;
+  background: var(--signal);
+}
+
+.clientMeta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.clientShare {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+/* Resolver response times: the resolver label, its median answer time, and the
+   answer count beneath. */
+.resolverList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resolverRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name time"
+    "name count";
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.resolverRow:first-child {
+  border-block-start: none;
+  padding-block-start: 0;
+}
+
+.resolverName {
+  grid-area: name;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resolverTime {
+  grid-area: time;
+  justify-self: end;
+  align-self: end;
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.resolverCount {
+  grid-area: count;
+  justify-self: end;
+  align-self: start;
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  font-variant-numeric: tabular-nums;
+}
+
+.recentTitle {
+  font-size: var(--step-1);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas: "domain tag ago" "client tag ago";
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.row:first-child {
+  border-block-start: none;
+  padding-block-start: 0;
+}
+
+.domain {
+  grid-area: domain;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client {
+  grid-area: client;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.tag {
+  grid-area: tag;
+  justify-self: start;
+  font-size: var(--step--1);
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.ago {
+  grid-area: ago;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 540px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "domain ago" "client tag";
+  }
+
+  .tag {
+    justify-self: end;
+  }
+
+  .heroChips {
+    gap: var(--space-4);
+  }
+}
+
+@media (max-width: 380px) {
+  .dayTiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

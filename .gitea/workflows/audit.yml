@@ -1,0 +1,60 @@
+name: Security audit
+
+# Dependency-vulnerability scanning for the Rust crate tree. CodeQL (run
+# separately) does not cover dependency CVEs, so this workflow is the gate for
+# crate-level advisories. It only reads Cargo.lock / cargo metadata — it does
+# NOT compile the DuckDB C++ tree — so it is fast and needs none of the
+# disk/memory workarounds the build jobs in ci.yml require.
+#
+# Two tools run, deliberately split:
+#   * cargo-deny  — the GATE. `cargo deny check` fails the build on security
+#                   vulnerabilities, yanked crates, disallowed licenses and
+#                   untrusted sources. Its policy (incl. every deliberately
+#                   ignored advisory, with reasons) lives in /deny.toml.
+#   * cargo-audit — INFORMATIONAL. Prints the full human-readable RustSec
+#                   report, including unmaintained-crate warnings that are not a
+#                   hard gate. Marked continue-on-error so an archived
+#                   transitive crate (or an advisory already ignored in
+#                   deny.toml) never blocks a PR on its own; cargo-deny remains
+#                   the authoritative pass/fail signal.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    # Same prebuilt CI image as ci.yml: Rust (and cargo) are already installed.
+    container: 192.168.20.143:3000/bonderosa/ci-base:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the crates.io / advisory-db registry and the installed tool
+      # binaries so repeat runs skip both the download and the recompile of
+      # cargo-audit / cargo-deny.
+      - name: Cache cargo registry and tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-audit-tools-v1
+          restore-keys: |
+            ${{ runner.os }}-cargo-audit-tools-
+
+      # `cargo install` is a no-op when the cached binaries are already the
+      # current version, so this only pays the build cost on a cold cache.
+      - name: Install cargo-audit and cargo-deny
+        run: cargo install cargo-audit cargo-deny --locked
+
+      # Informational: always print the RustSec report; never block on its own.
+      - name: cargo audit (report only)
+        continue-on-error: true
+        run: cargo audit
+
+      # The gate: advisories, bans, licenses and sources per /deny.toml.
+      - name: cargo deny check
+        run: cargo deny check

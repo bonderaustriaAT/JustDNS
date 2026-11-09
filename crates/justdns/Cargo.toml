@@ -1,0 +1,29 @@
+[package]
+name = "justdns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+justdns-access = { path = "../justdns-access" }
+justdns-audit = { path = "../justdns-audit" }
+justdns-auth = { path = "../justdns-auth" }
+justdns-clients = { path = "../justdns-clients" }
+justdns-config = { path = "../justdns-config" }
+justdns-dns = { path = "../justdns-dns" }
+justdns-filter = { path = "../justdns-filter" }
+justdns-lists = { path = "../justdns-lists" }
+justdns-rewrite = { path = "../justdns-rewrite" }
+justdns-schedule = { path = "../justdns-schedule" }
+justdns-store = { path = "../justdns-store" }
+justdns-web = { path = "../justdns-web" }
+arc-swap = "1.7.1"
+thiserror = "2"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+tracing-appender = "0.2.3"
+
+[dev-dependencies]
+tempfile = "3.23.0"

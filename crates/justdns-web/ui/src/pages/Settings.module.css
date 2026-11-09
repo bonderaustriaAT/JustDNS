@@ -1,0 +1,689 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+/* The expert switch sits apart from the categories: a sunken band so it reads
+   as a mode change, not just another toggle. */
+.expertBand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.rail {
+  position: sticky;
+  inset-block-start: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.railLink,
+.railActive {
+  display: block;
+  inline-size: 100%;
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-inline-start: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+}
+
+.railLink:hover {
+  color: var(--text);
+}
+
+.railActive {
+  color: var(--text);
+  background: var(--surface-sunken);
+  border-inline-start-color: var(--signal);
+}
+
+.railHint {
+  margin-block-start: var(--space-3);
+  padding-inline: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-inline-size: 0;
+}
+
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  scroll-margin-block-start: 96px;
+}
+
+.categoryHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--line);
+}
+
+.categoryTitle {
+  font-size: var(--step-1);
+}
+
+.categoryDescription {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.row:first-child {
+  border-block-start: none;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.labelLine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.label {
+  font-weight: 500;
+}
+
+/* A dependent setting is dimmed and inert while its parent feature is off, so
+   it reads as "available once that is on". */
+.row[data-disabled] .text,
+.row[data-disabled] .control {
+  opacity: 0.45;
+}
+
+.description {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-inline-size: 48ch;
+}
+
+.control {
+  flex: none;
+}
+
+.select {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Speed-profile switch: three segments sharing one outline, the active one
+   filled so the current profile reads at a glance, with the chosen profile's
+   one-liner below and the resolvers it uses under that. */
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.profileSwitch {
+  display: inline-flex;
+  align-self: start;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.profileButton {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.profileButton + .profileButton {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.profileButton:hover {
+  color: var(--text);
+}
+
+.profileButton[data-active] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+.profileDesc {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: 60ch;
+}
+
+.resolversTitle {
+  margin-block-start: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profileButton {
+    transition: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .profileSwitch {
+    align-self: stretch;
+  }
+
+  .profileButton {
+    flex: 1;
+    /* Let the segments shrink to share the row; the block-level switch has four
+       or five of them, which otherwise overflow and clip the last label. */
+    min-inline-size: 0;
+    text-align: center;
+    font-size: var(--step--2);
+    padding-inline: var(--space-2);
+  }
+}
+
+.resolvers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.resolver {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-start: 1px dashed var(--line);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+
+.resolverIp {
+  color: var(--text);
+  min-inline-size: 9ch;
+}
+
+.resolverHost {
+  color: var(--text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resolverTag {
+  flex: none;
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+}
+
+.resolverTag[data-warn] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+/* Editor for the user's own resolver list: one row per resolver with an
+   address, a transport, and — for the encrypted transports — a certificate
+   name, plus a button to drop the row. */
+.custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.customEmpty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.customList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.customRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.customInput {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-inline-size: 0;
+}
+
+.customInput:first-child {
+  flex: 1 1 10ch;
+}
+
+.customInput:nth-child(3) {
+  flex: 2 1 14ch;
+}
+
+.customInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Keep the row's layout steady for a plaintext resolver, where the name field
+   does not apply, rather than letting the row reflow. */
+.customInput[data-hidden] {
+  visibility: hidden;
+}
+
+.customRow[data-invalid] .customInput:first-child {
+  border-color: var(--warn);
+}
+
+.customRemove {
+  flex: none;
+  font: inherit;
+  line-height: 1;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.customRemove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.customWarn {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 540px) {
+  .customRow {
+    flex-wrap: wrap;
+  }
+
+  .customInput:first-child,
+  .customInput:nth-child(3) {
+    flex: 1 1 100%;
+  }
+
+  .customInput[data-hidden] {
+    display: none;
+  }
+}
+
+.number {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.number input {
+  font: inherit;
+  inline-size: 4.5rem;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.number input:disabled {
+  cursor: not-allowed;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The restore file picker is driven by its own button, so the native input is
+   hidden but kept in the DOM (and reachable) rather than removed. */
+.fileInput {
+  display: none;
+}
+
+.actionButton {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.actionButton:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.actionButton:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.actionDone {
+  color: var(--signal);
+  font-size: var(--step--1);
+}
+
+.actionError {
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+
+  .rail {
+    position: sticky;
+    inset-block-start: 60px;
+    flex-direction: row;
+    gap: var(--space-1);
+    overflow-x: auto;
+    padding-block: var(--space-2);
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(8px);
+    z-index: 5;
+  }
+
+  .railLink,
+  .railActive {
+    white-space: nowrap;
+    border-inline-start: none;
+    border-block-end: 2px solid transparent;
+  }
+
+  .railActive {
+    border-inline-start: none;
+    border-block-end-color: var(--signal);
+    background: transparent;
+  }
+
+  .railHint {
+    display: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .row,
+  .expertBand {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+}
+
+/* Encrypted client DNS (DoT/DoH) section. */
+.encUnavailable {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.encHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.inlineLink {
+  color: var(--signal);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.inlineLink:hover {
+  text-decoration: underline;
+}
+
+/* The block-page message is prose, not PEM, so it reads in the body face rather
+   than the monospace of the certificate fields. */
+.blockPageText {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--step--1);
+  resize: vertical;
+}
+
+.blockPageText:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.hostnameControl {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.encFingerprint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.encCode {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.encCertActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.encUpload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.encField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.encTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  resize: vertical;
+}
+
+.encTextarea:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.encEndpoints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.encEndpointRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.encEndpointLabel {
+  min-width: 14ch;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.encEndpointRow .encCode {
+  flex: 1 1 12rem;
+}
+
+.copyButton {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-size: var(--step--1);
+  cursor: pointer;
+}
+
+.copyButton:hover {
+  border-color: var(--line-strong);
+}
+
+/* Hostname field highlighted when the user tried to enable an endpoint without
+   it; cleared as soon as a name is typed. */
+.hostnameControl .select[data-required] {
+  border-color: var(--warn);
+  outline: 2px solid var(--warn);
+  outline-offset: 1px;
+}
+
+.encRequired {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+/* Sub-group headings inside the merged Encryption category: they split the
+   client-facing endpoints (your devices → JustDNS) from the upstream direction
+   (JustDNS → resolvers). */
+.encGroupTitle {
+  margin: var(--space-5) 0 0;
+  font-size: var(--step-0);
+  font-weight: 600;
+}
+
+.encGroupDesc {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-inline-size: 60ch;
+}
+
+@media (max-width: 540px) {
+  .hostnameControl {
+    justify-content: stretch;
+  }
+
+  .encEndpointLabel {
+    min-width: 0;
+  }
+}

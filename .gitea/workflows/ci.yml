@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Prebuilt CI image with Rust (+ rustfmt, clippy), g++ and git baked in, so
+    # the toolchain is not reinstalled on every run. Built from ci-base/Dockerfile
+    # and published to the registry.
+    container: 192.168.20.143:3000/bonderosa/ci-base:latest
+    env:
+      # DuckDB's bundled C++ sources compile into multi-gigabyte objects when
+      # debug info is on, which overflows the runner's disk (and /tmp). Drop
+      # debug info and incremental artefacts to keep the build within bounds.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+      # DuckDB's unity-build translation units are huge; compiling several in
+      # parallel pushed the runner over its memory/disk limit, so the C++ build
+      # (libduckdb-sys) died before the job could ever populate the target
+      # cache — every run then rebuilt DuckDB cold and failed again. Serialise
+      # the build so one object exists at a time: slower on a cold run, but it
+      # completes, saves the cache, and later runs restore it and stay fast.
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reuse compiled dependencies across runs. The first run pays the full
+      # DuckDB C++ build; later runs restore it and recompile only what changed.
+      - name: Cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # The runner's /tmp is a tiny tmpfs; the C++ compiler writes DuckDB's
+      # huge intermediate assembly (.s) there and fills it ("No space left on
+      # device"), while the .o output on the workspace volume has room. Point
+      # the compiler's temp at the workspace so the build has space.
+      - name: Build temp on the workspace volume (small /tmp otherwise fills up)
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.build-tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/.build-tmp" >> "$GITHUB_ENV"
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --all
+
+  ui:
+    runs-on: ubuntu-latest
+    # Same prebuilt CI image: Node 20 and npm are already installed, so the
+    # runtime is not downloaded on every run.
+    container: 192.168.20.143:3000/bonderosa/ci-base:latest
+    defaults:
+      run:
+        working-directory: crates/justdns-web/ui
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Node runtime lives in the image; cache only the npm download store
+      # so repeat installs skip the network.
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('crates/justdns-web/ui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build

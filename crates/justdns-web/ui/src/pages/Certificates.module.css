@@ -1,0 +1,352 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+  line-height: 1.5;
+}
+
+.banner {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  text-align: center;
+}
+
+/* --- Table --- */
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.table th,
+.table td {
+  padding: var(--space-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.nameCell {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.subjectCell {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.expiryCell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.expiryCell span + span {
+  margin-left: var(--space-2);
+}
+
+.badgeExpired,
+.badgeSoon {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: var(--step--2);
+  font-weight: 600;
+}
+
+.badgeExpired {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+.badgeSoon {
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+  color: var(--signal-strong);
+}
+
+.fingerprintCell {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+}
+
+.usedCell {
+  white-space: nowrap;
+}
+
+.usedNone {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.usedTags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.usedTag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  font-size: var(--step--2);
+  color: var(--text);
+}
+
+.actionsHead {
+  text-align: right;
+}
+
+.actionsCell {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.rowButton,
+.rowButtonDanger {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--step--2);
+  white-space: nowrap;
+}
+
+.rowButton:hover {
+  border-color: var(--signal);
+  color: var(--signal-strong);
+}
+
+.rowButtonDanger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.rowButtonDanger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.rowButtonDanger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rowButtonDanger:disabled:hover {
+  background: var(--surface);
+}
+
+/* --- Add-certificate card --- */
+
+.addCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.addTitle {
+  margin: 0;
+  font-size: var(--step-1);
+}
+
+.modeSwitch {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.modeButton {
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  border: none;
+}
+
+.modeButton + .modeButton {
+  border-left: 1px solid var(--line-strong);
+}
+
+.modeButton[data-active] {
+  background: var(--signal);
+  color: #fff;
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fieldLabel {
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-size: var(--step--1);
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  resize: vertical;
+}
+
+.input:focus-visible,
+.textarea:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.formError {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+.addActions,
+.modalActions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.modalIntro {
+  margin: 0 0 var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.primaryButton {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--signal);
+  background: var(--signal);
+  color: #fff;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.primaryButton:hover {
+  background: var(--signal-strong);
+  border-color: var(--signal-strong);
+}
+
+.primaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ghostButton {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--step--1);
+}
+
+.ghostButton:hover {
+  border-color: var(--text-muted);
+}
+
+.modalActions {
+  margin-top: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .subjectCell,
+  .fingerprintCell {
+    max-width: 10ch;
+  }
+}

@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 JustDNS contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[package]
+name = "justdns-audit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2"
+# Timestamps for each entry. `clock` gives `Utc::now`; no tz database is needed
+# here — entries are always recorded in UTC and rendered in the viewer's zone.
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"

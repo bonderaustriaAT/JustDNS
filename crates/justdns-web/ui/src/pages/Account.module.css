@@ -1,0 +1,500 @@
+/* SPDX-FileCopyrightText: 2026 JustDNS contributors
+   SPDX-License-Identifier: AGPL-3.0-or-later
+
+   Shared styling for the account, users and audit-log pages and the MFA
+   enrolment flow — all small, form- and table-heavy admin surfaces. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Page heading next to a primary action (e.g. the users page's add button). */
+.topRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: var(--step-3);
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-inline-size: 640px;
+}
+
+/* Table-heavy admin pages (users, audit) use the full content width so rows can
+   breathe across many columns instead of cramping into the narrow form column. */
+.cardWide {
+  composes: card;
+  max-inline-size: none;
+}
+
+.sectionTitle {
+  font-size: var(--step-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* A single-column form kept to a comfortable reading width — password fields
+   stack rather than spreading across the card. */
+.formNarrow {
+  composes: form;
+  max-inline-size: 420px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+/* Only when fields sit side by side (a .row) do they share the width; stacked in
+   a column form they keep their natural height — otherwise the flex-basis is read
+   vertically and each field grows tall with an empty gap below it. */
+.row .field {
+  flex: 1 1 180px;
+}
+
+.label {
+  font-size: var(--step--1);
+  font-weight: 500;
+}
+
+.input,
+.select {
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  inline-size: 100%;
+}
+
+.input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.checkField {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+
+/* Two-factor cell: a quiet status badge stacked above the "required" control, so
+   the read-only status and the thing you can toggle never read as one lump. */
+.mfaCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-inline-size: 7rem;
+}
+
+/* The little dot inside the "active" badge. */
+.badgeDot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+  flex: none;
+}
+
+/* A proper on/off switch built on a real checkbox, so "required" looks like a
+   control, not a bare tick. The input stays focusable but visually hidden. */
+.toggleField {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.toggleInput {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  margin: 0;
+}
+
+.toggleTrack {
+  position: relative;
+  inline-size: 34px;
+  block-size: 18px;
+  flex: none;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.toggleKnob {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  inline-size: 12px;
+  block-size: 12px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.toggleInput:checked + .toggleTrack {
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  border-color: var(--signal);
+}
+
+.toggleInput:checked + .toggleTrack .toggleKnob {
+  transform: translateX(16px);
+  background: var(--signal);
+}
+
+.toggleInput:focus-visible + .toggleTrack {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggleTrack,
+  .toggleKnob {
+    transition: none;
+  }
+}
+
+.hint {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.button {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.buttonPrimary {
+  composes: button;
+  color: #fff;
+  background: var(--signal-strong);
+  border-color: var(--signal-strong);
+}
+
+.buttonPrimary:hover:not(:disabled) {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.buttonDanger {
+  composes: button;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.buttonDanger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: var(--danger);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.notice {
+  font-size: var(--step--1);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.noticeOk {
+  composes: notice;
+  color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal) 35%, transparent);
+}
+
+.noticeErr {
+  composes: notice;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.readOnly {
+  composes: notice;
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+}
+
+/* Status chips for the users table and account summary. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--step--2);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  color: var(--text-muted);
+}
+
+.badgeOn {
+  composes: badge;
+  color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+}
+
+.badgeReq {
+  composes: badge;
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* The "Required" chip shown in each row while the global requirement is on, so
+   the column still reads at a glance even though the per-user toggle is moot. */
+.enforcedBadge {
+  composes: badge;
+  color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+}
+
+/* Global two-factor requirement band: sits above the account list and reads as
+   a mode that governs the whole table. Tints with the signal colour once on. */
+.mfaBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.mfaBanner[data-on] {
+  border-color: color-mix(in srgb, var(--signal) 45%, var(--line));
+  background: color-mix(in srgb, var(--signal) 9%, var(--surface));
+}
+
+.mfaShield {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.mfaShield svg {
+  inline-size: 22px;
+  block-size: 22px;
+}
+
+.mfaBanner[data-on] .mfaShield {
+  color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 40%, var(--line));
+}
+
+.mfaBannerText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.mfaBannerTitle {
+  font-weight: 600;
+}
+
+.mfaBannerDesc {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+  max-inline-size: var(--measure);
+}
+
+/* Users table. */
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--step--1);
+}
+
+.th {
+  text-align: start;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-3);
+  border-block-end: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.td {
+  padding: var(--space-2) var(--space-3);
+  border-block-end: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.you {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+}
+
+/* MFA enrolment. */
+.enroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.stepTitle {
+  font-weight: 600;
+  font-size: var(--step--1);
+}
+
+.qr {
+  inline-size: 180px;
+  block-size: 180px;
+  background: #fff;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+}
+
+.qr svg {
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+}
+
+.secret {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--step--1);
+  word-break: break-all;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.codeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--step--1);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.auditDetail {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  padding: var(--space-4) 0;
+}
+
+@media (max-width: 540px) {
+  .codeGrid {
+    grid-template-columns: 1fr;
+  }
+}

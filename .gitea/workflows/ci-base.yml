@@ -1,0 +1,37 @@
+name: CI base image
+
+# Build the prebuilt CI toolchain image (Rust + rustfmt/clippy, g++, git,
+# Node 20) and publish it to the registry. ci.yml runs its jobs in this image
+# via `container:`; keeping a copy in the registry means a runner that lost its
+# local copy (for example after a `docker system prune`) re-pulls it instead of
+# the job failing to start. Trigger it by hand, or it runs when the base image's
+# Dockerfile (or this workflow) changes on main.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ci-base/Dockerfile"
+      - ".gitea/workflows/ci-base.yml"
+
+env:
+  REGISTRY: 192.168.20.143:3000
+  IMAGE: 192.168.20.143:3000/bonderosa/ci-base
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the registry
+        # The same dedicated access token image.yml uses (write:package scope),
+        # stored as the REGISTRY_TOKEN secret; the username must own the token.
+        run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "$REGISTRY" -u Bonderosa --password-stdin
+
+      - name: Build
+        # The build context is the ci-base directory, which holds the Dockerfile.
+        run: docker build -t "$IMAGE:latest" ci-base
+
+      - name: Push
+        run: docker push "$IMAGE:latest"

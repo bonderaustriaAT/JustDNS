@@ -1,0 +1,539 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.title {
+  font-size: var(--step-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+  margin-block-start: 2px;
+}
+
+.banner {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+.addForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.addRow {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.input {
+  flex: 1;
+  min-inline-size: 12ch;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.addButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.addButton:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.addButton:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.cancelButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.cancelButton:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.cancelButton:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  margin-block-start: calc(-1 * var(--space-3));
+}
+
+.empty {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-style: italic;
+}
+
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Shared columns so the name, the arrow/addresses and the actions line up in
+     neat columns across every row — each row is a subgrid of these tracks. */
+  grid-template-columns: auto max-content 1fr auto;
+  column-gap: var(--space-3);
+}
+
+.entry {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.entryToggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.entryValue {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+/* A disabled rewrite is listed but not answered — dim the name and addresses so
+   its "off" state reads at a glance. The toggle and actions stay full strength. */
+.entry[data-off] .entryName,
+.entry[data-off] .entryValue {
+  opacity: 0.5;
+}
+
+/* The row being edited inline, marked with the signal accent. */
+.entry[data-editing] {
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+.entryActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.action:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+.entryName {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
+.arrow {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.ips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.ip {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+/* An address-object reference on a rewrite row: a chip set apart from a plain
+   address with the signal accent and a small leading mark, so you can see at a
+   glance that this target is an object, not a literal IP. */
+.aliasRef {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+.aliasRef::before {
+  content: "⇢ ";
+  opacity: 0.7;
+}
+
+/* The object picker in a rewrite form: a label and a row of toggle chips. */
+.aliasPick {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.aliasPickLabel {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+.aliasPickEmpty {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+  font-style: italic;
+}
+
+.aliasPickChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.aliasPickChip {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+
+.aliasPickChip:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.aliasPickChip[data-on] {
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+  border-color: var(--signal);
+}
+
+.aliasPickChip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.aliasPickChip:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* The "Address objects" section below the rewrites, with its own heading. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
+}
+
+.sectionHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sectionTitle {
+  font-size: var(--step-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.sectionLead {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}
+
+/* Address-object rows: like the rewrite rows but with no on/off toggle, so three
+   columns — name, addresses, actions. */
+.aliasEntries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr auto;
+  column-gap: var(--space-3);
+}
+
+.aliasEntry {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.aliasEntry[data-editing] {
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+
+.aliasEntryName {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
+.remove {
+  flex: none;
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.remove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.remove:disabled {
+  opacity: 0.4;
+  cursor: progress;
+}
+
+/* Inline edit: the name/addresses area of a row turns into this little form, so
+   editing happens in place instead of jumping back to the top add form. A
+   rewrite editor stacks its inputs row above the object picker; an object editor
+   has only the inputs row. */
+.rowEdit {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+/* An object row has no toggle column, so its inline editor spans from the first
+   column rather than the second. */
+.aliasEntry .rowEdit {
+  grid-column: 1 / -1;
+}
+
+.rowEditInputs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+.rowEditInput {
+  flex: 1;
+  min-inline-size: 10ch;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.rowEditInput:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--signal);
+}
+
+.rowSave {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--surface);
+  background: var(--signal);
+  border: 1px solid var(--signal-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.rowSave:hover:not(:disabled) {
+  background: var(--signal-strong);
+}
+
+.rowCancel {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.rowCancel:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.rowSave:disabled,
+.rowCancel:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* On a phone the four-column row can't hold the name, addresses and actions side
+   by side without colliding, so it stacks: the switch keeps its own column at
+   the left, the name and the actions share the top row, and the addresses sit on
+   a line beneath them. The inline editor fills the whole area beside the switch. */
+@media (max-width: 540px) {
+  .title {
+    font-size: var(--step-2);
+  }
+
+  .entries {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .entry {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "toggle name  actions"
+      "toggle value value";
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .entryToggle {
+    grid-area: toggle;
+  }
+
+  .entryName {
+    grid-area: name;
+  }
+
+  .entryValue {
+    grid-area: value;
+  }
+
+  .entryActions {
+    grid-area: actions;
+  }
+
+  .rowEdit {
+    grid-column: 2 / -1;
+    grid-row: 1 / -1;
+  }
+
+  .aliasEntries {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .aliasEntry {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name  actions"
+      "value value";
+    column-gap: var(--space-3);
+    row-gap: var(--space-1);
+  }
+
+  .aliasEntryName {
+    grid-area: name;
+  }
+
+  .aliasEntry .entryValue {
+    grid-area: value;
+  }
+
+  .aliasEntry .entryActions {
+    grid-area: actions;
+  }
+
+  .aliasEntry .rowEdit {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+  }
+}
