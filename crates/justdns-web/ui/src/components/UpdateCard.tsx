@@ -14,14 +14,15 @@ type Flow =
   | { kind: "done"; to: string }
   | { kind: "failed"; message: string };
 
-/** Trigger a browser download of the current configuration as a restore file. */
-async function downloadRestore(): Promise<void> {
-  const blob = await api.downloadBackup();
+/** Trigger a browser download of the current configuration as an encrypted
+ *  restore file, sealed with the password the admin typed. */
+async function downloadRestore(password: string): Promise<void> {
+  const blob = await api.downloadBackup(password);
   const url = URL.createObjectURL(blob);
   const stamp = new Date().toISOString().slice(0, 10);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `justdns-restore-${stamp}.json`;
+  anchor.download = `justdns-restore-${stamp}.jdbak`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
@@ -41,6 +42,10 @@ export function UpdateCard() {
   const [backupPath, setBackupPath] = useState("");
   const [downloaded, setDownloaded] = useState(false);
   const [dialogError, setDialogError] = useState<string | null>(null);
+  // The password the pre-update backup is encrypted with, typed twice so a typo
+  // in a password that cannot be recovered is caught before the update runs.
+  const [backupPw, setBackupPw] = useState("");
+  const [backupPw2, setBackupPw2] = useState("");
 
   // Load the cached status once on mount.
   useEffect(() => {
@@ -118,18 +123,28 @@ export function UpdateCard() {
   const openDialog = useCallback(() => {
     setDownloaded(false);
     setDialogError(null);
+    setBackupPw("");
+    setBackupPw2("");
     setFlow({ kind: "dialog" });
   }, []);
 
+  const pwMismatch = backupPw !== "" && backupPw2 !== "" && backupPw !== backupPw2;
+  const pwValid = backupPw !== "" && backupPw === backupPw2;
+
   async function startUpdate() {
     if (!info?.latestVersion) return;
+    if (!pwValid) {
+      setDialogError(t("update.passwordMismatch"));
+      return;
+    }
     setDialogError(null);
     try {
-      // Always hand the user a restore file, then kick off the update.
-      await downloadRestore().catch(() => {
+      // Always hand the user a restore file, then kick off the update. Both the
+      // downloaded file and the server's own safety backup use the same password.
+      await downloadRestore(backupPw).catch(() => {
         /* Non-fatal: the server still writes its own safety backup. */
       });
-      await api.startUpdate(backupPath);
+      await api.startUpdate(backupPath, backupPw);
       setFlow({
         kind: "running",
         from: info.currentVersion,
@@ -144,8 +159,13 @@ export function UpdateCard() {
   }
 
   async function doDownload() {
+    if (!pwValid) {
+      setDialogError(t("update.passwordMismatch"));
+      return;
+    }
+    setDialogError(null);
     try {
-      await downloadRestore();
+      await downloadRestore(backupPw);
       setDownloaded(true);
     } catch {
       setDialogError(t("update.downloadFailed"));
@@ -253,6 +273,34 @@ export function UpdateCard() {
               {t("update.dialogTitle", { version: info.latestVersion })}
             </h3>
 
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("update.backupPasswordLabel")}</span>
+              <input
+                className={styles.input}
+                type="password"
+                autoComplete="new-password"
+                value={backupPw}
+                onChange={(event) => setBackupPw(event.target.value)}
+                placeholder={t("update.backupPasswordPlaceholder")}
+              />
+            </label>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("update.backupPasswordConfirmLabel")}</span>
+              <input
+                className={styles.input}
+                type="password"
+                autoComplete="new-password"
+                value={backupPw2}
+                onChange={(event) => setBackupPw2(event.target.value)}
+                placeholder={t("update.backupPasswordConfirmPlaceholder")}
+              />
+              <span className={styles.fieldHint}>
+                {pwMismatch
+                  ? t("update.passwordMismatch")
+                  : t("update.backupPasswordHint")}
+              </span>
+            </label>
+
             {info.updaterPresent ? (
               <>
                 <p className={styles.dialogIntro}>{t("update.dialogIntro")}</p>
@@ -268,7 +316,12 @@ export function UpdateCard() {
                     {t("update.backupPathHint", { dir: dataDir })}
                   </span>
                 </label>
-                <button type="button" className={styles.secondary} onClick={doDownload}>
+                <button
+                  type="button"
+                  className={styles.secondary}
+                  onClick={doDownload}
+                  disabled={!pwValid}
+                >
                   {downloaded ? t("update.downloadDone") : t("update.downloadRestore")}
                 </button>
                 {dialogError ? <p className={styles.dialogError}>{dialogError}</p> : null}
@@ -276,7 +329,12 @@ export function UpdateCard() {
                   <button type="button" className={styles.cancel} onClick={() => setFlow({ kind: "idle" })}>
                     {t("update.cancel")}
                   </button>
-                  <button type="button" className={styles.update} onClick={startUpdate}>
+                  <button
+                    type="button"
+                    className={styles.update}
+                    onClick={startUpdate}
+                    disabled={!pwValid}
+                  >
                     {t("update.start")}
                   </button>
                 </div>
@@ -287,7 +345,12 @@ export function UpdateCard() {
                 <p className={styles.dialogIntro}>{t("update.manualIntro")}</p>
                 <pre className={styles.command}>{manualCommand}</pre>
                 <p className={styles.fieldHint}>{t("update.manualHint")}</p>
-                <button type="button" className={styles.secondary} onClick={doDownload}>
+                <button
+                  type="button"
+                  className={styles.secondary}
+                  onClick={doDownload}
+                  disabled={!pwValid}
+                >
                   {downloaded ? t("update.downloadDone") : t("update.downloadRestore")}
                 </button>
                 {dialogError ? <p className={styles.dialogError}>{dialogError}</p> : null}

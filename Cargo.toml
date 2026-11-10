@@ -11,6 +11,7 @@ members = [
     "crates/justdns-lists",
     "crates/justdns-rewrite",
     "crates/justdns-schedule",
+    "crates/justdns-secret",
     "crates/justdns-store",
     "crates/justdns-web",
     "crates/justdns",

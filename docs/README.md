@@ -38,6 +38,7 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [Backup & restore](guides/backup.md) | Save your whole configuration to a file and bring it back |
 | [Updating JustDNS](guides/updates.md) | Check GitHub and update in one click, with an automatic backup |
 | [High availability](guides/high-availability.md) | Run a second node that stays in sync, so either one can answer |
+| [Encryption at rest](guides/secrets-at-rest.md) | Your accounts and secret settings are encrypted on disk, automatically — a stolen volume or backup is useless without the key |
 
 ## How filtering fits together
 

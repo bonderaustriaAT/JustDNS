@@ -25,14 +25,18 @@ nothing is ever downloaded or installed without your click.
 
 Press **Update now**. A dialog opens that:
 
-1. **Pre-fills a backup path** on the data volume (e.g.
-   `/data/backups/justdns-backup-…json`). It must stay under `/data` so the backup
+1. Asks for an **encryption password**, typed twice to catch a typo. The safety
+   backup — both the one written on the server and the copy you download — is
+   encrypted with it, so neither is ever readable in the clear. Keep the password:
+   there is no recovery, and without it the backup cannot be restored.
+2. **Pre-fills a backup path** on the data volume (e.g.
+   `/data/backups/justdns-backup-…`). It must stay under `/data` so the backup
    survives the container being recreated — that is the whole point.
-2. Offers **Download restore file**, so you also keep a copy of your configuration
+3. Offers **Download restore file**, so you also keep a copy of your configuration
    on your own computer.
 
-Press **Start update**. JustDNS writes the safety backup, then the updater pulls
-the new image and recreates the container. The card shows the progress
+Press **Start update**. JustDNS writes the encrypted safety backup, then the updater
+pulls the new image and recreates the container. The card shows the progress
 (*downloading → recreating → waiting for restart*); the dashboard briefly
 reconnects while the new version comes up, then reports success.
 

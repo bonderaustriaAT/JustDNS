@@ -3,6 +3,33 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.24.0] - 2026-11-10
+
+- Added: **Encryption at rest.** The files that hold JustDNS's secrets — the account
+  list (password hashes, TOTP secrets, recovery codes) and the secret parts of your
+  settings (notification webhook or bot token) — are now **encrypted on disk**, so a
+  copied data volume, a backup archive or a VM snapshot is useless without the key. It is
+  fully automatic: there is nothing to switch on, and an existing install upgrades itself
+  on first start (it reads the old plaintext files and rewrites them sealed). The key is a
+  random value generated on first boot and kept in its **own volume** (`/keys`), separate
+  from the data so a stolen data volume cannot also decrypt it; the official `docker
+  compose` install adds this volume automatically. Each file is sealed with
+  ChaCha20-Poly1305 under a per-file key derived (HKDF-SHA256) from the master key, and
+  loading is fail-closed — a missing or wrong key stops the node with a clear error rather
+  than silently starting with no accounts. This protects data at rest, not a fully
+  compromised running host (the deliberate price of needing no passphrase at boot). New
+  guide: _Encryption at rest_ (DE + EN). **Back up the key volume separately — losing it
+  makes the sealed files unreadable.**
+- Added: **Password-encrypted backups.** A configuration backup is no longer a plaintext
+  file. You now set an **encryption password** (typed twice) when you download one, and
+  the file is sealed with it — Argon2id to stretch the password, ChaCha20-Poly1305 to
+  encrypt — so a backup that still holds settings like resolver addresses or a notification
+  webhook URL is never readable in the clear. The same password protects the safety backup
+  the one-click **update** writes before it runs, so the on-disk pre-update copy is sealed
+  too. Restore asks for the password and reports a wrong one plainly; older unencrypted
+  backups still restore (leave the password empty). **Keep the password — there is no
+  recovery, and without it a backup cannot be restored.**
+
 ## [0.23.0] - 2026-11-08
 
 - Added: **Notifications & alerts.** JustDNS can now reach out to you over a **webhook**

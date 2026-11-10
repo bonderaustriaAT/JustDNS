@@ -12,6 +12,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { ApiError, api, type CertListItem, type TlsSettings, type TlsStatus } from "../lib/api";
+import { bytesToBase64, looksEncrypted } from "../lib/backupFile";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import {
@@ -94,32 +95,43 @@ function ClearCacheButton() {
   );
 }
 
-/** Export the whole configuration to a file, and restore one. Export downloads
- *  a JSON backup; restore reads a chosen file, confirms, applies it on the
- *  server and reloads so every view reflects the restored data. */
+/** Export the whole configuration to a file, and restore one. Export encrypts
+ *  the backup with a password the operator types twice and downloads it; restore
+ *  reads a chosen file, asks for its password when it is encrypted, confirms,
+ *  applies it on the server and reloads so every view reflects the restored data. */
 function BackupSection() {
   const { t } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   const [exportState, setExportState] = useState<"idle" | "busy" | "error">("idle");
+  const [exportPw, setExportPw] = useState("");
+  const [exportPw2, setExportPw2] = useState("");
   const [importState, setImportState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const [importError, setImportError] = useState<string | null>(null);
-  // The parsed backup awaiting the confirm step, or null when none is pending.
-  const [pending, setPending] = useState<unknown>(null);
+  const [restorePw, setRestorePw] = useState("");
+  // The base64 backup file awaiting the confirm step (with whether it is
+  // encrypted), or null when none is pending.
+  const [pending, setPending] = useState<{ file: string; encrypted: boolean } | null>(null);
+
+  const mismatch = exportPw !== "" && exportPw2 !== "" && exportPw !== exportPw2;
+  const canExport = exportPw !== "" && exportPw === exportPw2 && exportState !== "busy";
 
   async function download() {
+    if (!canExport) return;
     setExportState("busy");
     try {
-      const blob = await api.downloadBackup();
+      const blob = await api.downloadBackup(exportPw);
       const url = URL.createObjectURL(blob);
       const stamp = new Date().toISOString().slice(0, 10);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `justdns-backup-${stamp}.json`;
+      anchor.download = `justdns-backup-${stamp}.jdbak`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
       setExportState("idle");
+      setExportPw("");
+      setExportPw2("");
     } catch {
       setExportState("error");
     }
@@ -132,9 +144,10 @@ function BackupSection() {
     if (!file) return;
     setImportState("idle");
     setImportError(null);
+    setRestorePw("");
     try {
-      const parsed: unknown = JSON.parse(await file.text());
-      setPending(parsed);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setPending({ file: bytesToBase64(bytes), encrypted: looksEncrypted(bytes) });
     } catch {
       setImportState("error");
       setImportError(t("settings.backupImportInvalid"));
@@ -142,15 +155,18 @@ function BackupSection() {
   }
 
   async function confirmRestore() {
+    if (!pending) return;
     setImportState("busy");
     try {
-      await api.restoreBackup(pending);
+      await api.restoreBackup(pending.file, pending.encrypted ? restorePw : undefined);
       setPending(null);
+      setRestorePw("");
       setImportState("done");
       // Reload so settings, lists and rewrites views all show the restored data.
       window.setTimeout(() => window.location.reload(), 1200);
     } catch (error) {
       setPending(null);
+      setRestorePw("");
       setImportState("error");
       setImportError(error instanceof ApiError ? error.message : t("settings.backupImportError"));
     }
@@ -163,20 +179,47 @@ function BackupSection() {
         description={t("settings.backupExportDesc")}
         details={t("settings.backupExportDetails")}
         control={
-          <div className={styles.action}>
-            <button
-              type="button"
-              className={styles.actionButton}
-              onClick={download}
-              disabled={exportState === "busy"}
-            >
-              {exportState === "busy"
-                ? t("settings.backupExportBusy")
-                : t("settings.backupExportButton")}
-            </button>
-            {exportState === "error" ? (
-              <span className={styles.actionError}>{t("settings.backupExportError")}</span>
-            ) : null}
+          <div className={styles.encField}>
+            <input
+              type="password"
+              className={styles.customInput}
+              value={exportPw}
+              autoComplete="new-password"
+              placeholder={t("settings.backupExportPasswordPlaceholder")}
+              aria-label={t("settings.backupExportPassword")}
+              onChange={(event) => setExportPw(event.target.value)}
+            />
+            <input
+              type="password"
+              className={styles.customInput}
+              value={exportPw2}
+              autoComplete="new-password"
+              placeholder={t("settings.backupExportPasswordConfirmPlaceholder")}
+              aria-label={t("settings.backupExportPasswordConfirm")}
+              onChange={(event) => setExportPw2(event.target.value)}
+            />
+            {mismatch ? (
+              <span className={styles.actionError}>
+                {t("settings.backupExportPasswordMismatch")}
+              </span>
+            ) : (
+              <span className={styles.hint}>{t("settings.backupExportPasswordHint")}</span>
+            )}
+            <div className={styles.action}>
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={download}
+                disabled={!canExport}
+              >
+                {exportState === "busy"
+                  ? t("settings.backupExportBusy")
+                  : t("settings.backupExportButton")}
+              </button>
+              {exportState === "error" ? (
+                <span className={styles.actionError}>{t("settings.backupExportError")}</span>
+              ) : null}
+            </div>
           </div>
         }
       />
@@ -189,7 +232,7 @@ function BackupSection() {
             <input
               ref={fileRef}
               type="file"
-              accept="application/json,.json"
+              accept=".jdbak,application/json,.json,application/octet-stream"
               className={styles.fileInput}
               onChange={onFile}
             />
@@ -218,11 +261,29 @@ function BackupSection() {
         <ConfirmDialog
           title={t("settings.backupRestoreConfirmTitle")}
           body={t("settings.backupRestoreConfirmBody")}
+          details={
+            pending.encrypted ? (
+              <div className={styles.encField}>
+                <input
+                  type="password"
+                  className={styles.customInput}
+                  value={restorePw}
+                  autoComplete="off"
+                  placeholder={t("settings.backupRestorePasswordPlaceholder")}
+                  aria-label={t("settings.backupRestorePassword")}
+                  onChange={(event) => setRestorePw(event.target.value)}
+                />
+              </div>
+            ) : undefined
+          }
           confirmLabel={t("settings.backupRestoreConfirm")}
           cancelLabel={t("settings.backupRestoreCancel")}
           busy={importState === "busy"}
           onConfirm={confirmRestore}
-          onCancel={() => setPending(null)}
+          onCancel={() => {
+            setPending(null);
+            setRestorePw("");
+          }}
         />
       ) : null}
     </>

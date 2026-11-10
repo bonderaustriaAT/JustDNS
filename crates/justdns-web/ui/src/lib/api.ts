@@ -1232,17 +1232,25 @@ export const api = {
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
   /** Download the full configuration backup (settings, lists and rewrites) as a
-   *  Blob the caller saves to a file. */
-  downloadBackup: async (): Promise<Blob> => {
-    const response = await fetch("/api/backup");
+   *  Blob the caller saves to a file. The file is encrypted with `password`, so
+   *  it is never readable in the clear; the password is mandatory. */
+  downloadBackup: async (password: string): Promise<Blob> => {
+    const response = await fetch("/api/backup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
     if (!response.ok) {
       throw failed("/api/backup", response.status);
     }
     return response.blob();
   },
-  /** Restore a backup file's parsed JSON, replacing the current settings, lists
-   *  and rewrites. The server refuses a file that is not a JustDNS backup. */
-  restoreBackup: (backup: unknown) => sendJson<void>("POST", "/api/backup/restore", backup),
+  /** Restore an encrypted backup file, replacing the current settings, lists and
+   *  rewrites. `file` is the raw file bytes base64-encoded; `password` is the one
+   *  it was downloaded with (legacy plaintext backups need no password). The
+   *  server refuses a file that is not a JustDNS backup or a wrong password. */
+  restoreBackup: (file: string, password?: string) =>
+    sendJson<void>("POST", "/api/backup/restore", { file, password }),
   /** The encrypted client-DNS status (DoT/DoH flags, hostname, selected certs). */
   tls: (signal?: AbortSignal) => getJson<TlsStatus>("/api/tls", signal),
   /** Set the DoT/DoH flags, hostname and selected certificate ids. Applied live. */
@@ -1358,9 +1366,10 @@ export const api = {
   /** Force a fresh check against GitHub now. */
   checkUpdate: () => sendJson<UpdateInfo>("POST", "/api/update/check"),
   /** Start a one-click update: write the safety backup to `backupPath` (must be
-   *  under the data volume) and ask the sidecar to pull and recreate. */
-  startUpdate: (backupPath: string) =>
-    sendJson<UpdateInfo>("POST", "/api/update", { backupPath }),
+   *  under the data volume), encrypted with `password`, and ask the sidecar to
+   *  pull and recreate. The password keeps the on-disk safety backup unreadable. */
+  startUpdate: (backupPath: string, password: string) =>
+    sendJson<UpdateInfo>("POST", "/api/update", { backupPath, password }),
   /** The light progress poll, used while an update runs and the UI reconnects. */
   updateStatus: (signal?: AbortSignal) => getJson<UpdateStatus>("/api/update/status", signal),
 

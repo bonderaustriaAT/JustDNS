@@ -25,14 +25,19 @@ installiert.
 
 Drücke **Jetzt updaten**. Es öffnet sich ein Dialog, der:
 
-1. Einen **Sicherungspfad vorschlägt** auf dem Datenträger (z. B.
-   `/data/backups/justdns-backup-…json`). Er muss unter `/data` liegen, damit die
+1. Nach einem **Verschlüsselungspasswort** fragt, zweimal eingegeben, um einen
+   Tippfehler zu fangen. Die Sicherung — die auf dem Server geschriebene wie die von
+   dir heruntergeladene Kopie — wird damit verschlüsselt und ist nie im Klartext
+   lesbar. Behalte das Passwort: es gibt keine Wiederherstellung, und ohne es lässt
+   sich die Sicherung nicht zurückspielen.
+2. Einen **Sicherungspfad vorschlägt** auf dem Datenträger (z. B.
+   `/data/backups/justdns-backup-…`). Er muss unter `/data` liegen, damit die
    Sicherung das Neuerstellen des Containers übersteht — genau darum geht es.
-2. **Wiederherstellungsdatei herunterladen** anbietet, damit du zusätzlich eine
+3. **Wiederherstellungsdatei herunterladen** anbietet, damit du zusätzlich eine
    Kopie deiner Konfiguration auf dem eigenen Rechner behältst.
 
-Drücke **Update starten**. JustDNS schreibt die Sicherung, dann lädt der Updater das
-neue Image und erstellt den Container neu. Die Karte zeigt den Fortschritt
+Drücke **Update starten**. JustDNS schreibt die verschlüsselte Sicherung, dann lädt der
+Updater das neue Image und erstellt den Container neu. Die Karte zeigt den Fortschritt
 (*laden → neu starten → auf Neustart warten*); das Dashboard verbindet sich kurz
 neu, während die neue Version hochkommt, und meldet dann Erfolg.
 

@@ -17,6 +17,10 @@ services:
       - "443:443/tcp"
     volumes:
       - justdns-data:/data
+      # At-rest encryption key for the secret files, in its own volume so a copied
+      # data volume cannot also decrypt them. Generated on first boot; back it up
+      # separately, since losing it makes the sealed files unreadable.
+      - justdns-keys:/keys
     environment:
       # Answer AAAA queries upstream as well; off by default so clients fall
       # back to IPv4. Set to "true" to enable IPv6 answers.
@@ -24,3 +28,4 @@ services:
 
 volumes:
   justdns-data:
+  justdns-keys:

@@ -1437,6 +1437,7 @@ dependencies = [
  "justdns-lists",
  "justdns-rewrite",
  "justdns-schedule",
+ "justdns-secret",
  "justdns-store",
  "justdns-web",
  "tempfile",
@@ -1473,6 +1474,7 @@ name = "justdns-auth"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "justdns-secret",
  "qrcode",
  "serde",
  "serde_json",
@@ -1495,6 +1497,7 @@ dependencies = [
 name = "justdns-config"
 version = "0.1.0"
 dependencies = [
+ "justdns-secret",
  "serde",
  "serde_json",
  "tempfile",
@@ -1577,6 +1580,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "justdns-secret"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "ring",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "justdns-store"
 version = "0.1.0"
 dependencies = [
@@ -1606,6 +1619,7 @@ dependencies = [
  "justdns-lists",
  "justdns-rewrite",
  "justdns-schedule",
+ "justdns-secret",
  "justdns-store",
  "ring",
  "rust-embed",

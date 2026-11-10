@@ -41,10 +41,18 @@ services:
       - "8443:8443/tcp"
     volumes:
       - justdns-data:/data
+      # The at-rest encryption key, in its own volume so a copied data volume
+      # cannot also decrypt the secret files (accounts, config). Generated on
+      # first boot. Keep a separate backup — losing it makes the sealed files
+      # unreadable.
+      - justdns-keys:/keys
     environment:
       # Where the data volume is mounted; the update request/status files live
       # under <data>/update. Matches the image default, set here for clarity.
       JUSTDNS_DATA_DIR: /data
+      # Where the at-rest master key lives (its own volume above). Matches the
+      # image default, set here for clarity.
+      JUSTDNS_SECRET_KEY_PATH: /keys/master.key
       # Persist devices, schedules and the audit trail on the data volume.
       JUSTDNS_CLIENTS_PATH: /data/clients.json
       JUSTDNS_SCHEDULES_PATH: /data/schedules.json
@@ -89,3 +97,8 @@ volumes:
   # volume.
   justdns-data:
     name: justdns-data
+  # The at-rest key volume, kept separate from the data on purpose. Pinned name so
+  # it is created once and reused across one-click updates (which recreate the
+  # service from this compose file, keeping the volume) rather than regenerated.
+  justdns-keys:
+    name: justdns-keys
