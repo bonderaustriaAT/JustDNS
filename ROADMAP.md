@@ -149,7 +149,26 @@ JustDNS deliberately does **not** automate failover (no node seizes the other's
 address). Clients use both resolver IPs, or an external virtual IP, and the
 operating-system resolver fallback is the failover.
 
-## Phase 7 — Apps _(planned)_
+## Phase 7 — Security hardening _(in progress)_
+
+Invisible, automatic hardening — protection that costs the operator nothing and needs
+no action, in the spirit of the HA peer encryption.
+
+- [x] **Encryption at rest.** The secret files — the account list (password hashes,
+  TOTP secrets, recovery codes) and the secret settings (notification webhook or bot
+  token) — are encrypted on disk, so a copied data volume, a backup or a VM snapshot is
+  useless without the key. Fully automatic: an existing install upgrades itself on first
+  start, the key is generated once and kept in its own volume apart from the data, and
+  loading is fail-closed. See [the guide](docs/guides/secrets-at-rest.md).
+- [ ] **Automatic browser & transport hardening.** Security headers (CSP, anti-clickjacking,
+  referrer and permissions policy), HTTPS for the dashboard out of the box, and CSRF
+  protection — on by default, nothing to configure.
+- [ ] **Login hardening.** Brute-force throttling with a self-healing lockout and hardened
+  session cookies, invisible to a normal login.
+- [ ] **Signed images.** The release images are signed and the one-click updater verifies
+  the signature before applying, so a compromised registry cannot push a bad image.
+
+## Phase 8 — Apps _(planned)_
 
 - [ ] **Native Android & iOS apps.** Dedicated apps on top of the web app, for a
   first-class mobile experience and tighter operating-system integration. The

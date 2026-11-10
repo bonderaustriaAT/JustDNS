@@ -22,6 +22,7 @@ use axum::middleware::{Next, from_fn_with_state};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use base64::Engine as _;
 use justdns_access::{AccessRequest, AccessStore};
 use justdns_audit::{AuditEntry, AuditStore};
 use justdns_auth::{AuthError, Role, SessionState, SessionStore, User, UserStore};
@@ -575,7 +576,7 @@ fn router(state: AppState) -> Router {
         .route("/api/certs/{id}/renew", post(renew_cert))
         .route("/api/certs/{id}/ca", get(download_cert_ca))
         .route("/api/cache/clear", post(clear_cache))
-        .route("/api/backup", get(export_backup))
+        .route("/api/backup", post(export_backup))
         .route("/api/backup/restore", post(restore_backup))
         // Self-service: a signed-in user manages their own password and MFA.
         .route("/api/account", get(get_account))
@@ -899,9 +900,10 @@ fn auth_error(error: AuthError) -> (StatusCode, String) {
         }
         AuthError::Invalid(_) => StatusCode::BAD_REQUEST,
         AuthError::Unknown(_) => StatusCode::NOT_FOUND,
-        AuthError::Hash(_) | AuthError::Io { .. } | AuthError::Parse { .. } => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        AuthError::Hash(_)
+        | AuthError::Io { .. }
+        | AuthError::Parse { .. }
+        | AuthError::Decrypt { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, error.to_string())
 }
@@ -2682,45 +2684,45 @@ struct Backup {
     schedules: Vec<Schedule>,
 }
 
-/// Export the whole UI-set configuration as one downloadable JSON file. The
-/// `Content-Disposition` header makes the browser save it; the dashboard also
-/// names the download itself.
+/// The download-backup request body: the password the file is encrypted with.
+/// Required — a backup leaves the server and must never be readable in the clear.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportRequest {
+    password: String,
+}
+
+/// Export the whole UI-set configuration as one **password-encrypted** download.
+/// The password is mandatory: a downloaded backup may be stored anywhere, so it is
+/// sealed (Argon2id + ChaCha20-Poly1305) and is useless without the password. The
+/// `Content-Disposition` header makes the browser save it.
 async fn export_backup(
-    State(config): State<ConfigStore>,
-    State(lists): State<ListStore>,
-    State(rewrites): State<RewriteStore>,
-    State(clients): State<ClientStore>,
-    State(schedules): State<ScheduleStore>,
+    State(state): State<AppState>,
+    Json(request): Json<ExportRequest>,
 ) -> Result<Response, (StatusCode, String)> {
-    let mut backup = Backup {
-        app: BACKUP_APP.to_owned(),
-        kind: BACKUP_KIND.to_owned(),
-        version: BACKUP_VERSION,
-        created_at_ms: Some(now_ms()),
-        settings: config.get(),
-        lists: lists.snapshot(),
-        rewrites: rewrites.snapshot(),
-        aliases: rewrites.alias_snapshot(),
-        clients: clients.snapshot(),
-        groups: clients.snapshot_groups(),
-        schedules: schedules.snapshot(),
-    };
-    // A downloaded backup leaves the server and may be stored anywhere, so the
-    // write-only webhook credential is stripped from it; the admin re-enters it
-    // after a restore. (The on-disk pre-update backup keeps it — it stays on the
-    // same `/data` volume as the live config.)
+    if request.password.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "a backup password is required".to_owned(),
+        ));
+    }
+    let mut backup = build_backup(&state);
+    // The write-only webhook credential is stripped even though the file is
+    // encrypted, so the password alone never reveals it; the admin re-enters it
+    // after a restore. (The on-disk pre-update backup keeps it.)
     redact_settings_secrets(&mut backup.settings);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let sealed = justdns_secret::seal_backup(&request.password, &json);
     Ok((
         [
-            (header::CONTENT_TYPE, "application/json".to_owned()),
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
-                "attachment; filename=\"justdns-backup.json\"".to_owned(),
+                "attachment; filename=\"justdns-backup.jdbak\"".to_owned(),
             ),
         ],
-        json,
+        sealed,
     )
         .into_response())
 }
@@ -2731,11 +2733,56 @@ async fn export_backup(
 /// validated as they are stored — an invalid entry rejects the restore before
 /// the lists or settings are touched. Each piece takes effect live, without a
 /// restart; the admin account and the query log are left untouched.
+/// The restore request: the backup file's raw bytes (base64) and, for an encrypted
+/// backup, its password. A legacy plaintext backup restores with no password.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreRequest {
+    /// The raw backup file, base64-encoded (it may be encrypted binary).
+    file: String,
+    #[serde(default)]
+    password: Option<String>,
+}
+
 async fn restore_backup(
     State(state): State<AppState>,
     identity: Identity,
-    Json(backup): Json<Backup>,
+    Json(request): Json<RestoreRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(request.file.trim())
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "the backup file is unreadable".to_owned(),
+            )
+        })?;
+    // An encrypted backup needs its password; a legacy plaintext backup restores
+    // as-is, so old exports keep working.
+    let json_bytes = if justdns_secret::is_backup_encrypted(&raw) {
+        let password = request.password.unwrap_or_default();
+        if password.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "this backup is encrypted — enter its password".to_owned(),
+            ));
+        }
+        justdns_secret::open_backup(&password, &raw).map_err(|error| match error {
+            justdns_secret::BackupError::WrongPassword => {
+                (StatusCode::BAD_REQUEST, "wrong backup password".to_owned())
+            }
+            other => (StatusCode::BAD_REQUEST, other.to_string()),
+        })?
+    } else {
+        raw
+    };
+    let backup: Backup = serde_json::from_slice(&json_bytes).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "this is not a JustDNS backup file".to_owned(),
+        )
+    })?;
+
     let (config, lists, rewrites, clients, schedules) = (
         &state.config,
         &state.lists,
@@ -3944,6 +3991,10 @@ struct StartUpdate {
     /// Where to write the safety backup. Must be inside the data volume so it
     /// survives the container recreate.
     backup_path: String,
+    /// The password the pre-update safety backup is encrypted with. Required, so
+    /// the on-disk backup is never readable in the clear. The UI collects it twice
+    /// to guard against a typo in a password that cannot be verified later.
+    password: String,
 }
 
 /// Start a one-click update: validate the backup path, write the safety backup to
@@ -3970,6 +4021,13 @@ async fn start_update(
         ));
     };
 
+    if body.password.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "a backup password is required".to_owned(),
+        ));
+    }
+
     let path = std::path::PathBuf::from(&body.backup_path);
     if !checker.is_within_data(&path) {
         return Err((
@@ -3990,15 +4048,18 @@ async fn start_update(
         ));
     }
 
-    // The safety net on disk comes before anything is triggered.
+    // The safety net on disk comes before anything is triggered. It is encrypted
+    // with the admin's password, so the on-disk backup is not readable in the
+    // clear even though it keeps the webhook credential.
     let backup = build_backup(&state);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let sealed = justdns_secret::seal_backup(&body.password, &json);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     }
-    std::fs::write(&path, &json)
+    std::fs::write(&path, &sealed)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     checker
@@ -5086,7 +5147,12 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        ConfigStore::load(path, Settings::default()).unwrap()
+        ConfigStore::load(
+            path,
+            Settings::default(),
+            &justdns_secret::Sealer::ephemeral(),
+        )
+        .unwrap()
     }
 
     /// A throwaway user store backed by a unique temp file (no admin yet).
@@ -5097,7 +5163,7 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
-        UserStore::load(path).unwrap()
+        UserStore::load(path, &justdns_secret::Sealer::ephemeral()).unwrap()
     }
 
     /// A throwaway list store backed by a unique temp directory, pushing its
@@ -5239,6 +5305,13 @@ mod tests {
     async fn body_of(response: Response) -> String {
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    async fn bytes_of(response: Response) -> Vec<u8> {
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec()
     }
 
     async fn get(store: Store, path: &str) -> Response {
@@ -6728,37 +6801,46 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
-        let backup = body_of(
+        let backup = bytes_of(
             app_a
                 .oneshot(
-                    Request::get("/api/backup")
+                    Request::post("/api/backup")
+                        .header("content-type", "application/json")
                         .header("cookie", &cookie_a)
-                        .body(Body::empty())
+                        .body(Body::from(r#"{"password":"backup-pass-123"}"#))
                         .unwrap(),
                 )
                 .await
                 .unwrap(),
         )
         .await;
-        assert!(backup.contains("justdns"), "envelope marker: {backup}");
-        assert!(backup.contains("tracker.test"), "lists in file: {backup}");
-        assert!(backup.contains("Gaeste"), "group in file: {backup}");
+        // The downloaded file is encrypted: it carries the backup magic and none
+        // of the plaintext leaks through.
         assert!(
-            backup.contains("werbung.test"),
-            "device delta in file: {backup}"
+            justdns_secret::is_backup_encrypted(&backup),
+            "backup file is password-encrypted"
         );
+        let as_text = String::from_utf8_lossy(&backup);
+        assert!(!as_text.contains("tracker.test"), "no plaintext lists leak");
+        assert!(!as_text.contains("Gaeste"), "no plaintext group leaks");
 
-        // Instance B: a fresh box. Restoring the backup brings everything back.
+        // Instance B: a fresh box. Restoring the (encrypted) backup with its
+        // password brings everything back.
         let (store_b, _writer_b) = Store::in_memory(100).unwrap();
         let (app_b, cookie_b) = app_and_cookie(store_b);
 
+        let restore_body = serde_json::json!({
+            "file": base64::engine::general_purpose::STANDARD.encode(&backup),
+            "password": "backup-pass-123",
+        })
+        .to_string();
         let res = app_b
             .clone()
             .oneshot(
                 Request::post("/api/backup/restore")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie_b)
-                    .body(Body::from(backup))
+                    .body(Body::from(restore_body))
                     .unwrap(),
             )
             .await
@@ -6846,16 +6928,20 @@ mod tests {
     async fn restore_rejects_a_file_that_is_not_ours() {
         let (store, _writer) = Store::in_memory(100).unwrap();
         let (app, cookie) = app_and_cookie(store);
-        // Well-formed JSON, right shape, but a foreign `app` marker: refused
-        // before anything is written.
+        // Well-formed (legacy plaintext) backup, right shape, but a foreign `app`
+        // marker: refused before anything is written.
+        let foreign =
+            r#"{"app":"evil","kind":"backup","version":1,"settings":{},"lists":{},"rewrites":[]}"#;
+        let body = serde_json::json!({
+            "file": base64::engine::general_purpose::STANDARD.encode(foreign),
+        })
+        .to_string();
         let res = app
             .oneshot(
                 Request::post("/api/backup/restore")
                     .header("content-type", "application/json")
                     .header("cookie", &cookie)
-                    .body(Body::from(
-                        r#"{"app":"evil","kind":"backup","version":1,"settings":{},"lists":{},"rewrites":[]}"#,
-                    ))
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await
@@ -7438,7 +7524,9 @@ mod tests {
             Request::post("/api/update")
                 .header("content-type", "application/json")
                 .header("cookie", &cookie)
-                .body(Body::from(r#"{"backupPath":"/etc/justdns-backup.json"}"#))
+                .body(Body::from(
+                    r#"{"backupPath":"/etc/justdns-backup.json","password":"update-pass-123"}"#,
+                ))
                 .unwrap(),
         )
         .await;

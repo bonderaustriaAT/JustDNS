@@ -18,6 +18,7 @@ justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }
 justdns-lists = { path = "../justdns-lists" }
 justdns-schedule = { path = "../justdns-schedule" }
+justdns-secret = { path = "../justdns-secret" }
 justdns-store = { path = "../justdns-store" }
 rust-embed = { version = "8.7.2", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }

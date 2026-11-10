@@ -20,6 +20,10 @@ const DEFAULT_CACHE_CAPACITY: u64 = 10_000;
 const DEFAULT_DB_PATH: &str = "queries.duckdb";
 const DEFAULT_CONFIG_PATH: &str = "config.json";
 const DEFAULT_AUTH_PATH: &str = "auth.json";
+/// The at-rest encryption key. Kept outside the data directory on purpose (its
+/// own volume in the container), so a copied data volume does not also hand over
+/// the key. The image sets this to `/keys/master.key`.
+const DEFAULT_SECRET_KEY_PATH: &str = "master.key";
 const DEFAULT_LISTS_PATH: &str = "lists.json";
 const DEFAULT_LISTS_CACHE: &str = "lists-cache";
 const DEFAULT_REWRITES_PATH: &str = "rewrites.json";
@@ -51,6 +55,9 @@ pub struct Config {
     pub config_path: PathBuf,
     /// Where the account list (admin password hash) is stored.
     pub auth_path: PathBuf,
+    /// Where the at-rest master key lives. A separate volume from the data, so a
+    /// stolen data volume cannot also decrypt the secret files.
+    pub secret_key_path: PathBuf,
     /// Where the user's allow/block lists and subscriptions are stored.
     pub lists_path: PathBuf,
     /// Directory where fetched external feeds are cached.
@@ -149,6 +156,11 @@ impl Config {
 
         let auth_path = PathBuf::from(
             read_var("JUSTDNS_AUTH_PATH")?.unwrap_or_else(|| DEFAULT_AUTH_PATH.to_owned()),
+        );
+
+        let secret_key_path = PathBuf::from(
+            read_var("JUSTDNS_SECRET_KEY_PATH")?
+                .unwrap_or_else(|| DEFAULT_SECRET_KEY_PATH.to_owned()),
         );
 
         let lists_path = PathBuf::from(
@@ -250,6 +262,7 @@ impl Config {
             db_path,
             config_path,
             auth_path,
+            secret_key_path,
             lists_path,
             lists_cache_dir,
             rewrites_path,

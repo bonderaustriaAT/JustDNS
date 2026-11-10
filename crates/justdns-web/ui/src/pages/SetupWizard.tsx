@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import { ApiError, api, type SpeedProfile } from "../lib/api";
+import { bytesToBase64, looksEncrypted } from "../lib/backupFile";
 import { LANGS, useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import { useAuth } from "../state/auth";
@@ -42,6 +43,7 @@ export function SetupWizard() {
   const [speedProfile, setSpeedProfile] = useState<SpeedProfile>("balanced");
   const [retention, setRetention] = useState(7);
   const [backupFile, setBackupFile] = useState<File | null>(null);
+  const [backupPassword, setBackupPassword] = useState("");
 
   // Once the admin exists its credentials cannot change, so the fields lock and
   // a second setup call is skipped if the user steps back and forward again.
@@ -106,22 +108,29 @@ export function SetupWizard() {
       setError(t("wizard.restore.invalid"));
       return false;
     }
-    let parsed: unknown;
+    let file: string;
+    let encrypted: boolean;
     try {
-      parsed = JSON.parse(await backupFile.text());
+      const bytes = new Uint8Array(await backupFile.arrayBuffer());
+      file = bytesToBase64(bytes);
+      encrypted = looksEncrypted(bytes);
     } catch {
       setError(t("wizard.restore.invalid"));
+      return false;
+    }
+    if (encrypted && backupPassword === "") {
+      setError(t("wizard.restore.passwordRequired"));
       return false;
     }
     try {
       // The admin account was created on the previous step, so this call is
       // authenticated. The server validates the envelope and rejects anything
-      // that is not a JustDNS backup with a 400.
-      await api.restoreBackup(parsed);
+      // that is not a JustDNS backup with a 400; a wrong password is a 400 too.
+      await api.restoreBackup(file, encrypted ? backupPassword : undefined);
       return true;
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 400) {
-        setError(t("wizard.restore.invalid"));
+        setError(encrypted ? t("wizard.restore.wrongPassword") : t("wizard.restore.invalid"));
       } else {
         setError(t("auth.setupFailed"));
       }
@@ -278,16 +287,30 @@ export function SetupWizard() {
           )}
 
           {stepName === "restore" && (
-            <label className={authStyles.field}>
-              <span className={authStyles.label}>{t("wizard.restore.fileLabel")}</span>
-              <input
-                className={styles.file}
-                type="file"
-                accept="application/json,.json"
-                onChange={(e) => setBackupFile(e.target.files?.[0] ?? null)}
-              />
-              <span className={authStyles.hint}>{t("wizard.restore.fileHint")}</span>
-            </label>
+            <>
+              <label className={authStyles.field}>
+                <span className={authStyles.label}>{t("wizard.restore.fileLabel")}</span>
+                <input
+                  className={styles.file}
+                  type="file"
+                  accept=".jdbak,application/json,.json,application/octet-stream"
+                  onChange={(e) => setBackupFile(e.target.files?.[0] ?? null)}
+                />
+                <span className={authStyles.hint}>{t("wizard.restore.fileHint")}</span>
+              </label>
+              <label className={authStyles.field}>
+                <span className={authStyles.label}>{t("wizard.restore.passwordLabel")}</span>
+                <input
+                  className={authStyles.input}
+                  type="password"
+                  autoComplete="off"
+                  value={backupPassword}
+                  placeholder={t("wizard.restore.passwordPlaceholder")}
+                  onChange={(e) => setBackupPassword(e.target.value)}
+                />
+                <span className={authStyles.hint}>{t("wizard.restore.passwordHint")}</span>
+              </label>
+            </>
           )}
 
           {stepName === "upstream" && (

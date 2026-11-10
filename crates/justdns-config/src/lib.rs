@@ -18,7 +18,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+use justdns_secret::{Sealer, is_sealed};
 use serde::{Deserialize, Serialize};
+
+/// HKDF purpose label binding the config file's subkey, distinct from the
+/// account file's so neither can open the other.
+const CONFIG_PURPOSE: &str = "config-v1";
 
 /// A ready-made speed/privacy profile. A single switch the user understands
 /// instead of a scatter of low-level knobs: each profile chooses which
@@ -450,10 +455,19 @@ pub enum ConfigError {
         #[source]
         source: serde_json::Error,
     },
+    /// The config file is sealed but could not be decrypted — a missing or wrong
+    /// secret key, or a tampered file. Reported (never silently reset to the seed)
+    /// so a key mishap fails closed instead of discarding the saved configuration.
+    #[error(
+        "config decrypt ({path}): the secret key is missing or does not match this file \
+         (check JUSTDNS_SECRET_KEY_PATH / the key volume)"
+    )]
+    Decrypt { path: PathBuf },
 }
 
 struct Inner {
     path: PathBuf,
+    sealer: Sealer,
     settings: RwLock<Settings>,
     /// Live flags the DNS path reads per query, kept in step with the matching
     /// `settings` field on every load and save so a dashboard change takes
@@ -485,15 +499,29 @@ impl ConfigStore {
     /// values derived from the environment) is written as the starting point;
     /// a file that exists but cannot be parsed is reported as an error so a
     /// typo is not silently overwritten.
-    pub fn load(path: impl Into<PathBuf>, seed: Settings) -> Result<Self, ConfigError> {
+    /// The file is encrypted at rest under `sealer`. A legacy plaintext config
+    /// still loads and is re-written encrypted at once, so an existing install
+    /// upgrades on the first start of the new version with nothing to do. A sealed
+    /// file that will not decrypt is an error, not a silent reset to the seed.
+    pub fn load(
+        path: impl Into<PathBuf>,
+        seed: Settings,
+        sealer: &Sealer,
+    ) -> Result<Self, ConfigError> {
         let path = path.into();
+        // Whether we must write the file after building the store: a fresh install
+        // (seed) or a legacy plaintext file to upgrade.
+        let mut needs_persist = false;
         let settings = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|source| ConfigError::Parse {
-                path: path.clone(),
-                source,
-            })?,
+            Ok(bytes) => {
+                let plain = decode(&path, sealer, &bytes, &mut needs_persist)?;
+                serde_json::from_slice(&plain).map_err(|source| ConfigError::Parse {
+                    path: path.clone(),
+                    source,
+                })?
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                write_atomic(&path, &seed)?;
+                needs_persist = true;
                 seed
             }
             Err(source) => {
@@ -504,9 +532,10 @@ impl ConfigStore {
             }
         };
 
-        Ok(Self {
+        let store = Self {
             inner: Arc::new(Inner {
                 path,
+                sealer: sealer.clone(),
                 ipv6: Arc::new(AtomicBool::new(settings.ipv6)),
                 block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
                 block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
@@ -519,7 +548,12 @@ impl ConfigStore {
                 on_change: RwLock::new(None),
                 settings: RwLock::new(settings),
             }),
-        })
+        };
+        if needs_persist {
+            let snapshot = store.get();
+            store.persist(&snapshot)?;
+        }
+        Ok(store)
     }
 
     /// Register the callback run after every [`set`](Self::set), so the binary
@@ -573,7 +607,19 @@ impl ConfigStore {
         if let Some(callback) = callback {
             callback(&settings);
         }
-        write_atomic(&self.inner.path, &settings)
+        self.persist(&settings)
+    }
+
+    /// Serialise, seal under the cluster-independent at-rest key and write the
+    /// config atomically. Used by both [`set`](Self::set) and the first-run /
+    /// migration write in [`load`](Self::load).
+    fn persist(&self, settings: &Settings) -> Result<(), ConfigError> {
+        let json = serde_json::to_vec_pretty(settings).map_err(|source| ConfigError::Parse {
+            path: self.inner.path.clone(),
+            source,
+        })?;
+        let sealed = self.inner.sealer.seal(CONFIG_PURPOSE, &json);
+        write_atomic(&self.inner.path, &sealed)
     }
 
     /// The shared IPv6 flag for the DNS pipeline to read per query.
@@ -609,10 +655,30 @@ impl ConfigStore {
     }
 }
 
-/// Write `settings` to `path` as pretty JSON, atomically: serialise to a
-/// sibling temp file first, then rename over the target so a crash mid-write
-/// never leaves a half-written config.
-fn write_atomic(path: &Path, settings: &Settings) -> Result<(), ConfigError> {
+/// Turn the raw file bytes into plaintext JSON. A sealed file is decrypted; a
+/// legacy plaintext file is returned as-is and flagged for migration.
+fn decode(
+    path: &Path,
+    sealer: &Sealer,
+    bytes: &[u8],
+    needs_persist: &mut bool,
+) -> Result<Vec<u8>, ConfigError> {
+    if is_sealed(bytes) {
+        sealer
+            .open(CONFIG_PURPOSE, bytes)
+            .ok_or_else(|| ConfigError::Decrypt {
+                path: path.to_path_buf(),
+            })
+    } else {
+        *needs_persist = true;
+        Ok(bytes.to_vec())
+    }
+}
+
+/// Write `bytes` (the sealed config) to `path` atomically: write a sibling temp
+/// file first, then rename over the target so a crash mid-write never leaves a
+/// half-written config.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     let io_err = |source| ConfigError::Io {
         path: path.to_path_buf(),
         source,
@@ -624,13 +690,8 @@ fn write_atomic(path: &Path, settings: &Settings) -> Result<(), ConfigError> {
         }
     }
 
-    let json = serde_json::to_vec_pretty(settings).map_err(|source| ConfigError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|source| ConfigError::Io {
+    std::fs::write(&tmp, bytes).map_err(|source| ConfigError::Io {
         path: tmp.clone(),
         source,
     })?;
@@ -641,6 +702,14 @@ fn write_atomic(path: &Path, settings: &Settings) -> Result<(), ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    /// One at-rest key for the whole test binary, so a store written in one
+    /// test reopens in another load with the same key.
+    fn sealer() -> &'static Sealer {
+        static S: OnceLock<Sealer> = OnceLock::new();
+        S.get_or_init(Sealer::ephemeral)
+    }
 
     fn temp_path() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -657,19 +726,46 @@ mod tests {
             ..Settings::default()
         };
 
-        let store = ConfigStore::load(&path, seed.clone()).unwrap();
+        let store = ConfigStore::load(&path, seed.clone(), sealer()).unwrap();
         assert_eq!(store.get(), seed);
         assert!(path.exists(), "seed should be written on first run");
 
         // A reload reads the file, not the (now different) seed.
-        let reopened = ConfigStore::load(&path, Settings::default()).unwrap();
+        let reopened = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert_eq!(reopened.get(), seed);
+
+        // The file at rest is sealed, and a wrong key fails closed rather than
+        // silently reverting to the seed.
+        assert!(is_sealed(&std::fs::read(&path).unwrap()));
+        assert!(matches!(
+            ConfigStore::load(&path, Settings::default(), &Sealer::ephemeral()),
+            Err(ConfigError::Decrypt { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_plaintext_config_loads_and_is_migrated_to_encrypted() {
+        let (_dir, path) = temp_path();
+        // A pre-encryption config.json written in the clear.
+        std::fs::write(&path, r#"{"ipv6":true,"instanceName":"Heimnetz"}"#).unwrap();
+
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        assert!(store.get().ipv6);
+        assert_eq!(store.get().instance_name, "Heimnetz");
+
+        // Loading upgrades it in place: sealed afterwards, reopens cleanly.
+        assert!(
+            is_sealed(&std::fs::read(&path).unwrap()),
+            "migrated on load"
+        );
+        let reopened = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        assert_eq!(reopened.get().instance_name, "Heimnetz");
     }
 
     #[test]
     fn set_persists_and_publishes_ipv6() {
         let (_dir, path) = temp_path();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let flag = store.ipv6_flag();
         assert!(!flag.load(Ordering::Relaxed));
 
@@ -682,14 +778,14 @@ mod tests {
             flag.load(Ordering::Relaxed),
             "live flag follows the setting"
         );
-        let reopened = ConfigStore::load(&path, Settings::default()).unwrap();
+        let reopened = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert_eq!(reopened.get(), next);
     }
 
     #[test]
     fn set_publishes_block_flags_live() {
         let (_dir, path) = temp_path();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let ads = store.block_ads_trackers_flag();
         let malware = store.block_malware_flag();
         let safe_search = store.safe_search_flag();
@@ -720,7 +816,7 @@ mod tests {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
 
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let settings = store.get();
         assert!(settings.ipv6);
         // A field absent from the file falls back to the default.
@@ -733,7 +829,7 @@ mod tests {
         let (_dir, path) = temp_path();
         std::fs::write(&path, "not json").unwrap();
         assert!(matches!(
-            ConfigStore::load(&path, Settings::default()),
+            ConfigStore::load(&path, Settings::default(), sealer()),
             Err(ConfigError::Parse { .. })
         ));
     }
@@ -789,7 +885,7 @@ mod tests {
     fn older_config_without_custom_upstreams_still_loads() {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true,"speedProfile":"speed"}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let settings = store.get();
         assert!(!settings.custom_upstreams_enabled, "defaults off");
         assert!(settings.custom_upstreams.is_empty());
@@ -808,7 +904,7 @@ mod tests {
             r#"{"blockLevel":"extreme","instanceName":"Heimnetz"}"#,
         )
         .unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert_eq!(store.get().instance_name, "Heimnetz");
     }
 
@@ -847,7 +943,7 @@ mod tests {
     fn older_config_without_block_response_defaults_to_null_ip() {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert_eq!(store.get().block_response, BlockResponse::NullIp);
     }
 
@@ -857,7 +953,7 @@ mod tests {
         // A file written before this field existed loads with the default.
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert_eq!(store.get().active_window_secs, 300);
 
         let settings = Settings {
@@ -940,7 +1036,7 @@ mod tests {
     fn older_config_without_block_page_loads_with_defaults() {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert!(!store.get().block_page.enabled);
     }
 
@@ -984,7 +1080,7 @@ mod tests {
     fn older_config_without_notifications_loads_with_defaults() {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert!(!store.get().notifications.enabled);
     }
 
@@ -992,7 +1088,7 @@ mod tests {
     fn older_config_without_encrypted_dns_loads_with_defaults() {
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let encrypted = store.get().encrypted_dns;
         assert!(!encrypted.dot_enabled && !encrypted.doh_enabled);
         assert_eq!(encrypted.cert_source, CertSource::SelfSigned);
@@ -1004,7 +1100,7 @@ mod tests {
         // A file written before this field existed loads with the default.
         let (_dir, path) = temp_path();
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert!(!store.get().require_mfa);
 
         let settings = Settings {
@@ -1019,7 +1115,7 @@ mod tests {
     #[test]
     fn set_publishes_the_block_null_ip_flag_live() {
         let (_dir, path) = temp_path();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let flag = store.block_null_ip_flag();
         // Default is null-ip, so the flag starts true.
         assert!(flag.load(Ordering::Relaxed));
@@ -1033,7 +1129,7 @@ mod tests {
     #[test]
     fn set_publishes_the_query_log_flag_live() {
         let (_dir, path) = temp_path();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         let flag = store.query_log_flag();
         // Default records queries, so the flag starts true.
         assert!(flag.load(Ordering::Relaxed));
@@ -1049,7 +1145,7 @@ mod tests {
         use std::sync::atomic::AtomicU8;
 
         let (_dir, path) = temp_path();
-        let store = ConfigStore::load(&path, Settings::default()).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
 
         // The callback records the profile it was handed, so the test can see it
         // ran with the just-set settings rather than the old ones.

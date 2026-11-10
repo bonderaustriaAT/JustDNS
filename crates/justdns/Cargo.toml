@@ -11,6 +11,7 @@ justdns-audit = { path = "../justdns-audit" }
 justdns-auth = { path = "../justdns-auth" }
 justdns-clients = { path = "../justdns-clients" }
 justdns-config = { path = "../justdns-config" }
+justdns-secret = { path = "../justdns-secret" }
 justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }
 justdns-lists = { path = "../justdns-lists" }

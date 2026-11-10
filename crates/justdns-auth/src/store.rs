@@ -13,11 +13,16 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use justdns_secret::{Sealer, is_sealed};
 use serde::{Deserialize, Serialize};
 
 use crate::mfa;
 use crate::password;
 use crate::role::{Role, default_admin};
+
+/// HKDF purpose label binding the account file's subkey, so it can never be
+/// opened with the subkey of another sealed file.
+const PURPOSE: &str = "auth-v1";
 
 /// Per-user second-factor state. The base32 TOTP `secret` is shared with the
 /// user's authenticator app; `confirmed` is false until the user proves they can
@@ -97,6 +102,14 @@ pub enum AuthError {
         #[source]
         source: serde_json::Error,
     },
+    /// The account file is sealed but could not be decrypted — a missing or wrong
+    /// secret key, or a tampered file. Reported (never treated as "no users") so a
+    /// key mishap fails closed instead of silently emptying the account list.
+    #[error(
+        "auth decrypt ({path}): the secret key is missing or does not match this file \
+         (check JUSTDNS_SECRET_KEY_PATH / the key volume)"
+    )]
+    Decrypt { path: PathBuf },
     /// Setup was attempted when an administrator already exists.
     #[error("an administrator already exists")]
     AlreadyConfigured,
@@ -119,6 +132,7 @@ pub enum AuthError {
 
 struct Inner {
     path: PathBuf,
+    sealer: Sealer,
     users: RwLock<Vec<User>>,
 }
 
@@ -134,12 +148,18 @@ impl UserStore {
     /// that exists but cannot be parsed is reported as an error rather than
     /// silently discarded, so a damaged file never locks everyone out by
     /// looking empty.
-    pub fn load(path: impl Into<PathBuf>) -> Result<Self, AuthError> {
+    /// The file is encrypted at rest under `sealer`. A legacy plaintext file still
+    /// loads — and is re-written encrypted at once, so an existing install upgrades
+    /// on the first start of the new version with no action from anyone. A sealed
+    /// file that will not decrypt is an error, not an empty list.
+    pub fn load(path: impl Into<PathBuf>, sealer: &Sealer) -> Result<Self, AuthError> {
         let path = path.into();
+        let mut needs_migration = false;
         let users = match std::fs::read(&path) {
             Ok(bytes) => {
+                let plain = decode(&path, sealer, &bytes, &mut needs_migration)?;
                 let doc: Document =
-                    serde_json::from_slice(&bytes).map_err(|source| AuthError::Parse {
+                    serde_json::from_slice(&plain).map_err(|source| AuthError::Parse {
                         path: path.clone(),
                         source,
                     })?;
@@ -154,12 +174,18 @@ impl UserStore {
             }
         };
 
-        Ok(Self {
+        let store = Self {
             inner: Arc::new(Inner {
                 path,
+                sealer: sealer.clone(),
                 users: RwLock::new(users),
             }),
-        })
+        };
+        if needs_migration {
+            let snapshot = store.read().clone();
+            store.persist(&snapshot)?;
+        }
+        Ok(store)
     }
 
     /// Whether at least one account exists. The login screen uses this to decide
@@ -472,7 +498,35 @@ impl UserStore {
     }
 
     fn persist(&self, users: &[User]) -> Result<(), AuthError> {
-        write_atomic(&self.inner.path, users)
+        let doc = Document {
+            users: users.to_vec(),
+        };
+        let json = serde_json::to_vec_pretty(&doc).map_err(|source| AuthError::Parse {
+            path: self.inner.path.clone(),
+            source,
+        })?;
+        let sealed = self.inner.sealer.seal(PURPOSE, &json);
+        write_atomic(&self.inner.path, &sealed)
+    }
+}
+
+/// Turn the raw file bytes into plaintext JSON. A sealed file is decrypted; a
+/// legacy plaintext file is returned as-is and flagged for migration.
+fn decode(
+    path: &Path,
+    sealer: &Sealer,
+    bytes: &[u8],
+    needs_migration: &mut bool,
+) -> Result<Vec<u8>, AuthError> {
+    if is_sealed(bytes) {
+        sealer
+            .open(PURPOSE, bytes)
+            .ok_or_else(|| AuthError::Decrypt {
+                path: path.to_path_buf(),
+            })
+    } else {
+        *needs_migration = true;
+        Ok(bytes.to_vec())
     }
 }
 
@@ -515,10 +569,10 @@ fn hash_recovery(codes: &[String]) -> Result<Vec<String>, AuthError> {
 /// of a login for a user that does not exist.
 const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$cnxHBvex1fxUfB7TBjNOAw$SNdG2C5F+eV/ccnN/9oCtBZiK+YMaMuFUFeUBIucL1E";
 
-/// Write the account list to `path` atomically: serialise to a sibling temp
-/// file, then rename over the target so a crash mid-write never leaves a
+/// Write `bytes` (the sealed account file) to `path` atomically: write a sibling
+/// temp file, then rename over the target so a crash mid-write never leaves a
 /// half-written file that could lock everyone out.
-fn write_atomic(path: &Path, users: &[User]) -> Result<(), AuthError> {
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> {
     let io_err = |source| AuthError::Io {
         path: path.to_path_buf(),
         source,
@@ -530,16 +584,8 @@ fn write_atomic(path: &Path, users: &[User]) -> Result<(), AuthError> {
         }
     }
 
-    let doc = Document {
-        users: users.to_vec(),
-    };
-    let json = serde_json::to_vec_pretty(&doc).map_err(|source| AuthError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|source| AuthError::Io {
+    std::fs::write(&tmp, bytes).map_err(|source| AuthError::Io {
         path: tmp.clone(),
         source,
     })?;
@@ -559,50 +605,72 @@ mod tests {
 
     fn store() -> (tempfile::TempDir, UserStore) {
         let (dir, path) = temp_path();
-        let store = UserStore::load(&path).unwrap();
+        let store = UserStore::load(&path, &Sealer::ephemeral()).unwrap();
         (dir, store)
     }
 
     #[test]
     fn starts_unconfigured_without_a_file() {
         let (_dir, path) = temp_path();
-        let store = UserStore::load(&path).unwrap();
+        let store = UserStore::load(&path, &Sealer::ephemeral()).unwrap();
         assert!(!store.is_configured());
         assert!(!path.exists(), "no file is written until an account exists");
     }
 
     #[test]
-    fn create_admin_persists_and_logs_in() {
+    fn create_admin_persists_encrypted_and_logs_in() {
         let (_dir, path) = temp_path();
-        let store = UserStore::load(&path).unwrap();
+        let sealer = Sealer::ephemeral();
+        let store = UserStore::load(&path, &sealer).unwrap();
         store.create_admin("admin", "hunter2hunter2").unwrap();
         assert!(store.is_configured());
         assert_eq!(store.role_of("admin"), Some(Role::Admin));
 
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("admin"));
-        assert!(!written.contains("hunter2hunter2"));
-        assert!(written.contains("$argon2"));
+        // The file at rest is sealed: no username, no hash, no password in clear.
+        let written = std::fs::read(&path).unwrap();
+        assert!(is_sealed(&written), "the account file is encrypted at rest");
+        let text = String::from_utf8_lossy(&written);
+        assert!(!text.contains("admin"));
+        assert!(!text.contains("hunter2hunter2"));
+        assert!(!text.contains("$argon2"));
 
-        let reopened = UserStore::load(&path).unwrap();
+        // Reopening with the same key decrypts and logs in.
+        let reopened = UserStore::load(&path, &sealer).unwrap();
         assert_eq!(
             reopened.verify("admin", "hunter2hunter2").as_deref(),
             Some("admin")
         );
         assert_eq!(reopened.verify("admin", "wrong"), None);
+
+        // A wrong key fails closed rather than seeing an empty account list.
+        assert!(matches!(
+            UserStore::load(&path, &Sealer::ephemeral()),
+            Err(AuthError::Decrypt { .. })
+        ));
     }
 
     #[test]
-    fn old_record_without_role_loads_as_admin() {
-        // A pre-roles auth.json: a user object with only name + hash.
+    fn old_plaintext_file_loads_and_is_migrated_to_encrypted() {
+        // A pre-encryption auth.json: a user object with only name + hash.
         let (_dir, path) = temp_path();
+        let sealer = Sealer::ephemeral();
         let hash = password::hash("hunter2hunter2").unwrap();
         let legacy = format!(r#"{{"users":[{{"username":"root","password_hash":{hash:?}}}]}}"#);
         std::fs::write(&path, legacy).unwrap();
-        let store = UserStore::load(&path).unwrap();
+
+        let store = UserStore::load(&path, &sealer).unwrap();
         assert_eq!(store.role_of("root"), Some(Role::Admin));
         assert!(!store.mfa_enabled("root"));
         assert!(!store.mfa_required_flag("root"));
+
+        // Loading a legacy file upgrades it in place: it is sealed afterwards and
+        // reopens cleanly under the same key.
+        assert!(
+            is_sealed(&std::fs::read(&path).unwrap()),
+            "migrated on load"
+        );
+        let reopened = UserStore::load(&path, &sealer).unwrap();
+        assert_eq!(reopened.role_of("root"), Some(Role::Admin));
     }
 
     #[test]
@@ -747,7 +815,7 @@ mod tests {
         let (_dir, path) = temp_path();
         std::fs::write(&path, "not json").unwrap();
         assert!(matches!(
-            UserStore::load(&path),
+            UserStore::load(&path, &Sealer::ephemeral()),
             Err(AuthError::Parse { .. })
         ));
     }

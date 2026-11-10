@@ -80,10 +80,18 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_DOH_LISTEN=0.0.0.0:8443 \
     JUSTDNS_TLS_DIR=/data/tls \
     JUSTDNS_CERTS_DIR=/data/certs \
-    JUSTDNS_SYSLOG_DIR=/data/logs
+    JUSTDNS_SYSLOG_DIR=/data/logs \
+    JUSTDNS_SECRET_KEY_PATH=/keys/master.key
 
-# The query log persists here; mount a volume to keep it across restarts.
+# The query log and secret files persist here; mount a volume to keep them
+# across restarts.
 VOLUME /data
+
+# The at-rest encryption key lives in its own volume, kept apart from /data so a
+# copied data volume cannot also decrypt the secret files. Generated on first
+# boot if absent. Back it up separately — losing it makes the sealed files
+# unreadable.
+VOLUME /keys
 
 EXPOSE 53/udp
 EXPOSE 53/tcp

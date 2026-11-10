@@ -38,6 +38,7 @@ Neu bei JustDNS? Beginne mit [Ersteinrichtung](guides/setup.de.md), danach
 | [Sicherung & Wiederherstellung](guides/backup.de.md) | Die ganze Konfiguration in eine Datei sichern und zurückholen |
 | [JustDNS aktualisieren](guides/updates.de.md) | Auf GitHub prüfen und mit einem Klick updaten, mit automatischer Sicherung |
 | [Hochverfügbarkeit](guides/high-availability.de.md) | Einen zweiten Knoten betreiben, der synchron bleibt, sodass beide antworten können |
+| [Verschlüsselung im Ruhezustand](guides/secrets-at-rest.de.md) | Konten und geheime Einstellungen liegen automatisch verschlüsselt auf der Platte — ein geklautes Volume oder Backup ist ohne den Schlüssel wertlos |
 
 ## Wie die Filterung zusammenspielt
 

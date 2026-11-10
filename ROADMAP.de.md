@@ -170,7 +170,29 @@ JustDNS automatisiert bewusst **kein** Failover (kein Knoten reißt die Adresse 
 anderen an sich). Clients nutzen beide Resolver-IPs oder eine externe virtuelle IP;
 der Resolver-Rückfall des Betriebssystems ist das Failover.
 
-## Phase 7 — Apps _(geplant)_
+## Phase 7 — Sicherheits-Härtung _(in Arbeit)_
+
+Unsichtbare, automatische Härtung — Schutz, der den Betreiber nichts kostet und keine
+Aktion braucht, im Geist der HA-Peer-Verschlüsselung.
+
+- [x] **Verschlüsselung im Ruhezustand.** Die Secret-Dateien — die Kontenliste
+  (Passwort-Hashes, TOTP-Secrets, Wiederherstellungscodes) und die geheimen
+  Einstellungen (Benachrichtigungs-Webhook oder Bot-Token) — liegen verschlüsselt auf
+  der Platte, sodass eine kopierte Daten-Partition, ein Backup oder ein VM-Snapshot ohne
+  den Schlüssel wertlos ist. Vollautomatisch: Eine bestehende Installation rüstet sich
+  beim ersten Start selbst um, der Schlüssel wird einmal erzeugt und in einem eigenen
+  Volume getrennt von den Daten gehalten, und das Laden ist fail-closed. Siehe
+  [den Guide](docs/guides/secrets-at-rest.de.md).
+- [ ] **Automatische Browser- & Transport-Härtung.** Security-Header (CSP,
+  Clickjacking-Schutz, Referrer- und Permissions-Policy), HTTPS fürs Dashboard ab Werk
+  und CSRF-Schutz — standardmäßig an, nichts einzurichten.
+- [ ] **Login-Härtung.** Brute-Force-Drosselung mit selbstheilender Sperre und gehärtete
+  Session-Cookies, für einen normalen Login unsichtbar.
+- [ ] **Signierte Images.** Die Release-Images werden signiert und der Ein-Klick-Updater
+  prüft die Signatur vor dem Anwenden, sodass eine kompromittierte Registry kein
+  schädliches Image unterschieben kann.
+
+## Phase 8 — Apps _(geplant)_
 
 - [ ] **Native Android- & iOS-Apps.** Auf der Web-App aufbauend eigene Apps für
   ein erstklassiges mobiles Erlebnis und engere Betriebssystem-Integration. Die

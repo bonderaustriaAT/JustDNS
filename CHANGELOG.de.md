@@ -4,6 +4,37 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.24.0] - 2026-11-10
+
+- Neu: **Verschlüsselung im Ruhezustand.** Die Dateien mit JustDNS' Geheimnissen — die
+  Kontenliste (Passwort-Hashes, TOTP-Secrets, Wiederherstellungscodes) und die geheimen
+  Teile deiner Einstellungen (Benachrichtigungs-Webhook oder Bot-Token) — liegen jetzt
+  **verschlüsselt auf der Platte**, sodass eine kopierte Daten-Partition, ein Backup oder
+  ein VM-Snapshot ohne den Schlüssel wertlos ist. Es ist vollautomatisch: Es gibt nichts
+  einzuschalten, und eine bestehende Installation rüstet sich beim ersten Start selbst um
+  (sie liest die alten Klartext-Dateien und schreibt sie versiegelt zurück). Der Schlüssel
+  ist ein Zufallswert, beim ersten Start erzeugt und in einem **eigenen Volume** (`/keys`)
+  gehalten, getrennt von den Daten, damit ein geklautes Daten-Volume ihn nicht
+  mitentschlüsselt; die offizielle `docker compose`-Installation legt dieses Volume
+  automatisch an. Jede Datei wird mit ChaCha20-Poly1305 unter einem je Datei aus dem
+  Masterschlüssel abgeleiteten (HKDF-SHA256) Teilschlüssel versiegelt, und das Laden ist
+  fail-closed — ein fehlender oder falscher Schlüssel stoppt den Knoten mit einem klaren
+  Fehler, statt still ohne Konten zu starten. Das schützt Daten im Ruhezustand, nicht
+  einen voll kompromittierten laufenden Host (der bewusste Preis dafür, ohne Passwort beim
+  Start auszukommen). Neuer Guide: _Verschlüsselung im Ruhezustand_ (DE + EN). **Sichere
+  das Schlüssel-Volume getrennt — bei Verlust sind die versiegelten Dateien unlesbar.**
+- Neu: **Passwortverschlüsselte Sicherungen.** Eine Konfigurationssicherung ist keine
+  Klartextdatei mehr. Beim Herunterladen legst du jetzt ein **Verschlüsselungspasswort**
+  fest (zweimal eingegeben), und die Datei wird damit versiegelt — Argon2id, um das
+  Passwort zu strecken, ChaCha20-Poly1305 zum Verschlüsseln — sodass eine Sicherung, die
+  weiterhin Einstellungen wie Resolver-Adressen oder eine Webhook-URL enthält, nie im
+  Klartext lesbar ist. Dasselbe Passwort schützt die Sicherung, die das Ein-Klick-**Update**
+  vor dem Start anlegt, sodass auch die Vor-Update-Kopie auf der Platte versiegelt ist. Die
+  Wiederherstellung fragt nach dem Passwort und meldet ein falsches klar; ältere
+  unverschlüsselte Sicherungen lassen sich weiterhin zurückspielen (Passwort leer lassen).
+  **Behalte das Passwort — es gibt keine Wiederherstellung, und ohne es lässt sich eine
+  Sicherung nicht zurückspielen.**
+
 ## [0.23.0] - 2026-11-08
 
 - Neu: **Benachrichtigungen & Alerts.** JustDNS kann sich jetzt über einen **Webhook** bei

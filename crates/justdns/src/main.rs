@@ -33,6 +33,7 @@ use justdns_filter::{Blocker, PolicyEngine};
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
 use justdns_schedule::ScheduleStore;
+use justdns_secret::Sealer;
 use justdns_store::Store;
 use justdns_web::{LogBuffer, LogLevelControl, RingLayer, RuntimeStatus};
 use tracing::{error, info, warn};
@@ -126,7 +127,19 @@ async fn main() -> ExitCode {
         ipv6: config.ipv6_enabled,
         ..Settings::default()
     };
-    let config_store = match ConfigStore::load(&config.config_path, seed) {
+    // The at-rest key seals the secret files (accounts, config) on disk. It lives
+    // in its own volume, generated on first boot; load_or_create mints it once and
+    // reads it thereafter. A missing key against already-sealed files fails those
+    // loads closed below, rather than silently starting empty.
+    let sealer = match Sealer::load_or_create(&config.secret_key_path) {
+        Ok(sealer) => sealer,
+        Err(error) => {
+            error!(%error, "cannot load or create the at-rest secret key");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let config_store = match ConfigStore::load(&config.config_path, seed, &sealer) {
         Ok(store) => store,
         Err(error) => {
             error!(%error, "cannot load the configuration");
@@ -137,7 +150,7 @@ async fn main() -> ExitCode {
     // The account list lives next to the config. On first run it is empty, and
     // the web UI's setup screen creates the single administrator; logins are
     // tracked in memory, so a restart simply asks for the password again.
-    let users = match UserStore::load(&config.auth_path) {
+    let users = match UserStore::load(&config.auth_path, &sealer) {
         Ok(users) => users,
         Err(error) => {
             error!(%error, "cannot load the account store");
