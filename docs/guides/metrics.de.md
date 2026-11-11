@@ -52,6 +52,50 @@ scrape_configs:
       - targets: ["dein-justdns-host:8080"]
 ```
 
+## Aus node64 (oder einem ähnlichen Monitor) abholen
+
+Manche selbstgehosteten Monitore holen JustDNS über ein kleines Zugangs-Formular statt
+über eine `scrape_config` ab. node64 ist ein Beispiel; anderswo gilt das Gleiche. Worauf
+es ankommt, ist die **Anmeldung**: JustDNS nutzt einen **Bearer-Token**, kein Basic-Auth.
+
+| Feld | Was eintragen |
+| --- | --- |
+| Art | `Prometheus` |
+| Benutzer | **leer lassen** — ein Benutzername schaltet den Client auf Basic-Auth, das JustDNS mit `401` ablehnt. Leer heißt: es wird ein Bearer-Token geschickt. |
+| URL | `https://dein-justdns-host/metrics` (oder `http://dein-justdns-host:8080/metrics`) |
+| Geheimnis | dein JustDNS-Metrics-Token (der Bearer-Token) |
+| Fingerabdruck | optional; leer lassen, außer du willst das TLS-Zertifikat pinnen |
+
+Viele solche Monitore zeigen nur die Metriken, die du ausdrücklich auflistest. node64
+nimmt eine JSON-Liste der Reihen: `name` ist die Metrik, `title` der Anzeigename,
+`rate: true` macht aus einem `*_total`-Zähler eine Rate pro Sekunde, `unit` ist die
+Anzeige-Einheit, und `labels` ist ein **Objekt** (`{"label":"wert"}`, kein Array), das
+eine einzelne gelabelte Reihe auswählt:
+
+```json
+[
+  {"name":"justdns_queries_total","title":"Anfragen/s","rate":true},
+  {"name":"justdns_cache_hits_total","title":"Cache-Treffer/s","rate":true},
+  {"name":"justdns_queries_blocked_total","title":"Blockiert/s","rate":true},
+  {"name":"justdns_queries_upstream_total","title":"Upstream/s","rate":true},
+  {"name":"justdns_responses_nxdomain_total","title":"NXDOMAIN/s","rate":true},
+  {"name":"justdns_cache_entries","title":"Cache-Einträge"},
+  {"name":"justdns_active_clients","title":"Aktive Clients"},
+  {"name":"justdns_query_duration_avg_ms","title":"Latenz Ø","unit":"ms"},
+  {"name":"justdns_list_entries","labels":{"list":"ads"},"title":"Liste: Ads"},
+  {"name":"justdns_list_entries","labels":{"list":"malware"},"title":"Liste: Malware"},
+  {"name":"justdns_listener_up","labels":{"listener":"udp"},"title":"Listener UDP"},
+  {"name":"justdns_listener_up","labels":{"listener":"doh"},"title":"Listener DoH"},
+  {"name":"justdns_uptime_seconds","title":"Uptime","unit":"s"}
+]
+```
+
+Mögliche Label-Werte: `list` ist `ads` / `malware` / `allow` / `custom`; `listener` ist
+`udp` / `tcp` / `dot` / `doh`. Für ein schlankeres Dashboard lass die `labels`-Zeilen
+weg. Mit dem *Testen*-Knopf des Monitors prüfst du es: `200` ist Erfolg, `401` heißt
+falscher Token (oder ein versehentlicher Benutzername), und `404` heißt, in JustDNS ist
+noch kein Token gesetzt.
+
 ## Was bereitgestellt wird
 
 Alle Namen tragen das Präfix `justdns_`.
