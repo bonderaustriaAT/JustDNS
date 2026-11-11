@@ -4101,10 +4101,12 @@ async fn get_settings(identity: Identity, State(config): State<ConfigStore>) -> 
     Json(settings)
 }
 
-/// Blank the write-only secret fields in a settings snapshot (currently the
-/// notification webhook URL), for any copy that leaves the admin trust boundary.
+/// Blank the write-only secret fields in a settings snapshot (the notification
+/// webhook URL and the Prometheus metrics token), for any copy that leaves the
+/// admin trust boundary.
 fn redact_settings_secrets(settings: &mut Settings) {
     settings.notifications.webhook_url = String::new();
+    settings.metrics_token = String::new();
 }
 
 /// Replace the settings. The new values take effect at once (IPv6 live); a
@@ -4986,14 +4988,24 @@ async fn diag(
 /// configured upstreams keep the real count small anyway.
 const RESOLVER_METRICS_LIMIT: usize = 20;
 
-/// The Prometheus scrape endpoint. Off (404) unless a bearer token is configured
-/// via `JUSTDNS_METRICS_TOKEN`; when set, the scraper must present it as
-/// `Authorization: Bearer <token>`. A scraper cannot hold a login session, so
-/// this carries its own token check rather than sitting behind the auth guard.
-/// The figures come from the same in-memory handles the diagnostics endpoint
-/// reads, so a scrape never touches DuckDB.
+/// The Prometheus scrape endpoint. Off (404) unless a bearer token is set; when
+/// set, the scraper must present it as `Authorization: Bearer <token>`. The token
+/// is managed in the dashboard (stored in the encrypted config); an install that
+/// still sets the `JUSTDNS_METRICS_TOKEN` environment variable keeps working as a
+/// fallback when no token is configured in the UI. A scraper cannot hold a login
+/// session, so this carries its own token check rather than sitting behind the
+/// auth guard. The figures come from the same in-memory handles the diagnostics
+/// endpoint reads, so a scrape never touches DuckDB.
 async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(expected) = state.metrics_token.as_deref() else {
+    // The UI-managed token (live config) wins; the startup env token is the
+    // fallback. `configured` is kept alive so `expected` can borrow it.
+    let configured = state.config.get().metrics_token;
+    let configured = configured.trim();
+    let expected = if !configured.is_empty() {
+        configured
+    } else if let Some(env_token) = state.metrics_token.as_deref() {
+        env_token
+    } else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
@@ -5476,6 +5488,25 @@ mod tests {
             body.contains("justdns_listener_up{listener=\"udp\"}"),
             "{body}"
         );
+    }
+
+    #[tokio::test]
+    async fn metrics_uses_the_token_managed_in_the_config() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        // No env token: the endpoint is driven purely by the UI-managed config
+        // token, which starts empty (off) and turns on once set.
+        let state = test_state(store);
+        assert!(state.metrics_token.is_none());
+        let mut settings = state.config.get();
+        settings.metrics_token = "ui-managed-token".to_owned();
+        state.config.set(settings).unwrap();
+        let app = router(state);
+
+        let response = get_metrics(app.clone(), Some("Bearer wrong")).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = get_metrics(app, Some("Bearer ui-managed-token")).await;
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

@@ -13,18 +13,29 @@ no extra port needs opening.
 
 ## Turning it on
 
-The endpoint is **off by default**. Set a bearer token to switch it on:
-
-```
-JUSTDNS_METRICS_TOKEN=<a long random string>
-```
+The endpoint is **off by default**. The simplest way to switch it on is in the
+dashboard: open **Settings → Netzwerk**, find **Metrics token (Prometheus)**, press
+**Generate token**, copy it, and it saves automatically. From then on `/metrics` is
+served and the scraper must present that token. Clearing the field turns the endpoint
+off again. The token is stored with the rest of your configuration, encrypted at rest.
 
 With no token set, `/metrics` answers **404** (as if it did not exist). With one set,
 a scraper must present it as `Authorization: Bearer <token>`, or it gets **401**. A
 Prometheus scraper cannot hold a login session, which is why the endpoint uses a
 token of its own rather than the dashboard's accounts.
 
-Pick a long, random token (for example `openssl rand -hex 32`) and keep it secret —
+### Setting it by environment variable instead
+
+If you would rather not keep the token in the dashboard, set it as an environment
+variable on the container:
+
+```
+JUSTDNS_METRICS_TOKEN=<a long random string>
+```
+
+Pick a long, random value (for example `openssl rand -hex 32`). A token set in the
+dashboard takes precedence; the environment variable applies only while no dashboard
+token is set, so existing installs keep working unchanged. Keep the token secret —
 anyone with it can read your operational figures.
 
 ## Scraping it from Prometheus

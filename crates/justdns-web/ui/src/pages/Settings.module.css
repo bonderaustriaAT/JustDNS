@@ -586,6 +586,36 @@
   gap: var(--space-1);
 }
 
+/* The encryption-password block: a labelled, width-constrained column of two
+   fields, a hint and the action button, so the inputs read as one group rather
+   than stretching across the whole control column. */
+.pwField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-inline-size: 22rem;
+}
+
+.pwLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
+  font-size: var(--step--1);
+}
+
+.pwLabel svg {
+  color: var(--signal);
+}
+
+.pwHint {
+  display: flex;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
 .encTextarea {
   width: 100%;
   box-sizing: border-box;

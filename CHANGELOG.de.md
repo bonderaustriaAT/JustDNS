@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.24.1] - 2026-11-11
+
+- Neu: **Prometheus-Metrics-Token im Dashboard.** Der Scrape-Endpunkt `GET /metrics`
+  braucht zum Einschalten keine Umgebungsvariable mehr. Unter _Einstellungen → Netzwerk_
+  gibt es jetzt ein Feld **Metrics-Token (Prometheus)**: Token mit einem Klick generieren,
+  in deine Prometheus-scrape_config kopieren, und der Endpunkt ist an; Feld leeren schaltet
+  ihn aus. Das Token liegt bei den übrigen Einstellungen, verschlüsselt im Ruhezustand, und
+  wird für Nicht-Admins ausgeblendet. Die alte Umgebungsvariable `JUSTDNS_METRICS_TOKEN`
+  funktioniert weiterhin und greift als Fallback, solange im Dashboard kein Token gesetzt
+  ist — bestehende Installationen sind also nicht betroffen.
+- Geändert: **Aufgeräumtes Backup-Passwortfeld.** Die Verschlüsselungspasswort-Felder beim
+  Backup-Download sitzen jetzt in einer beschrifteten, breitenbegrenzten Gruppe mit kleinem
+  Schloss-Icon und kürzerem Hilfetext, statt sich über die ganze Zeile zu ziehen.
+
 ## [0.24.0] - 2026-11-10
 
 - Neu: **Verschlüsselung im Ruhezustand.** Die Dateien mit JustDNS' Geheimnissen — die
