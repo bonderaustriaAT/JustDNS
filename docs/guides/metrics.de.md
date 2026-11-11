@@ -13,19 +13,31 @@ zusätzlicher Port muss also nicht geöffnet werden.
 
 ## Einschalten
 
-Der Endpunkt ist **standardmäßig aus**. Setze ein Bearer-Token, um ihn einzuschalten:
-
-```
-JUSTDNS_METRICS_TOKEN=<eine lange Zufallszeichenkette>
-```
+Der Endpunkt ist **standardmäßig aus**. Am einfachsten schaltest du ihn im Dashboard
+ein: Öffne **Einstellungen → Netzwerk**, finde **Metrics-Token (Prometheus)**, drücke
+**Token generieren**, kopiere es — es wird automatisch gespeichert. Danach ist
+`/metrics` erreichbar und der Scraper muss dieses Token mitschicken. Leerst du das
+Feld, ist der Endpunkt wieder aus. Das Token liegt bei der übrigen Konfiguration,
+verschlüsselt im Ruhezustand.
 
 Ohne gesetztes Token antwortet `/metrics` mit **404** (als gäbe es ihn nicht). Mit
 Token muss ein Scraper es als `Authorization: Bearer <token>` mitschicken, sonst
 kommt **401**. Ein Prometheus-Scraper kann keine Anmeldesitzung halten — deshalb hat
 der Endpunkt ein eigenes Token statt der Dashboard-Konten.
 
-Nimm ein langes, zufälliges Token (zum Beispiel `openssl rand -hex 32`) und halte es
-geheim — wer es hat, kann deine Betriebskennzahlen lesen.
+### Stattdessen per Umgebungsvariable setzen
+
+Wenn du das Token lieber nicht im Dashboard hältst, setze es als Umgebungsvariable am
+Container:
+
+```
+JUSTDNS_METRICS_TOKEN=<eine lange Zufallszeichenkette>
+```
+
+Nimm einen langen, zufälligen Wert (zum Beispiel `openssl rand -hex 32`). Ein im
+Dashboard gesetztes Token hat Vorrang; die Umgebungsvariable greift nur, solange kein
+Dashboard-Token gesetzt ist — bestehende Installationen laufen also unverändert
+weiter. Halte das Token geheim — wer es hat, kann deine Betriebskennzahlen lesen.
 
 ## Aus Prometheus abholen
 

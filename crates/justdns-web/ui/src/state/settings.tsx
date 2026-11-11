@@ -65,6 +65,7 @@ const SERVER_DEFAULTS: ServerSettings = {
   reports: DEFAULT_REPORT_SETTINGS,
   blockPage: DEFAULT_BLOCK_PAGE,
   notifications: DEFAULT_NOTIFICATIONS,
+  metricsToken: "",
 };
 
 const EXPERT_KEY = "justdns.expertMode";
@@ -90,6 +91,7 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "reports",
   "blockPage",
   "notifications",
+  "metricsToken",
 ];
 
 function toServer(settings: Settings): ServerSettings {

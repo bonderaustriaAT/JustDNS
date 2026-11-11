@@ -117,6 +117,9 @@ export interface ServerSettings {
   /// Active notifications (webhook alerts). Off by default; see
   /// `NotificationSettings`.
   notifications: NotificationSettings;
+  /// Bearer token that guards the Prometheus `GET /metrics` endpoint. Empty leaves
+  /// the endpoint off. A write-only secret: blanked for non-admin readers.
+  metricsToken: string;
 }
 
 /// When the daily and weekly activity reports are generated. Both cadences are

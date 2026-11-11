@@ -95,6 +95,27 @@ function ClearCacheButton() {
   );
 }
 
+/** A small outline padlock, matching the inline-SVG icon style used across the
+ *  shell. Inherits its colour from the parent via `currentColor`. */
+function LockIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="15"
+      height="15"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4" y="10" width="16" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
 /** Export the whole configuration to a file, and restore one. Export encrypts
  *  the backup with a password the operator types twice and downloads it; restore
  *  reads a chosen file, asks for its password when it is encrypted, confirms,
@@ -179,7 +200,11 @@ function BackupSection() {
         description={t("settings.backupExportDesc")}
         details={t("settings.backupExportDetails")}
         control={
-          <div className={styles.encField}>
+          <div className={styles.pwField}>
+            <span className={styles.pwLabel}>
+              <LockIcon />
+              {t("settings.backupExportPassword")}
+            </span>
             <input
               type="password"
               className={styles.customInput}
@@ -203,7 +228,7 @@ function BackupSection() {
                 {t("settings.backupExportPasswordMismatch")}
               </span>
             ) : (
-              <span className={styles.hint}>{t("settings.backupExportPasswordHint")}</span>
+              <span className={styles.pwHint}>{t("settings.backupExportPasswordHint")}</span>
             )}
             <div className={styles.action}>
               <button
@@ -1377,6 +1402,84 @@ function NotificationsSection() {
   );
 }
 
+/** The Prometheus metrics token. The `/metrics` scrape endpoint is off until a
+ *  bearer token is set here; the admin generates one (or types their own), copies
+ *  it into their Prometheus scrape config, and can clear it to turn the endpoint
+ *  off again. The token is a write-only secret stored in the encrypted config. */
+function MetricsSection() {
+  const { t } = useI18n();
+  const { settings, update } = useSettings();
+  const token = settings.metricsToken;
+  const enabled = token.trim() !== "";
+  const [copied, setCopied] = useState(false);
+
+  function generate() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    update("metricsToken", hex);
+    setCopied(false);
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // A browser that refuses clipboard access leaves the token on screen to
+      // copy by hand; nothing else to do.
+    }
+  }
+
+  return (
+    <Row
+      label={t("settings.metrics.label")}
+      description={t("settings.metrics.desc")}
+      details={t("settings.metrics.details")}
+      control={
+        <div className={styles.pwField}>
+          <span className={styles.pwLabel}>
+            <LockIcon />
+            {enabled ? t("settings.metrics.on") : t("settings.metrics.off")}
+          </span>
+          <input
+            type="text"
+            className={styles.customInput}
+            style={{ fontFamily: "var(--font-mono, monospace)" }}
+            value={token}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={t("settings.metrics.placeholder")}
+            aria-label={t("settings.metrics.label")}
+            onChange={(event) => update("metricsToken", event.target.value.trim())}
+          />
+          <div className={styles.action}>
+            <button type="button" className={styles.actionButton} onClick={generate}>
+              {t("settings.metrics.generate")}
+            </button>
+            {enabled ? (
+              <button type="button" className={styles.actionButton} onClick={copy}>
+                {copied ? t("settings.metrics.copied") : t("settings.metrics.copy")}
+              </button>
+            ) : null}
+            {enabled ? (
+              <button
+                type="button"
+                className={styles.actionButton}
+                onClick={() => update("metricsToken", "")}
+              >
+                {t("settings.metrics.clear")}
+              </button>
+            ) : null}
+          </div>
+          <span className={styles.pwHint}>{t("settings.metrics.pathHint")}</span>
+        </div>
+      }
+    />
+  );
+}
+
 export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -1691,6 +1794,7 @@ export function Settings() {
                   />
                 }
               />
+              <MetricsSection />
             </Category>
           )}
 

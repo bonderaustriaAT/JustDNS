@@ -3,6 +3,20 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.24.1] - 2026-11-11
+
+- Added: **Prometheus metrics token in the dashboard.** The `GET /metrics` scrape
+  endpoint no longer needs an environment variable to turn on. Under _Settings →
+  Network_ there is now a **Metrics token (Prometheus)** field: generate a token with
+  one click, copy it into your Prometheus scrape config, and the endpoint switches on;
+  clear the field to turn it off. The token is stored with the rest of your settings,
+  encrypted at rest, and blanked for non-admin readers. The old `JUSTDNS_METRICS_TOKEN`
+  environment variable still works and applies as a fallback whenever no token is set in
+  the dashboard, so existing installs are unaffected.
+- Changed: **Tidier backup password field.** The encryption-password inputs on the
+  backup download now sit in a labelled, width-constrained group with a small lock icon
+  and shorter helper text, instead of stretching across the whole row.
+
 ## [0.24.0] - 2026-11-10
 
 - Added: **Encryption at rest.** The files that hold JustDNS's secrets — the account

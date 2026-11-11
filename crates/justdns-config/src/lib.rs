@@ -404,6 +404,12 @@ pub struct Settings {
     /// Active notifications (webhook alerts). Off by default.
     #[serde(default)]
     pub notifications: Notifications,
+    /// The bearer token that guards the Prometheus `GET /metrics` endpoint. Empty
+    /// leaves the endpoint off (404). A write-only secret: it is blanked for
+    /// non-admin readers and stripped from downloaded backups. When empty, the
+    /// legacy `JUSTDNS_METRICS_TOKEN` environment variable still applies.
+    #[serde(default)]
+    pub metrics_token: String,
 }
 
 impl Default for Settings {
@@ -431,6 +437,7 @@ impl Default for Settings {
             reports: ReportSettings::default(),
             block_page: BlockPage::default(),
             notifications: Notifications::default(),
+            metrics_token: String::new(),
         }
     }
 }
