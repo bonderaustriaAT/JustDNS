@@ -14,9 +14,13 @@
 
 mod domain;
 mod services;
+mod trackers;
 
 pub use domain::{DomainSet, parse_rule};
 pub use services::{SERVICE_PREFIX, Service, service, services};
+pub use trackers::{
+    CATEGORIES as TRACKER_CATEGORIES, Tracker, classify as classify_tracker, trackers,
+};
 
 use std::collections::HashMap;
 use std::net::IpAddr;

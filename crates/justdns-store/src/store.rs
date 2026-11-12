@@ -15,7 +15,8 @@ use tokio::time::{self, Duration};
 use tracing::warn;
 
 use crate::duck::{
-    Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, QueryFilter, StoreError, natural_key,
+    Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, QueryFilter, StoreError,
+    TrackerScanRow, natural_key,
 };
 use crate::event::QueryEvent;
 use crate::recorder::{
@@ -227,6 +228,20 @@ impl Store {
     ) -> Result<Vec<(String, u64)>, StoreError> {
         let reader = self.reader.lock().expect("history reader mutex poisoned");
         reader.blocked_counts_by_client(start_ms, end_ms, limit)
+    }
+
+    /// Per-client, per-name lookup counts over `[start_ms, end_ms)` for the
+    /// privacy dashboard — which names each device reached and whether they were
+    /// blocked — up to `limit` rows, busiest first. Node-local only. A quick
+    /// blocking read; wrap async callers in `spawn_blocking`.
+    pub fn tracker_scan(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<TrackerScanRow>, StoreError> {
+        let reader = self.reader.lock().expect("history reader mutex poisoned");
+        reader.tracker_scan(start_ms, end_ms, limit)
     }
 
     /// A snapshot of the running totals.

@@ -669,6 +669,39 @@ impl DuckReader {
         )
     }
 
+    /// A per-client, per-name count over `[start_ms, end_ms)`, split by whether
+    /// the lookup was blocked, busiest first and capped at `limit` rows. Node-local
+    /// only (`origin = ''`). This is the raw material for the privacy dashboard:
+    /// the web layer maps each name to the company behind it and sums per device.
+    /// The cap keeps the scan bounded; because it is ordered by count, the
+    /// high-frequency tracker names (the ones that matter) are kept.
+    pub fn tracker_scan(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+    ) -> Result<Vec<TrackerScanRow>, StoreError> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut stmt = self.conn.prepare(
+            "SELECT client, name, source = 'blocked' AS blocked, COUNT(*) c \
+             FROM queries \
+             WHERE at_ms >= ? AND at_ms < ? AND origin = '' \
+             GROUP BY client, name, blocked \
+             ORDER BY c DESC, name LIMIT ?",
+        )?;
+        let rows = stmt
+            .query_map(params![start_ms, end_ms, limit], |row| {
+                Ok(TrackerScanRow {
+                    client: row.get::<_, String>(0)?,
+                    name: row.get::<_, String>(1)?,
+                    blocked: row.get::<_, bool>(2)?,
+                    count: count(row, 3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Helper for [`Self::period_report`]: run a `(label, COUNT(*))` top-list query
     /// bound to a window, returning `(label, count)` pairs in the query's order.
     fn top_in_window(
@@ -710,6 +743,16 @@ pub struct PeriodReport {
     pub top_blocked: Vec<(String, u64)>,
     /// Busiest clients, busiest first: `(client address, count)`.
     pub top_clients: Vec<(String, u64)>,
+}
+
+/// One row of [`DuckReader::tracker_scan`]: a client, a queried name, whether the
+/// lookup was blocked, and how many times it happened in the window.
+#[derive(Debug, Clone)]
+pub struct TrackerScanRow {
+    pub client: String,
+    pub name: String,
+    pub blocked: bool,
+    pub count: u64,
 }
 
 /// One row of filtered history: the event, the node it came from (empty for this

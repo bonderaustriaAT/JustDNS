@@ -49,6 +49,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M9 12l2 2 4-4" strokeLinecap="round" />
     </svg>
   ),
+  privacy: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
+      <path d="M8.3 11.2c1-1.6 2.3-2.4 3.7-2.4s2.7.8 3.7 2.4c-1 1.6-2.3 2.4-3.7 2.4s-2.7-.8-3.7-2.4z" strokeLinecap="round" />
+      <circle cx="12" cy="11.2" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
   rewrites: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 7h11l-3-3M4 7l3 3" />
@@ -490,6 +497,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <div className={styles.navTop}>
               <NavRow to="/" end icon="overview" label={t("nav.overview")} />
               <NavRow to="/protokoll" icon="log" label={t("nav.log")} />
+              <NavRow to="/privatsphaere" icon="privacy" label={t("nav.privacy")} />
               <NavRow to="/dnssec" icon="dnssec" label={t("nav.dnssec")} />
             </div>
 

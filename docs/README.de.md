@@ -18,6 +18,7 @@ Neu bei JustDNS? Beginne mit [Ersteinrichtung](guides/setup.de.md), danach
 | [Ersteinrichtung](guides/setup.de.md) | Der Einrichtungs-Assistent, dein Admin-Konto, das Anmelden |
 | [Die Übersicht](guides/overview.de.md) | Das Live-Dashboard: Zähler, Diagramm, aktivste Clients |
 | [Das Protokoll](guides/query-log.de.md) | Was gefragt wurde, von welchem Gerät, wie es beantwortet wurde |
+| [Privatsphäre-Dashboard](guides/privacy-trackers.de.md) | Sehen, mit welchen Firmen jedes Gerät redet; Tracker-Anfragen der Organisation dahinter zugeordnet |
 | [DNSSEC-Validierung](guides/dnssec.de.md) | Antwort-Signaturen prüfen und manipulierte Antworten abweisen |
 | [Sperr- & Erlauben-Listen](guides/lists.de.md) | Werbung/Schadsoftware blocken, Feeds abonnieren, einzelne Domains erlauben oder sperren |
 | [Blockierte Dienste](guides/blocked-services.de.md) | Ganze Dienste (TikTok, YouTube, …) mit einem Schalter sperren, global oder je Ebene |

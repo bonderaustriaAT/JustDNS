@@ -137,6 +137,12 @@ langfristig.
   mit dem Instanznamen als Präfix; den clusterweit identischen „Update“-Alert sendet nur
   eine Node. Als Abschnitt in den Einstellungen konfiguriert, mit „Test senden“-Knopf. Siehe
   [den Leitfaden](docs/guides/notifications.de.md).
+- [x] **Privatsphäre-Dashboard (Tracker-Attribution).** Eine Seite **Privatsphäre**, die die
+  DNS-Anfragen jedes Geräts der **Firma** hinter dem Namen zuordnet — netzwerkweite Summen
+  (Kontakte, geblockt, durchgekommen), die meistkontaktierten Firmen nach Kategorie und eine
+  Aufschlüsselung je Gerät — über 24 Stunden, 7 Tage oder 30 Tage. Der Firmenkatalog ist
+  kuratiert und einkompiliert, kein externer Feed. Für jeden angemeldeten Benutzer lesbar;
+  node-lokal. Siehe [den Leitfaden](docs/guides/privacy-trackers.de.md).
 
 ## Phase 6 — Hochverfügbarkeit _(fertig)_
 
