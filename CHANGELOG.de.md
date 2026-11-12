@@ -4,6 +4,21 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.25.0] - 2026-11-12
+
+- Neu: **Privatsphäre-Dashboard.** Eine neue Seite **Privatsphäre** (in der Seitenleiste,
+  neben Übersicht und Protokoll) ordnet die DNS-Anfragen deiner Geräte den **Firmen** hinter
+  den Namen zu – statt einer Domain-Liste siehst du in einfacher Sprache, dass ein Handy
+  heute 240× Google kontaktiert hat oder ein TV ständig mit einer Analyse-Firma redet.
+  Gezeigt werden netzwerkweite Summen (Tracker-Kontakte, wie viele geblockt, wie viele
+  durchgekommen sind), die meistkontaktierten Firmen mit einer Farbe je Kategorie und einem
+  Balken für den geblockten Anteil sowie eine Aufschlüsselung je Gerät, in die du
+  hineintippen kannst, um genau zu sehen, mit welchen Firmen ein Gerät redet. Wählbar sind
+  24 Stunden, 7 Tage oder 30 Tage. Der Firmenkatalog ist kuratiert und in JustDNS
+  einkompiliert – er deckt die großen Werbe-, Analyse-, Social- und Fingerprinting-Netzwerke
+  ab, holt keinen Feed und funkt nichts nach Hause. Für jeden angemeldeten Benutzer lesbar;
+  node-lokal wie die übrigen Statistiken.
+
 ## [0.24.1] - 2026-11-11
 
 - Neu: **Prometheus-Metrics-Token im Dashboard.** Der Scrape-Endpunkt `GET /metrics`

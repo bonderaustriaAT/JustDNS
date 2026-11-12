@@ -18,6 +18,7 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [First-run setup](guides/setup.md) | The setup wizard, your admin account, logging in |
 | [The overview](guides/overview.md) | The live dashboard: counters, graph, top clients |
 | [The query log](guides/query-log.md) | What was asked, by which device, how it was answered |
+| [Privacy dashboard](guides/privacy-trackers.md) | See which companies each device talks to, with tracker lookups attributed to the organisation behind them |
 | [DNSSEC validation](guides/dnssec.md) | Check answer signatures and refuse tampered replies |
 | [Block & allow lists](guides/lists.md) | Block ads/malware, subscribe to feeds, allow or block single domains |
 | [Blocked services](guides/blocked-services.md) | Block whole services (TikTok, YouTube, …) with one switch, globally or per scope |

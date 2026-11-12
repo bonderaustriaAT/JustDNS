@@ -3,6 +3,20 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.25.0] - 2026-11-12
+
+- Added: **Privacy dashboard.** A new **Privacy** page (in the sidebar, next to the
+  overview and the query log) attributes your devices' DNS lookups to the **companies**
+  behind the names — so instead of a list of domains you see, in plain language, that a
+  phone reached Google 240× today or that a TV keeps talking to an analytics firm. It
+  shows network-wide totals (tracker contacts, how many were blocked, how many got
+  through), the most-contacted companies with a per-category colour and a blocked-share
+  bar, and a per-device breakdown you can tap into to see exactly which companies one
+  device talks to. Pick a 24-hour, 7-day or 30-day window. The company catalogue is
+  curated and compiled into JustDNS — it covers the large advertising, analytics, social
+  and fingerprinting networks, fetches no feed and phones nothing home. Readable by any
+  signed-in user; node-local, like the other stats views.
+
 ## [0.24.1] - 2026-11-11
 
 - Added: **Prometheus metrics token in the dashboard.** The `GET /metrics` scrape

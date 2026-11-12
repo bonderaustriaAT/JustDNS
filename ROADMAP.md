@@ -122,6 +122,12 @@ The phases run roughly from near-term to long-term.
   possible malware beacon). Each node sends its own, prefixed with its instance name;
   the cluster-identical "update" alert is sent by just one node. Configured as a section
   in Settings, with a "Send test" button. See [the guide](docs/guides/notifications.md).
+- [x] **Privacy dashboard (tracker attribution).** A **Privacy** page that attributes each
+  device's DNS lookups to the **company** behind the name — network-wide totals (contacts,
+  blocked, got through), the most-contacted companies by category, and a per-device
+  drilldown — over a 24-hour, 7-day or 30-day window. The company catalogue is curated and
+  compiled in, not an external feed. Readable by any signed-in user; node-local. See
+  [the guide](docs/guides/privacy-trackers.md).
 
 ## Phase 6 — High availability _(done)_
 

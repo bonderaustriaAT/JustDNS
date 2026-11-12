@@ -205,6 +205,43 @@ export interface ReportListItem {
   blocked: number;
 }
 
+/** The window the privacy dashboard attributes over. */
+export type TrackerWindow = "day" | "week" | "month";
+
+/** One company a device (or the whole network) reached, with how many lookups
+ *  went to it and how many of those the filter blocked versus let through. */
+export interface CompanyContact {
+  org: string;
+  category: string;
+  contacts: number;
+  blocked: number;
+  allowed: number;
+}
+
+/** One device's tracker contacts over the window, with its company breakdown.
+ *  `name` is the device's friendly name when one is known. */
+export interface DeviceTrackers {
+  client: string;
+  name?: string;
+  contacts: number;
+  blocked: number;
+  allowed: number;
+  companies: CompanyContact[];
+}
+
+/** The privacy dashboard payload: network-wide totals, the companies contacted
+ *  most, and a per-device breakdown. */
+export interface TrackerReport {
+  window: TrackerWindow;
+  fromMs: number;
+  toMs: number;
+  totalContacts: number;
+  totalBlocked: number;
+  totalAllowed: number;
+  companies: CompanyContact[];
+  devices: DeviceTrackers[];
+}
+
 /// How a stored certificate came to be. Matches the Rust `CertKind`: one JustDNS
 /// minted itself (self-signed, with a local CA to install), or one the operator
 /// uploaded.
@@ -1047,6 +1084,11 @@ export const api = {
    *  each with its handling-time figures. Empty on a cache-only instance. */
   resolverStats: (signal?: AbortSignal) =>
     getJson<ResolverStat[]>("/api/stats/resolvers", signal),
+  /** The privacy dashboard: each device's DNS lookups attributed to the companies
+   *  behind the names, over the window (`day`/`week`/`month`), with network-wide
+   *  totals, the companies contacted most, and a per-device breakdown. */
+  privacyTrackers: (window: TrackerWindow = "day", signal?: AbortSignal) =>
+    getJson<TrackerReport>(`/api/privacy/trackers?window=${window}`, signal),
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());

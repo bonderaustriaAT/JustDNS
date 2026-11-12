@@ -1,0 +1,412 @@
+.page {
+  /* Category hues for the four tracker families, distinct from the green signal
+     palette so a dot or bar reads as "which kind" at a glance. */
+  --cat-advertising: #d9822b;
+  --cat-analytics: #2f6fb0;
+  --cat-social: #7a5bb0;
+  --cat-fingerprinting: #c2473f;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page {
+    --cat-advertising: #e5a24e;
+    --cat-analytics: #6bb0ea;
+    --cat-social: #a98fda;
+    --cat-fingerprinting: #e0695f;
+  }
+}
+
+:root[data-theme="dark"] .page {
+  --cat-advertising: #e5a24e;
+  --cat-analytics: #6bb0ea;
+  --cat-social: #a98fda;
+  --cat-fingerprinting: #e0695f;
+}
+
+/* Header: title + intro on the left, window switcher on the right; it wraps
+   under the text on narrow screens. */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--step-2);
+  margin: 0;
+}
+
+.intro {
+  margin: var(--space-1) 0 0;
+  max-inline-size: var(--measure);
+  color: var(--text-muted);
+}
+
+.caption {
+  color: var(--text-muted);
+}
+
+.captionHint {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* Segmented window switcher, matching the live-rate control on the overview. */
+.switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.switchButton {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: calc(var(--radius-sm) - 2px);
+  cursor: pointer;
+}
+
+.switchButton[data-active] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.switchButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Three headline tiles. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 560px) {
+  .tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tileHero {
+  border-color: color-mix(in srgb, var(--signal) 35%, var(--line));
+}
+
+.tileLabel {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.tileFigure {
+  font-family: var(--font-display);
+  font-size: var(--step-3);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tileFigure[data-tone="blocked"] {
+  color: var(--signal-strong);
+}
+
+.tileFigure[data-tone="allowed"] {
+  color: var(--warn);
+}
+
+.tileHint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* The plain-language headline line. */
+.story {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  font-size: var(--step-1);
+  font-family: var(--font-display);
+}
+
+/* Companies and devices sit side by side on wide screens, stack on narrow. */
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+@media (min-width: 860px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  font-family: var(--font-display);
+  font-size: var(--step-1);
+  margin: 0;
+}
+
+/* Company list -------------------------------------------------------------- */
+.companyList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.companyRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+@media (min-width: 520px) {
+  .companyRow {
+    grid-template-columns: minmax(8rem, 1.1fr) minmax(4rem, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+}
+
+.companyName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.dot {
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--slate);
+}
+
+.dot[data-cat="advertising"] {
+  background: var(--cat-advertising);
+}
+.dot[data-cat="analytics"] {
+  background: var(--cat-analytics);
+}
+.dot[data-cat="social"] {
+  background: var(--cat-social);
+}
+.dot[data-cat="fingerprinting"] {
+  background: var(--cat-fingerprinting);
+}
+
+.companyOrg {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.companyCat {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.bar {
+  display: block;
+  block-size: 8px;
+  background: var(--surface-sunken);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+/* The full bar is "contacts"; the filled inner slice is the blocked share, so a
+   mostly-blocked company reads as mostly-green. */
+.barTrack {
+  display: block;
+  block-size: 100%;
+  background: color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 999px;
+}
+
+.barBlocked {
+  display: block;
+  block-size: 100%;
+  background: var(--signal);
+  border-radius: 999px;
+}
+
+.companyMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+@media (min-width: 520px) {
+  .companyMeta {
+    align-items: flex-end;
+    text-align: end;
+  }
+}
+
+.companyContacts {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.companyShare {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+/* Device list --------------------------------------------------------------- */
+.deviceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.deviceRow {
+  inline-size: 100%;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  text-align: start;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.deviceRow:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+}
+
+.deviceRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.deviceMain {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.deviceName {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.devicePreview {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.deviceMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex: none;
+}
+
+.deviceContacts {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.deviceShare {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.chevron {
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* Device detail ------------------------------------------------------------- */
+.back {
+  align-self: flex-start;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--signal-strong);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+  padding: 0;
+}
+
+.back:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.deviceAddr {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+}
+
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}

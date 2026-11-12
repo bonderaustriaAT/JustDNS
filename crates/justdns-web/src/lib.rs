@@ -505,6 +505,7 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/queries/history", get(queries_history))
+        .route("/api/privacy/trackers", get(privacy_trackers))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
         .route("/api/settings", get(get_settings).put(put_settings))
@@ -4452,6 +4453,196 @@ async fn resolvers(State(store): State<Store>) -> Json<Vec<ResolverStat>> {
     Json(store.resolver_stats(TOP_RESOLVERS))
 }
 
+// --- Privacy: tracker attribution ---------------------------------------------
+
+/// How many name rows to scan when building the privacy view. Only a fraction of
+/// names belong to the tracker catalogue, so scan generously to catch them all.
+const TRACKER_SCAN_LIMIT: usize = 200_000;
+
+#[derive(Deserialize)]
+struct TrackerParams {
+    /// The window to attribute over: `day` (default), `week` or `month`.
+    window: Option<String>,
+}
+
+/// One company a device (or the whole network) reached, with how many lookups
+/// went to it and how many of those the filter blocked versus let through.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CompanyContact {
+    org: String,
+    category: String,
+    contacts: u64,
+    blocked: u64,
+    allowed: u64,
+}
+
+/// One device's tracker contacts over the window, with its per-company breakdown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceTrackers {
+    client: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    contacts: u64,
+    blocked: u64,
+    allowed: u64,
+    companies: Vec<CompanyContact>,
+}
+
+/// The privacy dashboard payload: network-wide totals, the companies contacted
+/// most, and a per-device breakdown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrackerReport {
+    window: String,
+    from_ms: i64,
+    to_ms: i64,
+    total_contacts: u64,
+    total_blocked: u64,
+    total_allowed: u64,
+    companies: Vec<CompanyContact>,
+    devices: Vec<DeviceTrackers>,
+}
+
+/// Running total for one company while aggregating a scan.
+#[derive(Default)]
+struct TrackerAccum {
+    category: &'static str,
+    contacts: u64,
+    blocked: u64,
+    allowed: u64,
+}
+
+impl TrackerAccum {
+    fn add(&mut self, category: &'static str, count: u64, blocked: bool) {
+        self.category = category;
+        self.contacts += count;
+        if blocked {
+            self.blocked += count;
+        } else {
+            self.allowed += count;
+        }
+    }
+}
+
+/// Turn a per-company accumulation into the response rows, busiest company first.
+fn tracker_companies(
+    map: std::collections::HashMap<&'static str, TrackerAccum>,
+) -> Vec<CompanyContact> {
+    let mut companies: Vec<CompanyContact> = map
+        .into_iter()
+        .map(|(org, a)| CompanyContact {
+            org: org.to_string(),
+            category: a.category.to_string(),
+            contacts: a.contacts,
+            blocked: a.blocked,
+            allowed: a.allowed,
+        })
+        .collect();
+    companies.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.org.cmp(&b.org)));
+    companies
+}
+
+/// Attribute each device's DNS lookups to the companies behind the names over the
+/// chosen window (`day`/`week`/`month`): read the durable log, map every queried
+/// name through the compiled tracker catalogue, and aggregate per device and per
+/// company — blocked lookups counted apart from the ones that got through.
+/// Node-local only. Readable by any signed-in user, like the other stats views.
+async fn privacy_trackers(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    Query(params): Query<TrackerParams>,
+) -> Result<Json<TrackerReport>, StatusCode> {
+    let window = params.window.as_deref().unwrap_or("day").to_owned();
+    let span_ms = match window.as_str() {
+        "day" => MS_PER_DAY,
+        "week" => 7 * MS_PER_DAY,
+        "month" => 30 * MS_PER_DAY,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+    let to_ms = now_ms() as i64;
+    let from_ms = to_ms - span_ms;
+
+    let rows =
+        tokio::task::spawn_blocking(move || store.tracker_scan(from_ms, to_ms, TRACKER_SCAN_LIMIT))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let resolver = ClientResolver::new(clients.view());
+
+    let mut per_device: std::collections::HashMap<
+        String,
+        std::collections::HashMap<&'static str, TrackerAccum>,
+    > = std::collections::HashMap::new();
+    let mut network: std::collections::HashMap<&'static str, TrackerAccum> =
+        std::collections::HashMap::new();
+    let mut total_contacts = 0u64;
+    let mut total_blocked = 0u64;
+    let mut total_allowed = 0u64;
+
+    for row in &rows {
+        let Some(tracker) = justdns_filter::classify_tracker(&row.name) else {
+            continue;
+        };
+        total_contacts += row.count;
+        if row.blocked {
+            total_blocked += row.count;
+        } else {
+            total_allowed += row.count;
+        }
+        per_device
+            .entry(row.client.clone())
+            .or_default()
+            .entry(tracker.org)
+            .or_default()
+            .add(tracker.category, row.count, row.blocked);
+        network
+            .entry(tracker.org)
+            .or_default()
+            .add(tracker.category, row.count, row.blocked);
+    }
+
+    let mut devices: Vec<DeviceTrackers> = per_device
+        .into_iter()
+        .map(|(client, orgs)| {
+            let companies = tracker_companies(orgs);
+            let contacts = companies.iter().map(|c| c.contacts).sum();
+            let blocked = companies.iter().map(|c| c.blocked).sum();
+            let allowed = companies.iter().map(|c| c.allowed).sum();
+            let name = client
+                .parse()
+                .ok()
+                .and_then(|ip| resolver.name_for(ip).map(str::to_owned));
+            DeviceTrackers {
+                client,
+                name,
+                contacts,
+                blocked,
+                allowed,
+                companies,
+            }
+        })
+        .collect();
+    devices.sort_by(|a, b| {
+        b.contacts
+            .cmp(&a.contacts)
+            .then_with(|| a.client.cmp(&b.client))
+    });
+
+    Ok(Json(TrackerReport {
+        window,
+        from_ms,
+        to_ms,
+        total_contacts,
+        total_blocked,
+        total_allowed,
+        companies: tracker_companies(network),
+        devices,
+    }))
+}
+
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
@@ -5405,6 +5596,76 @@ mod tests {
             !body.contains("\"nextBefore\""),
             "a short final page omits the cursor: {body}"
         );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("duckdb.wal"));
+    }
+
+    #[tokio::test]
+    async fn privacy_attributes_names_to_companies() {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "justdns-web-privacy-{}-{}.duckdb",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        let now = now_ms() as i64;
+        {
+            let (store, writer) = Store::open(&path, 100).unwrap();
+            let at = |at_ms, client, name, source| {
+                let mut event = sample(client, name, source);
+                event.at_ms = at_ms;
+                event
+            };
+            // Two Google lookups (one blocked), one Meta lookup that got through,
+            // and a non-tracker name that must stay unattributed.
+            store.record(at(
+                now - 1000,
+                Ipv4Addr::new(10, 0, 0, 1),
+                "ad.doubleclick.net",
+                QuerySource::Blocked,
+            ));
+            store.record(at(
+                now - 2000,
+                Ipv4Addr::new(10, 0, 0, 1),
+                "pagead2.googlesyndication.com",
+                QuerySource::Upstream,
+            ));
+            store.record(at(
+                now - 3000,
+                Ipv4Addr::new(10, 0, 0, 2),
+                "graph.facebook.com",
+                QuerySource::Upstream,
+            ));
+            store.record(at(
+                now - 4000,
+                Ipv4Addr::new(10, 0, 0, 2),
+                "news.example.com",
+                QuerySource::Cache,
+            ));
+            drop(store);
+            writer.await.unwrap();
+        }
+        let (store, _writer) = Store::open(&path, 100).unwrap();
+
+        let response = get(store.clone(), "/api/privacy/trackers?window=day").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_of(response).await;
+        assert!(body.contains("Google"), "{body}");
+        assert!(body.contains("Meta"), "{body}");
+        assert!(
+            !body.contains("news.example.com"),
+            "a non-tracker name must not be attributed: {body}"
+        );
+        // Three tracker lookups in all, one of them blocked.
+        assert!(body.contains("\"totalContacts\":3"), "{body}");
+        assert!(body.contains("\"totalBlocked\":1"), "{body}");
+        assert!(body.contains("\"totalAllowed\":2"), "{body}");
+
+        // Two devices, each with its own company.
+        assert!(body.contains("10.0.0.1"), "{body}");
+        assert!(body.contains("10.0.0.2"), "{body}");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("duckdb.wal"));
