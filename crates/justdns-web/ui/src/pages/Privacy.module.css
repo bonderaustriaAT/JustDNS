@@ -509,6 +509,12 @@
   color: var(--text-muted);
   font-size: var(--step--1);
   min-inline-size: 0;
+}
+
+/* The preview company name truncates on its own element (text-overflow does not
+   apply to the bare text node of a flex container). */
+.devicePreviewOrg {
+  min-inline-size: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
