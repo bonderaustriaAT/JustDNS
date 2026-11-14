@@ -52,8 +52,13 @@ export function parseCountries(text: string): string[] {
 export function parseAsns(text: string): number[] {
   const seen = new Set<number>();
   for (const raw of text.split(/[\s,]+/)) {
-    const asn = Number.parseInt(raw.trim().replace(/^as/i, ""), 10);
-    if (Number.isInteger(asn) && asn > 0) seen.add(asn);
+    // Only a whole token that is `AS?<digits>` counts — reject trailing garbage
+    // (e.g. `AS13335x`) rather than silently keeping the leading number, so a
+    // typo is dropped like a bad country code instead of becoming a watched ASN.
+    const token = raw.trim().replace(/^as/i, "");
+    if (!/^\d+$/.test(token)) continue;
+    const asn = Number.parseInt(token, 10);
+    if (asn > 0) seen.add(asn);
   }
   return [...seen];
 }

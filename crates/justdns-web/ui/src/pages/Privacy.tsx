@@ -485,21 +485,26 @@ function NetworksSection({
     return () => controller.abort();
   }, [canWrite]);
 
+  // Aggregate the per-ASN networks by country for the choropleth, memoised on the
+  // report so an unrelated re-render (selecting a country, a watch toggle, the
+  // settings fetch resolving) does not hand WorldMap a fresh array and force a full
+  // SVG re-paint. A network with no country (private/unknown address) never lands
+  // on the map. Computed before the early return below to keep hook order stable.
+  const { mapCountries, mapMax } = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const net of report?.networks ?? []) {
+      if (!net.country) continue;
+      const code = net.country.toLowerCase();
+      totals.set(code, (totals.get(code) ?? 0) + net.contacts);
+    }
+    const countries = Array.from(totals, ([code, contacts]) => ({ code, contacts }));
+    return { mapCountries: countries, mapMax: countries.reduce((peak, c) => Math.max(peak, c.contacts), 0) };
+  }, [report]);
+
   if (!available || !report || report.totalContacts === 0 || report.networks.length === 0) {
     return null;
   }
   const max = report.networks.reduce((peak, n) => Math.max(peak, n.contacts), 0);
-
-  // Aggregate the per-ASN networks by country for the choropleth. A network with
-  // no country (private or unknown address) simply never lands on the map.
-  const countryTotals = new Map<string, number>();
-  for (const net of report.networks) {
-    if (!net.country) continue;
-    const code = net.country.toLowerCase();
-    countryTotals.set(code, (countryTotals.get(code) ?? 0) + net.contacts);
-  }
-  const mapCountries = Array.from(countryTotals, ([code, contacts]) => ({ code, contacts }));
-  const mapMax = mapCountries.reduce((peak, c) => Math.max(peak, c.contacts), 0);
 
   // Selecting a country on the map filters the network list to it.
   const shownNetworks = country
