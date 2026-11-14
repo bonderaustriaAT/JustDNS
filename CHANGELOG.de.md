@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.29.1] - 2026-11-14
+
+- Geändert: **Der Nur-Lesen-Hinweis auf einer Follower-Node ist jetzt unübersehbar.** Auf einer
+  von einer Hauptnode verwalteten Node läuft der Hinweis, der auf die Hauptnode zeigt, jetzt als
+  gelber Streifen über die volle Breite ganz oben auf jeder Seite – über Sidebar und Inhalt, mit
+  Schloss-Icon und Link zur Hauptnode – statt als dezente Zeile im Inhalt.
+
 ## [0.29.0] - 2026-11-14
 
 - Neu: **Den ganzen Cluster von einer Node aus verwalten.** Du kannst jetzt eine
