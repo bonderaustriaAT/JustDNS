@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.31.0] - 2026-11-14
+
+- Geändert: **Cluster-Update einfacher und sicherer.** Das Aktualisieren des ganzen Clusters
+  ist jetzt leichter erreichbar und schwerer falsch zu machen. Auf dem Hauptknoten heißt der
+  Update-Button unter **System & Diagnose** jetzt **Cluster aktualisieren** und startet den
+  rollenden Update direkt dort (ein Follower verweist stattdessen auf den Hauptknoten); vorab
+  wird kurz geprüft, ob überhaupt ein Update vorliegt, damit nicht unnötig nach einem
+  Backup-Passwort gefragt wird. Das Backup-Passwort wird zweimal eingegeben, um einen Vertipper
+  in einem nicht wiederherstellbaren Passwort zu erkennen, und ein Fehler, bei dem dieses Feld
+  nach einem Zeichen den Fokus verlor, ist behoben.
+
 ## [0.30.0] - 2026-11-14
 
 - Neu: **Land und Netz hinter jeder Antwort sehen (GeoIP).** JustDNS ordnet jetzt jede

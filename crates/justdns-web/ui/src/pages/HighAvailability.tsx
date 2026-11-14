@@ -8,32 +8,14 @@ import {
   type HaStatus,
   type HaPrefer,
   type NodeConfig,
-  type ClusterUpdateState,
-  type ClusterUpdatePhase,
-  type ClusterNodePhase,
 } from "../lib/api";
 import { useI18n } from "../lib/i18n";
-import type { MessageKey } from "../lib/messages";
+import {
+  CLUSTER_NODE_PHASE_KEY,
+  CLUSTER_PHASE_KEY,
+  useClusterUpdate,
+} from "../lib/useClusterUpdate";
 import styles from "./HighAvailability.module.css";
-
-/** Overall cluster-update phase → message key. */
-const CLUSTER_PHASE_KEY: Record<ClusterUpdatePhase, MessageKey> = {
-  idle: "ha.cluster.phase.idle",
-  running: "ha.cluster.phase.running",
-  updatingPrimary: "ha.cluster.phase.updatingPrimary",
-  done: "ha.cluster.phase.done",
-  aborted: "ha.cluster.phase.aborted",
-};
-
-/** Per-node cluster-update phase → message key. */
-const CLUSTER_NODE_PHASE_KEY: Record<ClusterNodePhase, MessageKey> = {
-  pending: "ha.cluster.node.pending",
-  updating: "ha.cluster.node.updating",
-  restarting: "ha.cluster.node.restarting",
-  healthy: "ha.cluster.node.healthy",
-  skipped: "ha.cluster.node.skipped",
-  failed: "ha.cluster.node.failed",
-};
 
 /** How often the status refreshes while the page is open, so a sync that runs on
  *  the background thread shows up here without a reload. */
@@ -543,61 +525,41 @@ function AddNodeGuide({ status }: { status: HaStatus }) {
   );
 }
 
-/** Update the whole cluster in order from the primary: a password-confirmed start,
- *  then live per-node progress. Shown only on the primary, when there are peers. */
+/** Update the whole cluster in order from the primary: a background update check,
+ *  a password-confirmed start (typed twice), then live per-node progress. Shown
+ *  only on the primary, when there are peers. */
 function ClusterUpdatePanel() {
   const { t } = useI18n();
-  const [password, setPassword] = useState<string | null>(null);
-  const [state, setState] = useState<ClusterUpdateState | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const cu = useClusterUpdate();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [upToDate, setUpToDate] = useState(false);
+  const [target, setTarget] = useState<string | null>(null);
 
-  // One fetch when the panel opens, to pick up a run already in progress (or the last
-  // result).
-  useEffect(() => {
-    const controller = new AbortController();
-    api
-      .haClusterUpdateStatus(controller.signal)
-      .then(setState)
-      .catch(() => {
-        // Transient — keep whatever we have.
-      });
-    return () => controller.abort();
-  }, []);
+  const { state } = cu;
 
-  const running = state?.phase === "running" || state?.phase === "updatingPrimary";
-
-  // Poll only while a run is actually active, so an idle, done or aborted panel does
-  // not keep hitting the server. Starting a run flips `running`, which restarts this.
-  useEffect(() => {
-    if (!running) return;
-    const controller = new AbortController();
-    const timer = setInterval(() => {
-      api
-        .haClusterUpdateStatus(controller.signal)
-        .then(setState)
-        .catch(() => {
-          // Transient (e.g. the primary restarting at the end) — keep the last state.
-        });
-    }, 3_000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [running]);
-
-  async function start() {
-    if (password == null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setState(await api.haClusterUpdate(password));
-      setPassword(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("ha.cluster.updateFailed"));
-    } finally {
-      setBusy(false);
+  async function openDialog() {
+    setUpToDate(false);
+    cu.clearError();
+    // Check for a release first, so the admin is not asked for a backup password
+    // when there is nothing to update to. A failed check (null) does not block —
+    // the dialog still opens so they can proceed.
+    const info = await cu.check();
+    if (info && !info.updateAvailable) {
+      setUpToDate(true);
+      return;
     }
+    setTarget(info?.latestVersion ?? null);
+    cu.resetPassword();
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    setDialogOpen(false);
+    cu.resetPassword();
+  }
+
+  async function confirmStart() {
+    if (await cu.start()) closeDialog();
   }
 
   return (
@@ -607,18 +569,16 @@ function ClusterUpdatePanel() {
         <button
           type="button"
           className={styles.linkButton}
-          onClick={() => {
-            setPassword("");
-            setError(null);
-          }}
-          disabled={busy || running}
+          onClick={openDialog}
+          disabled={cu.busy || cu.running || cu.checking}
         >
-          {t("ha.cluster.updateButton")}
+          {cu.checking ? t("update.checking") : t("ha.cluster.updateButton")}
         </button>
       </div>
       <p className={styles.summarySub}>{t("ha.cluster.updateHint")}</p>
 
-      {error && <p className={styles.fieldError}>{error}</p>}
+      {upToDate && <p className={styles.summarySub}>{t("update.upToDate")}</p>}
+      {cu.error && <p className={styles.fieldError}>{cu.error}</p>}
 
       {state && state.phase !== "idle" && (
         <div className={styles.clusterUpdateState}>
@@ -644,27 +604,47 @@ function ClusterUpdatePanel() {
         </div>
       )}
 
-      {password != null && (
+      {dialogOpen && (
         <ConfirmDialog
           title={t("ha.cluster.updateTitle")}
-          body={t("ha.cluster.updateBody")}
+          body={
+            target
+              ? `${t("ha.cluster.updateBody")} → ${target}`
+              : t("ha.cluster.updateBody")
+          }
           details={
-            <label className={styles.nodeField}>
-              <span>{t("ha.node.backupPassword")}</span>
-              <input
-                className={styles.input}
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </label>
+            <>
+              <label className={styles.nodeField}>
+                <span>{t("ha.node.backupPassword")}</span>
+                <input
+                  className={styles.input}
+                  type="password"
+                  autoComplete="new-password"
+                  value={cu.password}
+                  onChange={(event) => cu.setPassword(event.target.value)}
+                />
+              </label>
+              <label className={styles.nodeField}>
+                <span>{t("update.backupPasswordConfirmLabel")}</span>
+                <input
+                  className={styles.input}
+                  type="password"
+                  autoComplete="new-password"
+                  value={cu.confirm}
+                  onChange={(event) => cu.setConfirm(event.target.value)}
+                />
+                {cu.mismatch && (
+                  <span className={styles.fieldError}>{t("update.passwordMismatch")}</span>
+                )}
+              </label>
+            </>
           }
           confirmLabel={t("ha.cluster.updateButton")}
           cancelLabel={t("ha.cancel")}
-          busy={busy}
-          onConfirm={start}
-          onCancel={() => setPassword(null)}
+          busy={cu.busy}
+          confirmDisabled={!cu.valid}
+          onConfirm={confirmStart}
+          onCancel={closeDialog}
         />
       )}
     </div>
