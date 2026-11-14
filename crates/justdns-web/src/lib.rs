@@ -5969,10 +5969,10 @@ async fn privacy_networks(
 
     for row in &rows {
         let client = row.event.client;
-        for ip in &row.event.addresses {
-            let Some(info) = db.lookup(*ip) else {
-                continue;
-            };
+        // One query counts once per distinct network it resolved into, so a name
+        // answered by several addresses in one ASN is not over-counted (matching
+        // the per-query tracker view and the log's own network badges).
+        for info in distinct_networks(&db, &row.event.addresses) {
             total_contacts += 1;
             let net = per_network.entry(info.clone()).or_default();
             net.contacts += 1;
@@ -6097,9 +6097,17 @@ struct NamedQueryEvent {
 /// that network once. Empty when no database is loaded or every address is
 /// private/unknown.
 fn geo_networks(geo: &Option<Arc<GeoDb>>, addresses: &[std::net::IpAddr]) -> Vec<GeoInfo> {
-    let Some(db) = geo else {
-        return Vec::new();
-    };
+    match geo {
+        Some(db) => distinct_networks(db, addresses),
+        None => Vec::new(),
+    }
+}
+
+/// The distinct countries/networks a set of addresses resolves into, in first-seen
+/// order, dropping duplicates so a name answered by several addresses in the same
+/// network counts that network once. Shared by the log enrichment and the
+/// "phone home" aggregation so both treat one query as one contact per network.
+fn distinct_networks(db: &GeoDb, addresses: &[std::net::IpAddr]) -> Vec<GeoInfo> {
     let mut out: Vec<GeoInfo> = Vec::new();
     for ip in addresses {
         if let Some(info) = db.lookup(*ip) {
