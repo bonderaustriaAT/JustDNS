@@ -39,15 +39,23 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const bodyId = useId();
 
-  // Focus the dismiss button once, when the dialog opens. This runs on mount
-  // only: a dependency on `busy`/`onCancel` (an inline arrow from the caller,
-  // new on every render) would re-fire on each keystroke and yank focus out of
-  // an input in `details` — the classic "type one letter and lose the field" bug.
+  // Set the initial focus once, when the dialog opens. When `details` carries a
+  // form (e.g. a password field), focus that field so the dialog is usable from
+  // the keyboard at once; otherwise focus the dismiss button — the safe default
+  // for a destructive "are you sure?". This runs on mount only: a dependency on
+  // `busy`/`onCancel` (an inline arrow from the caller, new on every render)
+  // would re-fire on each keystroke and yank focus out of the field — the classic
+  // "type one letter and lose the field" bug.
   useEffect(() => {
-    cancelRef.current?.focus();
+    const field = dialogRef.current?.querySelector<HTMLElement>(
+      "input, textarea, select",
+    );
+    if (field) field.focus();
+    else cancelRef.current?.focus();
   }, []);
 
   // Escape cancels. The listener is registered once; it reads the latest
@@ -74,6 +82,7 @@ export function ConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         className={styles.dialog}
         role="dialog"
         aria-modal="true"

@@ -57,22 +57,36 @@ export function UpdateCard() {
   // Cluster awareness: on a primary in a cluster the one-click update becomes a
   // rolling cluster update; a follower manages updates from the primary instead.
   const [ha, setHa] = useState<HaStatus | null>(null);
-  const cluster = useClusterUpdate();
+  // `haLoaded` becomes true once the HA status has resolved (success or failure),
+  // so we never offer an update action while it is still unknown whether this is
+  // a standalone node, a cluster primary or a follower — a click in that window
+  // would otherwise start the wrong (single-node) update.
+  const [haLoaded, setHaLoaded] = useState(false);
   const [clusterDialog, setClusterDialog] = useState(false);
   const inCluster = (ha?.peers.length ?? 0) > 0;
   const isPrimary = ha?.isPrimary ?? true;
   const clusterMode = inCluster && isPrimary;
   const isFollower = inCluster && !isPrimary;
+  const cluster = useClusterUpdate(clusterMode);
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
     api
       .haStatus(controller.signal)
-      .then(setHa)
+      .then((status) => {
+        if (active) setHa(status);
+      })
       .catch(() => {
         /* No HA status just means we treat this as a standalone node. */
+      })
+      .finally(() => {
+        if (active) setHaLoaded(true);
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, []);
 
   // Load the cached status once on mount.
@@ -317,7 +331,7 @@ export function UpdateCard() {
               type="button"
               className={styles.update}
               onClick={clusterMode ? openClusterDialog : openDialog}
-              disabled={clusterMode && (cluster.checking || cluster.running)}
+              disabled={!haLoaded || (clusterMode && (cluster.checking || cluster.running))}
             >
               {clusterMode
                 ? cluster.checking
