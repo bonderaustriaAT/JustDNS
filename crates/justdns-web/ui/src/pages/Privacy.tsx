@@ -640,6 +640,10 @@ export function Privacy() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Selection | null>(null);
+  // The companies and devices lists start collapsed to a handful of rows so the
+  // world map below them stays within quick reach; "show more" expands each.
+  const [companiesShown, setCompaniesShown] = useState(false);
+  const [devicesShown, setDevicesShown] = useState(false);
 
   useEffect(() => {
     try {
@@ -718,6 +722,12 @@ export function Privacy() {
 
   const blockedShare = blockedPercent(report.totalContacts, report.totalBlocked);
   const companyMax = report.companies.reduce((peak, c) => Math.max(peak, c.contacts), 0);
+  // Keep the top lists short by default so the world map below is quickly reached.
+  const COLLAPSED_ROWS = 5;
+  const shownCompanies = companiesShown
+    ? report.companies
+    : report.companies.slice(0, COLLAPSED_ROWS);
+  const shownDevices = devicesShown ? report.devices : report.devices.slice(0, COLLAPSED_ROWS);
 
   const selectedDevice =
     selected?.kind === "device"
@@ -767,7 +777,7 @@ export function Privacy() {
               {t("privacy.companiesHint", { window: t(`privacy.window.${window}`) })}
             </p>
             <ul className={styles.companyList}>
-              {report.companies.map((company) => {
+              {shownCompanies.map((company) => {
                 const width = companyMax === 0 ? 0 : (company.contacts / companyMax) * 100;
                 const blockedWidth =
                   company.contacts === 0 ? 0 : (company.blocked / company.contacts) * 100;
@@ -813,13 +823,24 @@ export function Privacy() {
                 );
               })}
             </ul>
+            {report.companies.length > COLLAPSED_ROWS && (
+              <button
+                type="button"
+                className={styles.showMore}
+                onClick={() => setCompaniesShown((shown) => !shown)}
+              >
+                {companiesShown
+                  ? t("privacy.showLess")
+                  : t("privacy.showMore", { n: report.companies.length - COLLAPSED_ROWS })}
+              </button>
+            )}
           </section>
 
           <section className={styles.card}>
             <h2 className={styles.sectionTitle}>{t("privacy.devices")}</h2>
             <p className={styles.captionHint}>{t("privacy.devicesHint")}</p>
             <ul className={styles.deviceList}>
-              {report.devices.map((device) => {
+              {shownDevices.map((device) => {
                 const label = device.name ?? device.client;
                 const share = blockedPercent(device.contacts, device.blocked);
                 const top = device.companies[0];
@@ -860,6 +881,17 @@ export function Privacy() {
                 );
               })}
             </ul>
+            {report.devices.length > COLLAPSED_ROWS && (
+              <button
+                type="button"
+                className={styles.showMore}
+                onClick={() => setDevicesShown((shown) => !shown)}
+              >
+                {devicesShown
+                  ? t("privacy.showLess")
+                  : t("privacy.showMore", { n: report.devices.length - COLLAPSED_ROWS })}
+              </button>
+            )}
           </section>
         </div>
         <NetworksSection window={window} t={t} locale={locale} nf={nf} canWrite={canWriteGeo} />

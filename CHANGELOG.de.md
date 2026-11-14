@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.32.1] - 2026-11-14
+
+- Geändert: **Das Privatsphäre-Dashboard führt schneller zur Weltkarte.** Die Listen
+  „Meistkontaktierte Firmen" und „Geräte" zeigen jetzt standardmäßig die obersten fünf, jeweils
+  mit „Mehr anzeigen" zum Ausklappen – so ist die Weltkarte darunter ohne langes Scrollen zu
+  sehen.
+
 ## [0.32.0] - 2026-11-14
 
 - Neu: **Weltkarte, wohin die Geräte telefonieren – und beobachtete Netze.** Der Abschnitt
