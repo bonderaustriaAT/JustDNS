@@ -196,6 +196,20 @@
   padding: 0;
 }
 
+/* A short explanatory line under a facet's inputs (e.g. the live-only geo
+   filter). Quieter and smaller than the label it sits beneath. */
+.facetHint {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* A disabled facet (the geo filter while a history facet is active) dims so it
+   reads as temporarily inapplicable rather than broken. */
+.facet:disabled {
+  opacity: 0.55;
+}
+
 /* One source checkbox: box plus the same tinted pill the list uses, so the
    facet reads in the colour of what it filters to. */
 .check {
@@ -382,6 +396,28 @@
 
 .resolvedArrow {
   color: var(--signal);
+}
+
+/* The country/network each answer resolved into — small pills under the name,
+   from the offline GeoIP database. Only shown when a database is loaded. */
+.networks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-block-start: 2px;
+}
+
+.network {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  white-space: nowrap;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .meta {

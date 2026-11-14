@@ -513,6 +513,24 @@ async fn main() -> ExitCode {
         .filter(|token| !token.trim().is_empty())
         .map(Arc::from);
 
+    // Offline GeoIP databases (country + ASN) for enriching answer addresses with
+    // their country and network on the read path. Node-local: the paths come from
+    // the environment with the bundled DB-IP Lite databases as the default, so an
+    // operator can point at their own MaxMind files without touching the synced
+    // settings. A missing or unreadable file just leaves the feature off.
+    let geo = {
+        let country = env::var("JUSTDNS_GEOIP_COUNTRY_DB")
+            .unwrap_or_else(|_| "/usr/share/justdns/geoip/dbip-country-lite.mmdb".to_owned());
+        let asn = env::var("JUSTDNS_GEOIP_ASN_DB")
+            .unwrap_or_else(|_| "/usr/share/justdns/geoip/dbip-asn-lite.mmdb".to_owned());
+        let country = (!country.trim().is_empty()).then(|| std::path::PathBuf::from(country));
+        let asn = (!asn.trim().is_empty()).then(|| std::path::PathBuf::from(asn));
+        justdns_geoip::GeoDb::open(country.as_deref(), asn.as_deref()).map(Arc::new)
+    };
+    if geo.is_some() {
+        tracing::info!("geoip enrichment enabled");
+    }
+
     // After the web layer mutates the certificate store (a renewal or a
     // regenerate), rebuild the live DoT/DoH and block-page TLS configs so the
     // changed certificate is served without a restart.
@@ -541,7 +559,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;

@@ -16,6 +16,7 @@ justdns-clients = { path = "../justdns-clients" }
 justdns-config = { path = "../justdns-config" }
 justdns-dns = { path = "../justdns-dns" }
 justdns-filter = { path = "../justdns-filter" }
+justdns-geoip = { path = "../justdns-geoip" }
 justdns-lists = { path = "../justdns-lists" }
 justdns-schedule = { path = "../justdns-schedule" }
 justdns-secret = { path = "../justdns-secret" }

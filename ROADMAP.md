@@ -128,6 +128,11 @@ The phases run roughly from near-term to long-term.
   drilldown — over a 24-hour, 7-day or 30-day window. The company catalogue is curated and
   compiled in, not an external feed. Readable by any signed-in user; node-local. See
   [the guide](docs/guides/privacy-trackers.md).
+- [x] **Country and network of answers (GeoIP).** Map each answer address to its country and
+  network (ASN) from a local, **offline** database — flags and the network operator in the
+  query log, a filter by country or ASN, and a **Where your devices phone home** section on
+  the Privacy page. Ships with DB-IP Lite out of the box; point it at your own MaxMind
+  GeoLite2 files to swap it. See [the guide](docs/guides/geoip.md).
 
 ## Phase 6 — High availability _(done)_
 
