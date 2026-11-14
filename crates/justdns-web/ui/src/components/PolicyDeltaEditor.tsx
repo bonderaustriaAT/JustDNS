@@ -22,14 +22,45 @@ export function serviceObjects(services: Service[]): ListObject[] {
  *  forced off. */
 export type ListState = "inherit" | "on" | "off";
 
-/** Whether a delta changes nothing — no list tweaks and no ad-hoc rules. */
+/** Whether a delta changes nothing — no list tweaks, no ad-hoc rules and no
+ *  watched countries or networks. */
 export function isEmptyDelta(delta: PolicyDelta): boolean {
   return (
     delta.listsAdded.length === 0 &&
     delta.listsDisabled.length === 0 &&
     delta.allow.length === 0 &&
-    delta.block.length === 0
+    delta.block.length === 0 &&
+    (delta.watchCountries?.length ?? 0) === 0 &&
+    (delta.watchAsns?.length ?? 0) === 0
   );
+}
+
+/** Parse a free-text box of country codes (space/comma-separated) into clean,
+ *  de-duplicated, lower-cased ISO 3166-1 alpha-2 codes. Non-two-letter tokens are
+ *  dropped. */
+export function parseCountries(text: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of text.split(/[\s,]+/)) {
+    const code = raw.trim().toLowerCase();
+    if (/^[a-z]{2}$/.test(code)) seen.add(code);
+  }
+  return [...seen];
+}
+
+/** Parse a free-text box of ASN numbers (space/comma-separated, an optional `AS`
+ *  prefix allowed) into clean, de-duplicated positive integers. */
+export function parseAsns(text: string): number[] {
+  const seen = new Set<number>();
+  for (const raw of text.split(/[\s,]+/)) {
+    // Only a whole token that is `AS?<digits>` counts — reject trailing garbage
+    // (e.g. `AS13335x`) rather than silently keeping the leading number, so a
+    // typo is dropped like a bad country code instead of becoming a watched ASN.
+    const token = raw.trim().replace(/^as/i, "");
+    if (!/^\d+$/.test(token)) continue;
+    const asn = Number.parseInt(token, 10);
+    if (asn > 0) seen.add(asn);
+  }
+  return [...seen];
 }
 
 /** Read a list's state out of a delta. */
@@ -221,6 +252,35 @@ export function PolicyDeltaEditor({
             onChange={(e) => onChange({ ...delta, block: parseDomains(e.target.value) })}
             placeholder={t("clients.domainsHint")}
             rows={2}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+      </div>
+      <div className={styles.policyDomains}>
+        <label className={styles.policyDomain}>
+          <span className={styles.policyLabel}>
+            {t("clients.watchCountriesLabel")}
+            <InfoHint label={t("clients.watchCountriesLabel")} text={t("clients.watchHint")} />
+          </span>
+          <input
+            type="text"
+            className={styles.domainBox}
+            value={delta.watchCountries?.join(" ") ?? ""}
+            onChange={(e) => onChange({ ...delta, watchCountries: parseCountries(e.target.value) })}
+            placeholder={t("clients.watchCountriesHint")}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </label>
+        <label className={styles.policyDomain}>
+          <span className={styles.policyLabel}>{t("clients.watchAsnsLabel")}</span>
+          <input
+            type="text"
+            className={styles.domainBox}
+            value={delta.watchAsns?.join(" ") ?? ""}
+            onChange={(e) => onChange({ ...delta, watchAsns: parseAsns(e.target.value) })}
+            placeholder={t("clients.watchAsnsHint")}
             autoComplete="off"
             spellCheck={false}
           />

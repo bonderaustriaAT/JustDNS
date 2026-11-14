@@ -19,6 +19,8 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [The overview](guides/overview.md) | The live dashboard: counters, graph, top clients |
 | [The query log](guides/query-log.md) | What was asked, by which device, how it was answered |
 | [Privacy dashboard](guides/privacy-trackers.md) | See which companies each device talks to, with tracker lookups attributed to the organisation behind them |
+| [Country & network of answers (GeoIP)](guides/geoip.md) | See the country and network (ASN) behind every answer, offline |
+| [World map & watched networks](guides/world-map.md) | A world map of where your devices phone home; watch a country or network to flag and alert on it |
 | [DNSSEC validation](guides/dnssec.md) | Check answer signatures and refuse tampered replies |
 | [Block & allow lists](guides/lists.md) | Block ads/malware, subscribe to feeds, allow or block single domains |
 | [Blocked services](guides/blocked-services.md) | Block whole services (TikTok, YouTube, …) with one switch, globally or per scope |

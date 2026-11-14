@@ -120,7 +120,24 @@ export interface ServerSettings {
   /// Bearer token that guards the Prometheus `GET /metrics` endpoint. Empty leaves
   /// the endpoint off. A write-only secret: blanked for non-admin readers.
   metricsToken: string;
+  /// Globally watched countries and networks (Privacy "where do my devices phone
+  /// home" map). Empty by default. Optional on the wire (an older server omits it).
+  geoWatch?: GeoWatch;
 }
+
+/** The globally watched countries and networks: answers that resolve into one are
+ *  highlighted in the log for every device and, when `onWatchedGeo` is on, can
+ *  raise a webhook alert. A group or device can watch more via its own delta.
+ *  Matches the Rust `GeoWatch`. */
+export interface GeoWatch {
+  /** Watched countries (ISO 3166-1 alpha-2, lower-case). */
+  countries: string[];
+  /** Watched networks, by ASN number. */
+  asns: number[];
+}
+
+/** An empty global watch set, used to backfill an older server. */
+export const EMPTY_GEO_WATCH: GeoWatch = { countries: [], asns: [] };
 
 /// When the daily and weekly activity reports are generated. Both cadences are
 /// off by default and configured on the Reports page; the timezone comes from
@@ -462,6 +479,9 @@ export interface NotificationSettings {
   onUpdate: boolean;
   onCertExpiry: boolean;
   onDeviceSpike: boolean;
+  /// Alert when an answer resolves into a watched country or network. Off by
+  /// default. Optional on the wire (an older server omits it).
+  onWatchedGeo?: boolean;
   certExpiryDays: number;
   spikeBlockedThreshold: number;
   spikeWindowMins: number;
@@ -479,6 +499,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   onUpdate: true,
   onCertExpiry: true,
   onDeviceSpike: false,
+  onWatchedGeo: false,
   certExpiryDays: 14,
   spikeBlockedThreshold: 100,
   spikeWindowMins: 10,
@@ -516,6 +537,10 @@ export interface QueryRow {
   /** The distinct countries and networks the answer addresses resolve into, from
    *  the offline GeoIP database. Absent when no database is loaded. */
   networks?: GeoInfo[];
+  /** Whether one of this row's networks is watched for this client (global, or its
+   *  group/device delta). Absent/false when nothing matched. Drives the log
+   *  highlight. */
+  watched?: boolean;
 }
 
 /** One cluster node as the explorer shows it: the stable id, the host a person
@@ -673,11 +698,18 @@ export interface PolicyDelta {
   allow: string[];
   /** Domains this scope always blocks. */
   block: string[];
+  /** Countries (ISO 3166-1 alpha-2, lower-case) this scope watches — answers that
+   *  resolve into one are highlighted in the log and can raise an alert. A pure
+   *  read-path marker, never folded into blocking. Optional on the wire (a
+   *  `#[serde(default)]` field): an older server omits it. */
+  watchCountries?: string[];
+  /** Networks (ASN numbers) this scope watches, same markieren/warnen semantics. */
+  watchAsns?: number[];
 }
 
 /** An empty delta, for a fresh scope. */
 export function emptyDelta(): PolicyDelta {
-  return { listsAdded: [], listsDisabled: [], allow: [], block: [] };
+  return { listsAdded: [], listsDisabled: [], allow: [], block: [], watchCountries: [], watchAsns: [] };
 }
 
 /** A device's policy as the client holds it while editing: its group (or null
