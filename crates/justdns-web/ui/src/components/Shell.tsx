@@ -474,6 +474,35 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className={styles.shell}>
+      {(follower || readOnly) && (
+        <div className={styles.globalBanner} role="status">
+          <svg
+            className={styles.globalBannerIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="4" y="11" width="16" height="9" rx="2" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+          <span>
+            {follower ? t("common.followerReadOnly") : t("common.readOnly")}
+            {follower && primaryUrl && (
+              <>
+                {" "}
+                <a href={primaryUrl} className={styles.globalBannerLink}>
+                  {primaryUrl}
+                </a>
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
       {drawerOpen && (
         <div className={styles.scrim} onClick={() => setDrawerOpen(false)} aria-hidden="true" />
       )}
@@ -557,25 +586,6 @@ export function Shell({ children }: { children: ReactNode }) {
         <InstallBanner />
 
         <main className={styles.main}>
-          {follower ? (
-            <p className={styles.readOnlyBanner} role="status">
-              {t("common.followerReadOnly")}
-              {primaryUrl && (
-                <>
-                  {" "}
-                  <a href={primaryUrl} className={styles.readOnlyLink}>
-                    {primaryUrl}
-                  </a>
-                </>
-              )}
-            </p>
-          ) : (
-            readOnly && (
-              <p className={styles.readOnlyBanner} role="status">
-                {t("common.readOnly")}
-              </p>
-            )
-          )}
           {children}
           <footer className={styles.footer}>
             JustDNS <span className={styles.version}>{__APP_VERSION__}</span>
