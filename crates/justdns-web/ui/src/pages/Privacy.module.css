@@ -6,6 +6,11 @@
   --cat-social: #7a5bb0;
   --cat-fingerprinting: #c2473f;
 
+  /* A lifted row surface for the device and drill-down lists, a clear step above
+     the card so the rows read as distinct tiles instead of blending in. */
+  --row: var(--surface-sunken);
+  --row-hover: color-mix(in srgb, var(--surface-sunken) 86%, var(--signal) 14%);
+
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -17,6 +22,8 @@
     --cat-analytics: #6bb0ea;
     --cat-social: #a98fda;
     --cat-fingerprinting: #e0695f;
+    --row: #1a443f;
+    --row-hover: #20514b;
   }
 }
 
@@ -25,6 +32,8 @@
   --cat-analytics: #6bb0ea;
   --cat-social: #a98fda;
   --cat-fingerprinting: #e0695f;
+  --row: #1a443f;
+  --row-hover: #20514b;
 }
 
 /* Header: title + intro on the left, window switcher on the right; it wraps
@@ -137,7 +146,7 @@
 }
 
 .tileFigure[data-tone="allowed"] {
-  color: var(--warn);
+  color: var(--danger);
 }
 
 .tileHint {
@@ -206,6 +215,63 @@
     align-items: center;
     gap: var(--space-3);
   }
+}
+
+/* The clickable variant used in the network company list: same row, plus a
+   chevron, as a full-width button that highlights on hover. */
+.companyButton {
+  inline-size: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+@media (min-width: 520px) {
+  .companyButton {
+    grid-template-columns: minmax(8rem, 1.1fr) minmax(4rem, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+}
+
+.companyButton:hover {
+  background: var(--row);
+  border-color: var(--line-strong);
+}
+
+.companyButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* A labelled sub-section inside the company detail (devices, domains). */
+.subSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.subTitle {
+  font-family: var(--font-display);
+  font-size: var(--step-0);
+  margin: 0;
+}
+
+.domainName {
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .companyName {
@@ -310,21 +376,21 @@
 .deviceRow {
   inline-size: 100%;
   appearance: none;
-  border: 1px solid var(--line);
-  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  background: var(--row);
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
   text-align: start;
   font: inherit;
+  color: inherit;
   display: flex;
   align-items: center;
   gap: var(--space-3);
 }
 
 .deviceRow:hover {
-  border-color: var(--line-strong);
-  background: var(--surface-sunken);
+  background: var(--row-hover);
 }
 
 .deviceRow:focus-visible {

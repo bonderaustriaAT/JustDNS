@@ -4,6 +4,15 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.25.1] - 2026-11-14
+
+- Geändert: **Feinschliff am Privatsphäre-Dashboard.** Ein Klick auf eine Firma öffnet
+  jetzt eine eigene Ansicht mit **welchen Geräten** sie kontaktiert haben und **welchen
+  genauen Domains** dahinter aufgelöst wurden (etwa `graph.facebook.com`,
+  `connect.facebook.net`), je mit geblocktem Anteil. Die Zahl „Durchgekommen" ist jetzt
+  rot, damit sie als die Zahl zum Hinschauen liest, die Geräte-Karten heben sich besser
+  von der Karte dahinter ab, und die einzeilige Schlagzeile ist entfallen.
+
 ## [0.25.0] - 2026-11-12
 
 - Neu: **Privatsphäre-Dashboard.** Eine neue Seite **Privatsphäre** (in der Seitenleiste,

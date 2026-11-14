@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type CompanyContact, type DeviceTrackers, type TrackerReport, type TrackerWindow } from "../lib/api";
+import {
+  api,
+  type CompanyContact,
+  type CompanyDevice,
+  type CompanyDomain,
+  type DeviceTrackers,
+  type TrackerReport,
+  type TrackerWindow,
+} from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import styles from "./Privacy.module.css";
@@ -18,6 +26,9 @@ const CATEGORY_LABEL: Record<string, MessageKey> = {
   fingerprinting: "privacy.cat.fingerprinting",
 };
 
+/** What the detail pane is focused on: one device, or one company. */
+type Selection = { kind: "device"; id: string } | { kind: "company"; id: string };
+
 function readWindow(): TrackerWindow {
   try {
     const saved = localStorage.getItem(WINDOW_KEY);
@@ -28,35 +39,48 @@ function readWindow(): TrackerWindow {
   return "day";
 }
 
-/** The share of a company's contacts that were blocked, 0–100, rounded. */
+/** The share of contacts that were blocked, 0–100, rounded. */
 function blockedPercent(contacts: number, blocked: number): number {
   if (contacts === 0) return 0;
   return Math.round((blocked / contacts) * 100);
 }
 
-/** One company row: a category dot, the name, a split blocked/through bar sized
- *  against the busiest company in the list, and the raw counts. */
-function CompanyRow({
-  company,
+/** A single meter row: an optional category dot, a label (with optional
+ *  sub-label), a split blocked/through bar sized against the busiest row in its
+ *  list, and the raw counts. Shared by every list in the page. */
+function MeterRow({
+  label,
+  mono,
+  dotCat,
+  sublabel,
+  contacts,
+  blocked,
   max,
+  title,
   t,
   nf,
 }: {
-  company: CompanyContact;
+  label: string;
+  mono?: boolean;
+  dotCat?: string;
+  sublabel?: string;
+  contacts: number;
+  blocked: number;
   max: number;
+  title?: string;
   t: ReturnType<typeof useI18n>["t"];
   nf: Intl.NumberFormat;
 }) {
-  const labelKey = CATEGORY_LABEL[company.category];
-  const categoryLabel = labelKey ? t(labelKey) : company.category;
-  const width = max === 0 ? 0 : (company.contacts / max) * 100;
-  const blockedWidth = company.contacts === 0 ? 0 : (company.blocked / company.contacts) * 100;
+  const width = max === 0 ? 0 : (contacts / max) * 100;
+  const blockedWidth = contacts === 0 ? 0 : (blocked / contacts) * 100;
   return (
     <li className={styles.companyRow}>
       <span className={styles.companyName}>
-        <span className={styles.dot} data-cat={company.category} aria-hidden="true" />
-        <span className={styles.companyOrg}>{company.org}</span>
-        <span className={styles.companyCat}>{categoryLabel}</span>
+        {dotCat && <span className={styles.dot} data-cat={dotCat} aria-hidden="true" />}
+        <span className={mono ? styles.domainName : styles.companyOrg} title={title}>
+          {label}
+        </span>
+        {sublabel && <span className={styles.companyCat}>{sublabel}</span>}
       </span>
       <span className={styles.bar} aria-hidden="true">
         <span className={styles.barTrack} style={{ inlineSize: `${Math.max(width, 3)}%` }}>
@@ -64,16 +88,21 @@ function CompanyRow({
         </span>
       </span>
       <span className={styles.companyMeta}>
-        <span className={styles.companyContacts}>{nf.format(company.contacts)}</span>
+        <span className={styles.companyContacts}>{nf.format(contacts)}</span>
         <span className={styles.companyShare}>
           {t("privacy.contactsOf", {
-            blocked: nf.format(company.blocked),
-            total: nf.format(company.contacts),
+            blocked: nf.format(blocked),
+            total: nf.format(contacts),
           })}
         </span>
       </span>
     </li>
   );
+}
+
+function categoryLabel(category: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const key = CATEGORY_LABEL[category];
+  return key ? t(key) : category;
 }
 
 /** The focused view for one device: its companies, busiest first. */
@@ -99,9 +128,91 @@ function DeviceDetail({
       {device.name && <p className={styles.deviceAddr}>{device.client}</p>}
       <ul className={styles.companyList}>
         {device.companies.map((company) => (
-          <CompanyRow key={company.org} company={company} max={max} t={t} nf={nf} />
+          <MeterRow
+            key={company.org}
+            label={company.org}
+            dotCat={company.category}
+            sublabel={categoryLabel(company.category, t)}
+            contacts={company.contacts}
+            blocked={company.blocked}
+            max={max}
+            t={t}
+            nf={nf}
+          />
         ))}
       </ul>
+    </section>
+  );
+}
+
+/** The focused view for one company: which devices reached it and which exact
+ *  names under it were looked up. */
+function CompanyDetail({
+  company,
+  onBack,
+  t,
+  nf,
+}: {
+  company: CompanyContact;
+  onBack: () => void;
+  t: ReturnType<typeof useI18n>["t"];
+  nf: Intl.NumberFormat;
+}) {
+  const devices: CompanyDevice[] = company.devices ?? [];
+  const domains: CompanyDomain[] = company.domains ?? [];
+  const deviceMax = devices.reduce((peak, d) => Math.max(peak, d.contacts), 0);
+  const domainMax = domains.reduce((peak, d) => Math.max(peak, d.contacts), 0);
+  return (
+    <section className={styles.card}>
+      <button type="button" className={styles.back} onClick={onBack}>
+        <span aria-hidden="true">‹</span> {t("privacy.allCompanies")}
+      </button>
+      <h2 className={styles.sectionTitle}>
+        <span className={styles.dot} data-cat={company.category} aria-hidden="true" />{" "}
+        {t("privacy.companyContacts", { org: company.org })}
+      </h2>
+
+      {devices.length > 0 && (
+        <div className={styles.subSection}>
+          <h3 className={styles.subTitle}>{t("privacy.companyDevicesTitle")}</h3>
+          <p className={styles.captionHint}>{t("privacy.companyDevicesHint")}</p>
+          <ul className={styles.companyList}>
+            {devices.map((device) => (
+              <MeterRow
+                key={device.client}
+                label={device.name ?? device.client}
+                title={device.name ? device.client : undefined}
+                contacts={device.contacts}
+                blocked={device.blocked}
+                max={deviceMax}
+                t={t}
+                nf={nf}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {domains.length > 0 && (
+        <div className={styles.subSection}>
+          <h3 className={styles.subTitle}>{t("privacy.companyDomainsTitle")}</h3>
+          <p className={styles.captionHint}>{t("privacy.companyDomainsHint")}</p>
+          <ul className={styles.companyList}>
+            {domains.map((domain) => (
+              <MeterRow
+                key={domain.name}
+                label={domain.name}
+                mono
+                contacts={domain.contacts}
+                blocked={domain.blocked}
+                max={domainMax}
+                t={t}
+                nf={nf}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -114,7 +225,7 @@ export function Privacy() {
   const [report, setReport] = useState<TrackerReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Selection | null>(null);
 
   useEffect(() => {
     try {
@@ -142,7 +253,8 @@ export function Privacy() {
     return () => controller.abort();
   }, [window]);
 
-  // Changing the window invalidates the drilldown, since a device may drop out.
+  // Changing the window invalidates the drilldown, since a device or company may
+  // drop out of the new window.
   useEffect(() => setSelected(null), [window]);
 
   const windowSwitch = (
@@ -192,22 +304,14 @@ export function Privacy() {
 
   const blockedShare = blockedPercent(report.totalContacts, report.totalBlocked);
   const companyMax = report.companies.reduce((peak, c) => Math.max(peak, c.contacts), 0);
-  const selectedDevice = selected
-    ? report.devices.find((d) => d.client === selected) ?? null
-    : null;
 
-  // The one-line "story" for non-technical readers: the busiest device and the
-  // company it reached most. Devices and companies are already sorted busiest
-  // first, so the first of each is the headline.
-  const topDevice = report.devices[0];
-  const storyCompany = topDevice?.companies[0];
-  const story =
-    topDevice && storyCompany
-      ? t("privacy.story", {
-          device: topDevice.name ?? topDevice.client,
-          org: storyCompany.org,
-          count: nf.format(storyCompany.contacts),
-        })
+  const selectedDevice =
+    selected?.kind === "device"
+      ? (report.devices.find((d) => d.client === selected.id) ?? null)
+      : null;
+  const selectedCompany =
+    selected?.kind === "company"
+      ? (report.companies.find((c) => c.org === selected.id) ?? null)
       : null;
 
   return (
@@ -236,15 +340,10 @@ export function Privacy() {
         </section>
       </div>
 
-      {story && <p className={styles.story}>{story}</p>}
-
-      {selectedDevice ? (
-        <DeviceDetail
-          device={selectedDevice}
-          onBack={() => setSelected(null)}
-          t={t}
-          nf={nf}
-        />
+      {selectedCompany ? (
+        <CompanyDetail company={selectedCompany} onBack={() => setSelected(null)} t={t} nf={nf} />
+      ) : selectedDevice ? (
+        <DeviceDetail device={selectedDevice} onBack={() => setSelected(null)} t={t} nf={nf} />
       ) : (
         <div className={styles.columns}>
           <section className={styles.card}>
@@ -253,9 +352,51 @@ export function Privacy() {
               {t("privacy.companiesHint", { window: t(`privacy.window.${window}`) })}
             </p>
             <ul className={styles.companyList}>
-              {report.companies.map((company) => (
-                <CompanyRow key={company.org} company={company} max={companyMax} t={t} nf={nf} />
-              ))}
+              {report.companies.map((company) => {
+                const width = companyMax === 0 ? 0 : (company.contacts / companyMax) * 100;
+                const blockedWidth =
+                  company.contacts === 0 ? 0 : (company.blocked / company.contacts) * 100;
+                return (
+                  <li key={company.org}>
+                    <button
+                      type="button"
+                      className={styles.companyButton}
+                      onClick={() => setSelected({ kind: "company", id: company.org })}
+                    >
+                      <span className={styles.companyName}>
+                        <span className={styles.dot} data-cat={company.category} aria-hidden="true" />
+                        <span className={styles.companyOrg}>{company.org}</span>
+                        <span className={styles.companyCat}>
+                          {categoryLabel(company.category, t)}
+                        </span>
+                      </span>
+                      <span className={styles.bar} aria-hidden="true">
+                        <span
+                          className={styles.barTrack}
+                          style={{ inlineSize: `${Math.max(width, 3)}%` }}
+                        >
+                          <span
+                            className={styles.barBlocked}
+                            style={{ inlineSize: `${blockedWidth}%` }}
+                          />
+                        </span>
+                      </span>
+                      <span className={styles.companyMeta}>
+                        <span className={styles.companyContacts}>{nf.format(company.contacts)}</span>
+                        <span className={styles.companyShare}>
+                          {t("privacy.contactsOf", {
+                            blocked: nf.format(company.blocked),
+                            total: nf.format(company.contacts),
+                          })}
+                        </span>
+                      </span>
+                      <span className={styles.chevron} aria-hidden="true">
+                        ›
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </section>
 
@@ -272,10 +413,13 @@ export function Privacy() {
                     <button
                       type="button"
                       className={styles.deviceRow}
-                      onClick={() => setSelected(device.client)}
+                      onClick={() => setSelected({ kind: "device", id: device.client })}
                     >
                       <span className={styles.deviceMain}>
-                        <span className={styles.deviceName} title={device.name ? device.client : undefined}>
+                        <span
+                          className={styles.deviceName}
+                          title={device.name ? device.client : undefined}
+                        >
                           {label}
                         </span>
                         {top && (

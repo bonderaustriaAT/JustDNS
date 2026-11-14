@@ -208,14 +208,36 @@ export interface ReportListItem {
 /** The window the privacy dashboard attributes over. */
 export type TrackerWindow = "day" | "week" | "month";
 
+/** One device in a company's drill-down: how much it reached that company. */
+export interface CompanyDevice {
+  client: string;
+  name?: string;
+  contacts: number;
+  blocked: number;
+  allowed: number;
+}
+
+/** One name in a company's drill-down: how often that exact domain was looked up. */
+export interface CompanyDomain {
+  name: string;
+  contacts: number;
+  blocked: number;
+  allowed: number;
+}
+
 /** One company a device (or the whole network) reached, with how many lookups
- *  went to it and how many of those the filter blocked versus let through. */
+ *  went to it and how many of those the filter blocked versus let through. For a
+ *  network-wide company, `devices` and `domains` carry its drill-down (which
+ *  devices reached it, which names under it were looked up); for a single
+ *  device's company they are omitted and default to empty. */
 export interface CompanyContact {
   org: string;
   category: string;
   contacts: number;
   blocked: number;
   allowed: number;
+  devices?: CompanyDevice[];
+  domains?: CompanyDomain[];
 }
 
 /** One device's tracker contacts over the window, with its company breakdown.
