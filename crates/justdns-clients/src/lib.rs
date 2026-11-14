@@ -80,6 +80,16 @@ pub struct PolicyDelta {
     pub allow: Vec<String>,
     /// Single domains this scope always blocks.
     pub block: Vec<String>,
+    /// Countries (ISO 3166-1 alpha-2, lower-case) this scope watches: answers that
+    /// resolve into one are highlighted in the log and can raise an alert. Purely a
+    /// read-path marker — it is never folded into the resolved blocking policy, so
+    /// the DNS hot path is unaffected.
+    #[serde(default)]
+    pub watch_countries: Vec<String>,
+    /// Networks (ASN numbers) this scope watches, with the same markieren/warnen
+    /// semantics as `watch_countries` and likewise outside the blocking policy.
+    #[serde(default)]
+    pub watch_asns: Vec<u32>,
 }
 
 impl PolicyDelta {
@@ -89,6 +99,8 @@ impl PolicyDelta {
             && self.lists_disabled.is_empty()
             && self.allow.is_empty()
             && self.block.is_empty()
+            && self.watch_countries.is_empty()
+            && self.watch_asns.is_empty()
     }
 }
 
@@ -281,6 +293,28 @@ impl ClientResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_watch_only_delta_is_not_empty_and_round_trips() {
+        let delta = PolicyDelta {
+            watch_countries: vec!["ru".to_owned()],
+            watch_asns: vec![13335],
+            ..Default::default()
+        };
+        assert!(
+            !delta.is_empty(),
+            "a watch-only delta still changes the scope"
+        );
+
+        // Round-trips through serde (camelCase on the wire), and an older payload
+        // without the watch fields loads them as empty via the struct default.
+        let json = serde_json::to_string(&delta).unwrap();
+        assert!(json.contains("watchCountries"));
+        let back: PolicyDelta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, delta);
+        let legacy: PolicyDelta = serde_json::from_str(r#"{"listsAdded":["ads"]}"#).unwrap();
+        assert!(legacy.watch_countries.is_empty() && legacy.watch_asns.is_empty());
+    }
 
     #[test]
     fn parses_and_masks_a_cidr_target() {

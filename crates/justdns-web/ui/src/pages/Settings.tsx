@@ -1375,6 +1375,19 @@ function NotificationsSection() {
             </>
           ) : null}
 
+          <Row
+            label={t("settings.notifications.onWatchedGeoLabel")}
+            description={t("settings.notifications.onWatchedGeoDesc")}
+            details={t("settings.notifications.onWatchedGeoDetails")}
+            control={
+              <Toggle
+                label={t("settings.notifications.onWatchedGeoLabel")}
+                checked={n.onWatchedGeo ?? false}
+                onChange={(v) => set("onWatchedGeo", v)}
+              />
+            }
+          />
+
           <div className={styles.action}>
             <button
               type="button"

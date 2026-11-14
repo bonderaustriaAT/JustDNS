@@ -17,10 +17,14 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use justdns_clients::{ClientResolver, ClientStore, Group};
 use justdns_config::{ConfigStore, Notifications, WebhookFormat};
 use justdns_dns::cert_store::CertStore;
-use justdns_store::Store;
+use justdns_geoip::{GeoDb, GeoInfo};
+use justdns_store::{QueryFilter, Store};
 use tracing::warn;
+
+use crate::geo_watch::{WatchSet, anything_watched, effective_watch};
 
 use crate::ha;
 use crate::update::UpdateChecker;
@@ -29,6 +33,16 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const MS_PER_DAY: i64 = 24 * 60 * 60 * 1_000;
 /// How many of the busiest blocked clients to look at per spike scan.
 const SPIKE_SCAN_LIMIT: usize = 20;
+/// How far back each watched-geo pass scans for answers resolving into a watched
+/// country or network. Kept short because a pass runs every minute; the cooldown
+/// below keeps a persistent contact from re-alerting.
+const WATCHED_GEO_WINDOW_MS: i64 = 5 * 60 * 1_000;
+/// How many recent events a watched-geo pass reads at most, so a very busy
+/// instance never scans an unbounded slice.
+const WATCHED_GEO_SCAN_LIMIT: usize = 20_000;
+/// Per-(device, watched network) cooldown: a still-ongoing contact alerts at most
+/// once an hour rather than every pass.
+const WATCHED_GEO_COOLDOWN_MS: i64 = 60 * 60 * 1_000;
 
 /// Post `title`/`body` to the configured webhook, in the shape its format expects.
 /// Returns a short error string on any failure (no URL, transport error, …).
@@ -176,6 +190,9 @@ struct AlertState {
     alerted_certs: HashSet<String>,
     /// Client address → last spike-alert time (ms), for a per-device cooldown.
     spike_last_ms: HashMap<String, i64>,
+    /// `"<client>|<country?>|<asn?>"` → last watched-geo alert time (ms), for a
+    /// per-device, per-network cooldown.
+    watched_last_ms: HashMap<String, i64>,
 }
 
 /// Watches the alert conditions and posts to the webhook. Reads the live config
@@ -187,6 +204,8 @@ pub struct AlertEvaluator {
     update: Arc<UpdateChecker>,
     certs: Option<Arc<CertStore>>,
     store: Store,
+    clients: ClientStore,
+    geo: Option<Arc<GeoDb>>,
     state: Mutex<AlertState>,
 }
 
@@ -197,6 +216,8 @@ impl AlertEvaluator {
         update: Arc<UpdateChecker>,
         certs: Option<Arc<CertStore>>,
         store: Store,
+        clients: ClientStore,
+        geo: Option<Arc<GeoDb>>,
     ) -> Self {
         Self {
             config,
@@ -204,6 +225,8 @@ impl AlertEvaluator {
             update,
             certs,
             store,
+            clients,
+            geo,
             state: Mutex::new(AlertState::default()),
         }
     }
@@ -241,6 +264,9 @@ impl AlertEvaluator {
         }
         if cfg.on_device_spike {
             self.collect_spike(cfg, now, &mut state, &mut out);
+        }
+        if cfg.on_watched_geo {
+            self.collect_watched_geo(now, &mut state, &mut out);
         }
         out
     }
@@ -382,6 +408,101 @@ impl AlertEvaluator {
         }
     }
 
+    /// Alert when a recent answer resolved into a watched country or network. The
+    /// watch set for each client is the union of the global list and the client's
+    /// group and device deltas, so a device-specific watch alerts only for that
+    /// device. Each node evaluates its own queries (a contact is local to the node
+    /// that served it), so there is no primary-sender gating here. Nothing is
+    /// scanned when no scope watches anything.
+    fn collect_watched_geo(
+        &self,
+        now: i64,
+        state: &mut AlertState,
+        out: &mut Vec<(String, String)>,
+    ) {
+        let Some(db) = &self.geo else {
+            return;
+        };
+        let global = self.config.get().geo_watch;
+        let devices = self.clients.view();
+        let groups_list = self.clients.groups();
+        if !anything_watched(&global, &devices, &groups_list) {
+            return;
+        }
+
+        // Drop cooldown entries that have aged out, so the map stays bounded by
+        // the networks contacted within the last cooldown window rather than
+        // growing for the life of the process (stale clients, un-watched nets).
+        state
+            .watched_last_ms
+            .retain(|_, last| now - *last < WATCHED_GEO_COOLDOWN_MS);
+
+        let groups: HashMap<String, Group> =
+            groups_list.into_iter().map(|g| (g.id.clone(), g)).collect();
+        let resolver = ClientResolver::new(devices);
+        let filter = QueryFilter {
+            before: None,
+            start_ms: Some(now - WATCHED_GEO_WINDOW_MS),
+            end_ms: Some(now),
+            sources: Vec::new(),
+            record_type: None,
+            response_code: None,
+            resolver: None,
+            origin: None,
+            clients: None,
+            needle: None,
+            limit: WATCHED_GEO_SCAN_LIMIT,
+        };
+        let rows = match self.store.history(&filter) {
+            Ok((rows, _)) => rows,
+            Err(error) => {
+                warn!(%error, "watched-geo scan query failed");
+                return;
+            }
+        };
+
+        // Resolve each distinct client's effective watch set once; a 5-minute scan
+        // of a busy node repeats the same handful of clients across many rows.
+        let mut watch_cache: HashMap<IpAddr, WatchSet> = HashMap::new();
+        for row in &rows {
+            let client = row.event.client;
+            let watch = watch_cache
+                .entry(client)
+                .or_insert_with(|| effective_watch(&global, resolver.resolve(client), &groups));
+            if watch.is_empty() {
+                continue;
+            }
+            // One query counts once per distinct network it resolved into.
+            let mut seen: HashSet<(Option<String>, Option<u32>)> = HashSet::new();
+            for ip in &row.event.addresses {
+                let Some(info) = db.lookup(*ip) else {
+                    continue;
+                };
+                if !seen.insert((info.country.clone(), info.asn)) {
+                    continue;
+                }
+                if !watch.matches(&info) {
+                    continue;
+                }
+                let dedup = format!("{client}|{:?}|{:?}", info.country, info.asn);
+                if let Some(last) = state.watched_last_ms.get(&dedup) {
+                    if now - last < WATCHED_GEO_COOLDOWN_MS {
+                        continue;
+                    }
+                }
+                state.watched_last_ms.insert(dedup, now);
+                out.push((
+                    "JustDNS: watched network contacted".to_owned(),
+                    format!(
+                        "Device {client} resolved {} into {} (watched).",
+                        row.event.name,
+                        describe_geo(&info)
+                    ),
+                ));
+            }
+        }
+    }
+
     /// Whether this node is the one that should send cluster-wide alerts: true on
     /// a standalone node or HA-off, and otherwise only for the lowest node id
     /// among this node and its currently-reachable peers.
@@ -409,6 +530,26 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
+}
+
+/// A short English label for a resolved network, for the alert body — e.g.
+/// "US AS13335 Cloudflare, Inc.".
+fn describe_geo(info: &GeoInfo) -> String {
+    let mut parts = Vec::new();
+    if let Some(country) = &info.country {
+        parts.push(country.to_uppercase());
+    }
+    if let Some(asn) = info.asn {
+        parts.push(format!("AS{asn}"));
+    }
+    if let Some(org) = &info.org {
+        parts.push(org.clone());
+    }
+    if parts.is_empty() {
+        "an unknown network".to_owned()
+    } else {
+        parts.join(" ")
+    }
 }
 
 #[cfg(test)]

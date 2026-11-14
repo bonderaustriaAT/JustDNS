@@ -55,6 +55,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
+mod geo_watch;
 mod ha;
 mod ha_crypto;
 mod metrics;
@@ -502,6 +503,8 @@ pub async fn serve(
                 state.update.clone(),
                 state.certs.clone(),
                 state.store.clone(),
+                state.clients.clone(),
+                state.geo.clone(),
             );
             std::thread::sleep(Duration::from_secs(60));
             loop {
@@ -6090,6 +6093,11 @@ struct NamedQueryEvent {
     /// loaded; empty (and omitted) otherwise, so the column simply stays blank.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     networks: Vec<GeoInfo>,
+    /// Whether one of this row's networks is watched for this client (global, or
+    /// its group/device delta). A read-path marker for the log highlight; omitted
+    /// when false, so an unwatched row and an older client both read it as off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    watched: bool,
 }
 
 /// Enrich a query's answer addresses with their country and network, dropping
@@ -6210,6 +6218,7 @@ async fn nodes(State(state): State<AppState>) -> Json<NodesResponse> {
 async fn queries(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
     State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<QueryParams>,
 ) -> Json<Vec<NamedQueryEvent>> {
@@ -6217,7 +6226,16 @@ async fn queries(
         .limit
         .unwrap_or(DEFAULT_QUERY_LIMIT)
         .min(MAX_QUERY_LIMIT);
-    let resolver = ClientResolver::new(clients.view());
+    let devices = clients.view();
+    let groups_list = clients.groups();
+    let global_watch = config.get().geo_watch;
+    let watch_active =
+        geo.is_some() && geo_watch::anything_watched(&global_watch, &devices, &groups_list);
+    let groups_map: std::collections::HashMap<String, _> =
+        groups_list.into_iter().map(|g| (g.id.clone(), g)).collect();
+    let resolver = ClientResolver::new(devices);
+    let mut watcher =
+        geo_watch::WatchResolver::new(&global_watch, &resolver, &groups_map, watch_active);
 
     let needle = params
         .q
@@ -6256,8 +6274,10 @@ async fn queries(
         .into_iter()
         .map(|event| {
             let networks = geo_networks(&geo, &event.addresses);
+            let watched = watcher.watched(event.client, &networks);
             NamedQueryEvent {
                 device_name: resolver.name_for(event.client).map(str::to_owned),
+                watched,
                 event,
                 origin: String::new(),
                 networks,
@@ -6323,6 +6343,7 @@ struct HistoryResponse {
 async fn queries_history(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
     State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<HistoryParams>,
 ) -> Json<HistoryResponse> {
@@ -6429,13 +6450,24 @@ async fn queries_history(
             }
         };
 
-    let resolver = ClientResolver::new(clients.view());
+    let devices = clients.view();
+    let groups_list = clients.groups();
+    let global_watch = config.get().geo_watch;
+    let watch_active =
+        geo.is_some() && geo_watch::anything_watched(&global_watch, &devices, &groups_list);
+    let groups_map: std::collections::HashMap<String, _> =
+        groups_list.into_iter().map(|g| (g.id.clone(), g)).collect();
+    let resolver = ClientResolver::new(devices);
+    let mut watcher =
+        geo_watch::WatchResolver::new(&global_watch, &resolver, &groups_map, watch_active);
     let rows = events
         .into_iter()
         .map(|row| {
             let networks = geo_networks(&geo, &row.event.addresses);
+            let watched = watcher.watched(row.event.client, &networks);
             NamedQueryEvent {
                 device_name: resolver.name_for(row.event.client).map(str::to_owned),
+                watched,
                 event: row.event,
                 origin: row.origin,
                 networks,
@@ -6473,6 +6505,7 @@ struct DnssecResponse {
 async fn dnssec(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(config): State<ConfigStore>,
     State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<DnssecParams>,
 ) -> Json<DnssecResponse> {
@@ -6482,7 +6515,16 @@ async fn dnssec(
         .unwrap_or(DEFAULT_QUERY_LIMIT)
         .min(MAX_QUERY_LIMIT);
     let want = params.status.as_deref().and_then(DnssecStatus::from_label);
-    let resolver = ClientResolver::new(clients.view());
+    let devices = clients.view();
+    let groups_list = clients.groups();
+    let global_watch = config.get().geo_watch;
+    let watch_active =
+        geo.is_some() && geo_watch::anything_watched(&global_watch, &devices, &groups_list);
+    let groups_map: std::collections::HashMap<String, _> =
+        groups_list.into_iter().map(|g| (g.id.clone(), g)).collect();
+    let resolver = ClientResolver::new(devices);
+    let mut watcher =
+        geo_watch::WatchResolver::new(&global_watch, &resolver, &groups_map, watch_active);
 
     // Scan the hot ring newest-first for entries that carry a verdict, keeping
     // those matching the requested one (or all, when none is asked for).
@@ -6494,8 +6536,10 @@ async fn dnssec(
         .take(limit)
         .map(|event| {
             let networks = geo_networks(&geo, &event.addresses);
+            let watched = watcher.watched(event.client, &networks);
             NamedQueryEvent {
                 device_name: resolver.name_for(event.client).map(str::to_owned),
+                watched,
                 event,
                 origin: String::new(),
                 networks,

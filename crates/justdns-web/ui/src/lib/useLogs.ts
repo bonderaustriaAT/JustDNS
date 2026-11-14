@@ -81,6 +81,9 @@ export interface LogRow {
   /** The distinct countries and networks those addresses resolve into, from the
    *  offline GeoIP database; absent when no database is loaded. */
   networks?: GeoInfo[];
+  /** Whether one of this row's networks is watched for its client. Drives the
+   *  log highlight and badge. */
+  watched?: boolean;
   durationMs: number;
   /** The peer node this row was pulled from, in a cluster; absent for this
    *  node's own queries. */
@@ -121,6 +124,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     answers: row.answers,
     addresses: row.addresses ?? [],
     networks: row.networks,
+    watched: row.watched,
     durationMs: row.duration_ms,
     origin: row.origin,
   };

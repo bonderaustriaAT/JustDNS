@@ -7,10 +7,14 @@ import {
   type CompanyDevice,
   type CompanyDomain,
   type DeviceTrackers,
+  type GeoWatch,
   type NetworkReport,
+  type ServerSettings,
   type TrackerReport,
   type TrackerWindow,
 } from "../lib/api";
+import { Toggle } from "../components/Toggle";
+import { WorldMap } from "../components/WorldMap";
 import { countryName, flagEmoji } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
@@ -428,18 +432,26 @@ function NetworksSection({
   t,
   locale,
   nf,
+  canWrite,
 }: {
   window: TrackerWindow;
   t: ReturnType<typeof useI18n>["t"];
   locale: string;
   nf: Intl.NumberFormat;
+  canWrite: boolean;
 }) {
   const [report, setReport] = useState<NetworkReport | null>(null);
   const [available, setAvailable] = useState(true);
+  const [country, setCountry] = useState<string | null>(null);
+  // The full settings object, held so a watch toggle can PUT it back with only
+  // `geoWatch` changed. Only loaded/used by an admin on the writable node.
+  const [settings, setSettings] = useState<ServerSettings | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     setReport(null);
+    setCountry(null);
     api
       .privacyNetworks(window, controller.signal)
       .then((data) => {
@@ -459,10 +471,83 @@ function NetworksSection({
     return () => controller.abort();
   }, [window]);
 
+  // Load settings once, for the watch toggles. Only an admin on the writable node
+  // can change them, so skip the fetch otherwise.
+  useEffect(() => {
+    if (!canWrite) return;
+    const controller = new AbortController();
+    api
+      .settings(controller.signal)
+      .then(setSettings)
+      .catch(() => {
+        /* a transient failure just leaves the toggles unavailable this load */
+      });
+    return () => controller.abort();
+  }, [canWrite]);
+
+  // Aggregate the per-ASN networks by country for the choropleth, memoised on the
+  // report so an unrelated re-render (selecting a country, a watch toggle, the
+  // settings fetch resolving) does not hand WorldMap a fresh array and force a full
+  // SVG re-paint. A network with no country (private/unknown address) never lands
+  // on the map. Computed before the early return below to keep hook order stable.
+  const { mapCountries, mapMax } = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const net of report?.networks ?? []) {
+      if (!net.country) continue;
+      const code = net.country.toLowerCase();
+      totals.set(code, (totals.get(code) ?? 0) + net.contacts);
+    }
+    const countries = Array.from(totals, ([code, contacts]) => ({ code, contacts }));
+    return { mapCountries: countries, mapMax: countries.reduce((peak, c) => Math.max(peak, c.contacts), 0) };
+  }, [report]);
+
   if (!available || !report || report.totalContacts === 0 || report.networks.length === 0) {
     return null;
   }
   const max = report.networks.reduce((peak, n) => Math.max(peak, n.contacts), 0);
+
+  // Selecting a country on the map filters the network list to it.
+  const shownNetworks = country
+    ? report.networks.filter((net) => net.country?.toLowerCase() === country)
+    : report.networks;
+  const selectedLabel = country
+    ? `${flagEmoji(country)} ${countryName(country, locale) || country.toUpperCase()}`.trim()
+    : "";
+
+  // The current global watch set, for the toggles. Writing is gated on `canWrite`
+  // and a loaded settings object; otherwise the map and list are read-only.
+  const geoWatch: GeoWatch = settings?.geoWatch ?? { countries: [], asns: [] };
+  const watchedCountries = new Set(geoWatch.countries.map((c) => c.toLowerCase()));
+  const watchedAsns = new Set(geoWatch.asns);
+  const showWatch = canWrite && settings !== null;
+
+  // Persist a changed watch set by PUTting the whole settings back with only
+  // `geoWatch` replaced. Optimistic: on failure the previous settings are kept.
+  const persistWatch = (next: GeoWatch) => {
+    if (!settings || saving) return;
+    const previous = settings;
+    const updated = { ...settings, geoWatch: next };
+    setSettings(updated);
+    setSaving(true);
+    api
+      .saveSettings(updated)
+      .then((saved) => setSettings(saved))
+      .catch(() => setSettings(previous))
+      .finally(() => setSaving(false));
+  };
+  const toggleCountry = (code: string) => {
+    const lower = code.toLowerCase();
+    const countries = watchedCountries.has(lower)
+      ? geoWatch.countries.filter((c) => c.toLowerCase() !== lower)
+      : [...geoWatch.countries, lower];
+    persistWatch({ ...geoWatch, countries });
+  };
+  const toggleAsn = (asn: number) => {
+    const asns = watchedAsns.has(asn)
+      ? geoWatch.asns.filter((a) => a !== asn)
+      : [...geoWatch.asns, asn];
+    persistWatch({ ...geoWatch, asns });
+  };
 
   return (
     <section className={styles.card}>
@@ -470,8 +555,38 @@ function NetworksSection({
       <p className={styles.captionHint}>
         {t("privacy.networksHint", { window: t(`privacy.window.${window}`) })}
       </p>
+      {mapCountries.length > 0 && (
+        <WorldMap
+          countries={mapCountries}
+          max={mapMax}
+          selected={country}
+          onSelect={setCountry}
+          locale={locale}
+          t={t}
+          nf={nf}
+        />
+      )}
+      {country && (
+        <div className={styles.mapFilter}>
+          <span className={styles.mapFilterName}>{selectedLabel}</span>
+          {showWatch && (
+            <span className={styles.watchControl}>
+              <Toggle
+                checked={watchedCountries.has(country)}
+                onChange={() => toggleCountry(country)}
+                label={t("privacy.watchCountryLabel", { country: selectedLabel })}
+                disabled={saving}
+              />
+              <span className={styles.watchText}>{t("privacy.watchCountry")}</span>
+            </span>
+          )}
+          <button type="button" className={styles.mapFilterClear} onClick={() => setCountry(null)}>
+            {t("privacy.mapClear")}
+          </button>
+        </div>
+      )}
       <ul className={styles.companyList}>
-        {report.networks.map((net, i) => {
+        {shownNetworks.map((net, i) => {
           const width = max === 0 ? 0 : (net.contacts / max) * 100;
           const flag = flagEmoji(net.country);
           const land = countryName(net.country, locale);
@@ -490,18 +605,34 @@ function NetworksSection({
                 <span className={styles.barTrack} style={{ inlineSize: `${Math.max(width, 3)}%` }} />
               </span>
               <span className={styles.companyMeta}>
+                {showWatch && country && net.asn != null && (
+                  <span className={styles.watchControl}>
+                    <Toggle
+                      checked={watchedAsns.has(net.asn)}
+                      onChange={() => toggleAsn(net.asn!)}
+                      label={t("privacy.watchAsnLabel", { asn: `AS${net.asn}` })}
+                      disabled={saving}
+                    />
+                    <span className={styles.watchText}>{t("privacy.watchAsn")}</span>
+                  </span>
+                )}
                 <span className={styles.companyContacts}>{nf.format(net.contacts)}</span>
               </span>
             </li>
           );
         })}
       </ul>
+      {mapCountries.length > 0 && <p className={styles.mapCredit}>{t("privacy.mapCredit")}</p>}
     </section>
   );
 }
 
 export function Privacy() {
   const { t, locale } = useI18n();
+  const { isAdmin, canEdit } = useAuth();
+  // Watching is a global setting change: admin only, and (on an HA cluster) only
+  // on the primary — the same gate `canEdit` applies to the writable node.
+  const canWriteGeo = isAdmin && canEdit;
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 
   const [window, setWindow] = useState<TrackerWindow>(readWindow);
@@ -731,7 +862,7 @@ export function Privacy() {
             </ul>
           </section>
         </div>
-        <NetworksSection window={window} t={t} locale={locale} nf={nf} />
+        <NetworksSection window={window} t={t} locale={locale} nf={nf} canWrite={canWriteGeo} />
         </>
       )}
 

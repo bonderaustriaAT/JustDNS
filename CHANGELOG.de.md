@@ -4,6 +4,19 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.32.0] - 2026-11-14
+
+- Neu: **Weltkarte, wohin die Geräte telefonieren – und beobachtete Netze.** Der Abschnitt
+  „Wohin telefonieren deine Geräte" im Privatsphäre-Dashboard beginnt jetzt mit einer offline
+  eingebetteten Weltkarte, die jedes Land nach Kontaktvolumen einfärbt; ein Klick auf ein Land
+  filtert die Netz-Liste darauf. Du kannst ein Land oder Netz (ASN) als **beobachtet**
+  markieren – global über die Karte oder pro Gerät und Gruppe in deren Richtlinie – und JustDNS
+  hebt dann jede passende Antwort im Protokoll mit einem bernsteinfarbenen Abzeichen hervor und
+  kann bei Kontakt einen Webhook-Alarm senden (standardmäßig aus). Beobachten ist rein ein
+  Lese-Marker: es markiert und alarmiert, blockt aber nichts und berührt den DNS-Hotpath nicht.
+  Die Karte ist ein gebündeltes, offline eingebettetes SVG (Simple World Map von Al MacDonald
+  und Fritz Lekschas, CC BY-SA 3.0) – keine Map-Bibliothek, keine Netzwerkaufrufe.
+
 ## [0.31.0] - 2026-11-14
 
 - Geändert: **Cluster-Update einfacher und sicherer.** Das Aktualisieren des ganzen Clusters

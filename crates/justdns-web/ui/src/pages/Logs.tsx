@@ -526,7 +526,12 @@ function LogList({
         const key = `${row.at_ms}-${index}`;
         const open = openKey === key;
         return (
-          <li key={key} className={styles.item} data-blocked={row.isBlocked || undefined}>
+          <li
+            key={key}
+            className={styles.item}
+            data-blocked={row.isBlocked || undefined}
+            data-watched={row.watched || undefined}
+          >
             <button
               type="button"
               className={styles.row}
@@ -554,6 +559,11 @@ function LogList({
                 ) : null}
                 {row.networks && row.networks.length > 0 ? (
                   <span className={styles.networks}>
+                    {row.watched && (
+                      <span className={styles.watchedBadge} title={t("logs.watchedHint")}>
+                        {t("logs.watchedBadge")}
+                      </span>
+                    )}
                     {row.networks.map((net, i) => (
                       <span
                         key={i}
