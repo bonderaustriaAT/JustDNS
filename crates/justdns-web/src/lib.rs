@@ -4767,7 +4767,8 @@ async fn privacy_trackers(
 
 /// Block request from the privacy dashboard: a whole company by `org` (every
 /// domain the catalogue attributes to it) or a single `domain`. Exactly one is
-/// expected; `org` wins if both are sent.
+/// expected; `org` wins if both are sent. With `client` (a device address) the
+/// block applies to that one device's own policy instead of the global list.
 #[derive(Deserialize)]
 struct PrivacyBlockBody {
     #[serde(default)]
@@ -4775,9 +4776,14 @@ struct PrivacyBlockBody {
     #[serde(default)]
     domain: Option<String>,
     /// Optional provenance tag for a single-domain block (the company it was
-    /// blocked from); ignored for a company block, which tags with the org name.
+    /// blocked from); ignored for a company block, which tags with the org name,
+    /// and ignored for a per-device block, which has no note.
     #[serde(default)]
     note: Option<String>,
+    /// When set, the block targets this device's own policy (by its address)
+    /// rather than the global block list.
+    #[serde(default)]
+    client: Option<String>,
 }
 
 /// How many entries a block action newly added (a re-block adds nothing).
@@ -4788,12 +4794,14 @@ struct PrivacyBlockResult {
 }
 
 /// Act on what the privacy dashboard shows: add a whole company's catalogue
-/// domains (or a single domain) to the user's block list. A content change, so
+/// domains (or a single domain) to the block list. A content change, so
 /// Editor-gated like the other list edits, and idempotent — re-blocking simply
-/// adds nothing. Company-wide blocks tag each entry with the company name so the
-/// block list shows where it came from.
+/// adds nothing. Without `client` it adds to the global block list (company-wide
+/// blocks tag each entry with the company name); with `client` it adds to that
+/// one device's own policy instead.
 async fn privacy_block(
     State(lists): State<ListStore>,
+    State(clients): State<ClientStore>,
     Json(body): Json<PrivacyBlockBody>,
 ) -> Result<Json<PrivacyBlockResult>, (StatusCode, String)> {
     let org = body.org.as_deref().map(str::trim).filter(|s| !s.is_empty());
@@ -4802,11 +4810,18 @@ async fn privacy_block(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    let client = body
+        .client
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
-    let added = if let Some(org) = org {
-        let domains = justdns_filter::tracker_domains_for_org(org)
+    // Resolve which domains this request blocks (and, for the global list, the
+    // note each entry carries), independent of where they land.
+    let (domains, note): (Vec<&str>, Option<&str>) = if let Some(org) = org {
+        let catalogue = justdns_filter::tracker_domains_for_org(org)
             .ok_or((StatusCode::NOT_FOUND, format!("unknown company: {org}")))?;
-        lists.add_blocks(domains, Some(org)).map_err(list_error)?
+        (catalogue.to_vec(), Some(org))
     } else if let Some(domain) = domain {
         if justdns_filter::parse_rule(domain).is_none() {
             return Err((StatusCode::BAD_REQUEST, format!("invalid domain: {domain}")));
@@ -4816,12 +4831,20 @@ async fn privacy_block(
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty());
-        lists.add_blocks(&[domain], note).map_err(list_error)?
+        (vec![domain], note)
     } else {
         return Err((
             StatusCode::BAD_REQUEST,
             "either org or domain is required".to_owned(),
         ));
+    };
+
+    let added = if let Some(client) = client {
+        clients
+            .add_device_blocks(client, &domains)
+            .map_err(client_error)?
+    } else {
+        lists.add_blocks(&domains, note).map_err(list_error)?
     };
 
     Ok(Json(PrivacyBlockResult { added }))
@@ -5931,6 +5954,75 @@ mod tests {
             .await
             .unwrap();
         assert!(body_of(res).await.contains("doubleclick.net"));
+    }
+
+    #[tokio::test]
+    async fn privacy_block_can_target_one_device() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        let post = |path: &'static str, json: &'static str| {
+            let app = app.clone();
+            let cookie = cookie.clone();
+            async move {
+                app.oneshot(
+                    Request::post(path)
+                        .header("content-type", "application/json")
+                        .header("cookie", &cookie)
+                        .body(Body::from(json))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let get = |path: &'static str| {
+            let app = app.clone();
+            let cookie = cookie.clone();
+            async move {
+                app.oneshot(
+                    Request::get(path)
+                        .header("cookie", &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // Block a whole company for one device.
+        let res = post(
+            "/api/privacy/block",
+            r#"{"org":"Google","client":"192.168.20.10"}"#,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let added =
+            serde_json::from_str::<serde_json::Value>(&body_of(res).await).unwrap()["added"]
+                .as_u64()
+                .unwrap();
+        assert!(added >= 2, "Google has several domains");
+
+        // Re-blocking for the same device adds nothing.
+        let res = post(
+            "/api/privacy/block",
+            r#"{"org":"Google","client":"192.168.20.10"}"#,
+        )
+        .await;
+        assert!(body_of(res).await.contains("\"added\":0"));
+
+        // The device now carries the Google domains in its own policy …
+        let devices = body_of(get("/api/clients").await).await;
+        assert!(devices.contains("192.168.20.10"), "{devices}");
+        assert!(devices.contains("doubleclick.net"), "{devices}");
+
+        // … while the global block list was left untouched.
+        let lists = body_of(get("/api/lists").await).await;
+        assert!(
+            !lists.contains("doubleclick.net"),
+            "per-device block must not touch the global list: {lists}"
+        );
     }
 
     /// A router whose `/metrics` endpoint is configured with `token` (or off when
