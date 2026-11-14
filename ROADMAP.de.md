@@ -143,6 +143,11 @@ langfristig.
   Aufschlüsselung je Gerät — über 24 Stunden, 7 Tage oder 30 Tage. Der Firmenkatalog ist
   kuratiert und einkompiliert, kein externer Feed. Für jeden angemeldeten Benutzer lesbar;
   node-lokal. Siehe [den Leitfaden](docs/guides/privacy-trackers.de.md).
+- [x] **Land und Netz der Antworten (GeoIP).** Jede Antwort-Adresse ihrem Land und Netz (ASN)
+  aus einer lokalen, **offline** Datenbank zuordnen — Flaggen und Netzbetreiber im Protokoll,
+  ein Filter nach Land oder ASN und ein Abschnitt **Wohin telefonieren deine Geräte** auf der
+  Privatsphäre-Seite. Mit DB-IP Lite sofort einsatzbereit; mit eigenen MaxMind-GeoLite2-Dateien
+  austauschbar. Siehe [den Leitfaden](docs/guides/geoip.de.md).
 
 ## Phase 6 — Hochverfügbarkeit _(fertig)_
 

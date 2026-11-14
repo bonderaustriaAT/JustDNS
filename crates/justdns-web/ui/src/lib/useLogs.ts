@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type HistoryCursor, type HistoryFilter, type QueryRow, type QuerySource } from "./api";
+import {
+  api,
+  type GeoInfo,
+  type HistoryCursor,
+  type HistoryFilter,
+  type QueryRow,
+  type QuerySource,
+} from "./api";
 import {
   displayName,
   recordTypeDescription,
@@ -71,6 +78,9 @@ export interface LogRow {
   answers: number;
   /** The IPs the query resolved to, in answer order. */
   addresses: string[];
+  /** The distinct countries and networks those addresses resolve into, from the
+   *  offline GeoIP database; absent when no database is loaded. */
+  networks?: GeoInfo[];
   durationMs: number;
   /** The peer node this row was pulled from, in a cluster; absent for this
    *  node's own queries. */
@@ -110,6 +120,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     rcodeTone: rcodeTone(row.response_code, isBlocked),
     answers: row.answers,
     addresses: row.addresses ?? [],
+    networks: row.networks,
     durationMs: row.duration_ms,
     origin: row.origin,
   };
@@ -120,7 +131,13 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
  *  the list never flashes empty between polls or while a new search resolves.
  *  `enabled` gates the whole hook: the explorer turns it off while a facet
  *  filter is active, so the ring poll stops and the history view takes over. */
-export function useLogs(query: string, live: boolean, enabled = true): LogsState {
+export function useLogs(
+  query: string,
+  live: boolean,
+  enabled = true,
+  geoCountry?: string,
+  geoAsn?: number,
+): LogsState {
   const { lang, t, locale } = useI18n();
   const [state, setState] = useState<LogsState>({
     rows: null,
@@ -137,10 +154,12 @@ export function useLogs(query: string, live: boolean, enabled = true): LogsState
     let active = true;
     const controller = new AbortController();
     const fmt = formatters(locale);
+    const geo =
+      geoCountry || geoAsn != null ? { country: geoCountry, asn: geoAsn } : undefined;
 
     async function load() {
       try {
-        const rows = await api.queries(LOG_LIMIT, query, controller.signal);
+        const rows = await api.queries(LOG_LIMIT, query, controller.signal, geo);
         if (!active) return;
         setState({
           rows: rows.map((row) => toLogRow(row, lang, fmt)),
@@ -165,8 +184,10 @@ export function useLogs(query: string, live: boolean, enabled = true): LogsState
       if (timer) clearInterval(timer);
     };
     // `lang`/`locale` are in the deps so the labels and the time formatting are
-    // rebuilt in the new language when the user switches.
-  }, [query, live, enabled, lang, locale, t]);
+    // rebuilt in the new language when the user switches. `geoCountry`/`geoAsn`
+    // are primitives so a changed geo filter re-runs the poll without an object
+    // identity re-triggering it every render.
+  }, [query, live, enabled, geoCountry, geoAsn, lang, locale, t]);
 
   return state;
 }

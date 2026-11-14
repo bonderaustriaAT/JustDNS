@@ -51,6 +51,41 @@ COPY --from=ui /ui/dist crates/justdns-web/ui/dist
 RUN cargo build --release --locked --bin justdns \
     && cp target/release/justdns /usr/local/bin/justdns
 
+# Fetch the offline GeoIP databases (DB-IP Lite, CC BY 4.0) so the dashboard can
+# show the country and network each answer resolves into out of the box, with no
+# runtime network lookups. The free DB-IP files are published monthly with the
+# month in the path, so we try the current month and fall back to the previous
+# one. A failed download is NOT fatal: the binary degrades gracefully with no
+# database (the feature simply stays off), so a db-ip.com outage never blocks
+# building the image. An operator can override these at runtime with their own
+# MaxMind GeoLite2 files via JUSTDNS_GEOIP_COUNTRY_DB / JUSTDNS_GEOIP_ASN_DB; see
+# docs/guides/geoip.md for attribution and the bring-your-own setup.
+FROM debian:13.7-slim AS geoip
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /geoip
+# Pin the fallback to the first of this month minus one day, so it lands in the
+# previous month on every date — `date -d 'last month'` would roll forward to the
+# current month on the 29th-31st and defeat the fallback.
+RUN set -eu; \
+    base="https://download.db-ip.com/free"; \
+    prev="$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m)"; \
+    for kind in country asn; do \
+      ok=0; \
+      for month in "$(date -u +%Y-%m)" "$prev"; do \
+        if curl -fsSL "$base/dbip-$kind-lite-$month.mmdb.gz" -o "dbip-$kind-lite.mmdb.gz"; then \
+          ok=1; break; \
+        fi; \
+      done; \
+      if [ "$ok" = 1 ]; then \
+        gunzip "dbip-$kind-lite.mmdb.gz"; \
+      else \
+        echo "WARNING: could not download dbip-$kind-lite; GeoIP enrichment stays off until a database is provided" >&2; \
+        rm -f "dbip-$kind-lite.mmdb.gz"; \
+      fi; \
+    done
+
 # Runtime: just the binary. TLS roots are compiled in (webpki-roots), so no
 # system certificate store is needed for DoT/DoH upstreams. curl is added only
 # so the container HEALTHCHECK below can probe the web endpoint.
@@ -59,6 +94,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
+# The bundled offline GeoIP databases; the binary's defaults point here. Copied
+# as a directory so a download that failed above (leaving one or both files out)
+# still builds — the binary just finds no database and leaves the feature off.
+COPY --from=geoip /geoip/ /usr/share/justdns/geoip/
 
 # The release version (git tag) so the backend can report it at /api/diag. The
 # build arg is the same one the UI stage bakes into the bundle; re-declaring it
@@ -81,7 +120,9 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_TLS_DIR=/data/tls \
     JUSTDNS_CERTS_DIR=/data/certs \
     JUSTDNS_SYSLOG_DIR=/data/logs \
-    JUSTDNS_SECRET_KEY_PATH=/keys/master.key
+    JUSTDNS_SECRET_KEY_PATH=/keys/master.key \
+    JUSTDNS_GEOIP_COUNTRY_DB=/usr/share/justdns/geoip/dbip-country-lite.mmdb \
+    JUSTDNS_GEOIP_ASN_DB=/usr/share/justdns/geoip/dbip-asn-lite.mmdb
 
 # The query log and secret files persist here; mount a volume to keep them
 # across restarts.

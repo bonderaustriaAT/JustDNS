@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::{FromRef, FromRequestParts, Path, Query, Request, State};
+
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
@@ -33,6 +34,7 @@ use justdns_config::{BlockPage, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::cert_store::{CertInfo, CertRecord, CertStore};
 use justdns_filter::Blocker;
+use justdns_geoip::{GeoDb, GeoInfo};
 use justdns_lists::{
     ListEntry, ListError, ListKind, ListStore, ListsView, RefreshOutcome, Subscription, UserLists,
 };
@@ -234,6 +236,12 @@ struct AppState {
     /// reads it. Idle until an admin starts one; node-local and not persisted (a
     /// restart — including the primary's own update at the end — resets it).
     cluster_update: Arc<Mutex<ClusterUpdate>>,
+    /// Offline GeoIP databases for enriching answer addresses with their country
+    /// and network (ASN) on the read path. `None` when no database is present, in
+    /// which case the log and privacy views simply carry no geo data. Node-local:
+    /// the database paths come from the binary's environment, never the synced
+    /// settings, so a bring-your-own path on one node never leaks to the cluster.
+    geo: Option<Arc<GeoDb>>,
 }
 
 impl FromRef<AppState> for Store {
@@ -332,6 +340,12 @@ impl FromRef<AppState> for ReportStore {
     }
 }
 
+impl FromRef<AppState> for Option<Arc<GeoDb>> {
+    fn from_ref(state: &AppState) -> Self {
+        state.geo.clone()
+    }
+}
+
 /// Bind `addr` and serve the API and embedded UI until the listener fails.
 ///
 /// This is the web layer's composition root: it takes each shared store the
@@ -360,6 +374,7 @@ pub async fn serve(
     status: Arc<RuntimeStatus>,
     log_level: Arc<LogLevelControl>,
     metrics_token: Option<Arc<str>>,
+    geo: Option<Arc<GeoDb>>,
 ) -> std::io::Result<()> {
     // The update checker reads GitHub (public tags) and mediates the on-disk
     // protocol the updater sidecar watches. The periodic check runs on its own
@@ -413,6 +428,7 @@ pub async fn serve(
         ha,
         reports,
         cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
+        geo,
     };
 
     // Fill the block-page server IP from this node's own cluster address when the
@@ -571,6 +587,7 @@ fn router(state: AppState) -> Router {
         .route("/api/queries", get(queries))
         .route("/api/queries/history", get(queries_history))
         .route("/api/privacy/trackers", get(privacy_trackers))
+        .route("/api/privacy/networks", get(privacy_networks))
         .route("/api/privacy/block", post(privacy_block))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
@@ -5815,12 +5832,242 @@ async fn privacy_block(
     Ok(Json(PrivacyBlockResult { added }))
 }
 
+/// How many events the "where answers resolve" scan reads at most over its
+/// window, and how many networks / devices the drill-downs carry — busiest first,
+/// enough for the view without an unbounded payload.
+const NETWORK_SCAN_LIMIT: usize = 200_000;
+const NETWORK_TOP: usize = 60;
+const NETWORK_TOP_DEVICES: usize = 50;
+
+/// One destination network the answers resolved into (an ASN, or a country-only
+/// bucket when the database knew the country but not the network), with how many
+/// resolved contacts went to it over the window. `devices` is filled for the
+/// network-wide list and left empty inside a single device's breakdown.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct NetworkContact {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asn: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    org: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    country: Option<String>,
+    contacts: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    devices: Vec<NetworkDevice>,
+}
+
+/// One device in a network's drill-down: how many of its answers resolved there.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct NetworkDevice {
+    client: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    contacts: u64,
+}
+
+/// One device's outward destinations over the window: its total resolved contacts
+/// and the networks it reached most.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceNetworks {
+    client: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    contacts: u64,
+    networks: Vec<NetworkContact>,
+}
+
+/// The "where your devices phone home" payload: the network-wide destinations and
+/// a per-device breakdown, grouped by the country and ASN each answer address
+/// resolves into.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkReport {
+    window: String,
+    from_ms: i64,
+    to_ms: i64,
+    total_contacts: u64,
+    networks: Vec<NetworkContact>,
+    devices: Vec<DeviceNetworks>,
+}
+
+/// Running totals for one network while aggregating a scan: total contacts and,
+/// for the network-wide list, which devices reached it.
+#[derive(Default)]
+struct NetAccum {
+    contacts: u64,
+    devices: std::collections::HashMap<std::net::IpAddr, u64>,
+}
+
+/// Running totals for one device: total contacts and the networks it reached.
+#[derive(Default)]
+struct DeviceNetAccum {
+    contacts: u64,
+    networks: std::collections::HashMap<GeoInfo, u64>,
+}
+
+/// Where the network answers resolve to — the geo counterpart of
+/// `privacy_trackers`, grouped by the country and ASN of each answer address
+/// rather than by the queried name. Returns 404 when no GeoIP database is loaded,
+/// so the UI can hide the section. Readable by any signed-in user, like the rest
+/// of the query log.
+async fn privacy_networks(
+    State(store): State<Store>,
+    State(clients): State<ClientStore>,
+    State(geo): State<Option<Arc<GeoDb>>>,
+    Query(params): Query<TrackerParams>,
+) -> Result<Json<NetworkReport>, StatusCode> {
+    let Some(db) = geo else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let window = params.window.as_deref().unwrap_or("day").to_owned();
+    let span_ms = match window.as_str() {
+        "day" => MS_PER_DAY,
+        "week" => 7 * MS_PER_DAY,
+        "month" => 30 * MS_PER_DAY,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+    let to_ms = now_ms() as i64;
+    let from_ms = to_ms - span_ms;
+
+    // Scan the durable window for events (with their answer addresses). DuckDB
+    // reads are blocking, so keep them off the async executor.
+    let filter = QueryFilter {
+        before: None,
+        start_ms: Some(from_ms),
+        end_ms: Some(to_ms),
+        sources: Vec::new(),
+        record_type: None,
+        response_code: None,
+        resolver: None,
+        origin: None,
+        clients: None,
+        needle: None,
+        limit: NETWORK_SCAN_LIMIT,
+    };
+    let store_for_read = store.clone();
+    let rows = match tokio::task::spawn_blocking(move || store_for_read.history(&filter)).await {
+        Ok(Ok((rows, _))) => rows,
+        Ok(Err(error)) => {
+            warn!(%error, "network attribution scan failed");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        Err(error) => {
+            warn!(%error, "network attribution scan task panicked");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let resolver = ClientResolver::new(clients.view());
+    let mut per_network: std::collections::HashMap<GeoInfo, NetAccum> =
+        std::collections::HashMap::new();
+    let mut per_device: std::collections::HashMap<std::net::IpAddr, DeviceNetAccum> =
+        std::collections::HashMap::new();
+    let mut total_contacts = 0u64;
+
+    for row in &rows {
+        let client = row.event.client;
+        // One query counts once per distinct network it resolved into, so a name
+        // answered by several addresses in one ASN is not over-counted (matching
+        // the per-query tracker view and the log's own network badges).
+        for info in distinct_networks(&db, &row.event.addresses) {
+            total_contacts += 1;
+            let net = per_network.entry(info.clone()).or_default();
+            net.contacts += 1;
+            *net.devices.entry(client).or_default() += 1;
+            let dev = per_device.entry(client).or_default();
+            dev.contacts += 1;
+            *dev.networks.entry(info).or_default() += 1;
+        }
+    }
+
+    let name_for = |ip: std::net::IpAddr| resolver.name_for(ip).map(str::to_owned);
+
+    let mut networks: Vec<NetworkContact> = per_network
+        .into_iter()
+        .map(|(info, acc)| {
+            let mut devices: Vec<NetworkDevice> = acc
+                .devices
+                .into_iter()
+                .map(|(ip, contacts)| NetworkDevice {
+                    name: name_for(ip),
+                    client: ip.to_string(),
+                    contacts,
+                })
+                .collect();
+            devices.sort_by(|a, b| {
+                b.contacts
+                    .cmp(&a.contacts)
+                    .then_with(|| a.client.cmp(&b.client))
+            });
+            devices.truncate(NETWORK_TOP_DEVICES);
+            NetworkContact {
+                asn: info.asn,
+                org: info.org,
+                country: info.country,
+                contacts: acc.contacts,
+                devices,
+            }
+        })
+        .collect();
+    networks.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.asn.cmp(&b.asn)));
+    networks.truncate(NETWORK_TOP);
+
+    let mut devices: Vec<DeviceNetworks> = per_device
+        .into_iter()
+        .map(|(ip, acc)| {
+            let mut nets: Vec<NetworkContact> = acc
+                .networks
+                .into_iter()
+                .map(|(info, contacts)| NetworkContact {
+                    asn: info.asn,
+                    org: info.org,
+                    country: info.country,
+                    contacts,
+                    devices: Vec::new(),
+                })
+                .collect();
+            nets.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.asn.cmp(&b.asn)));
+            nets.truncate(NETWORK_TOP);
+            DeviceNetworks {
+                name: name_for(ip),
+                client: ip.to_string(),
+                contacts: acc.contacts,
+                networks: nets,
+            }
+        })
+        .collect();
+    devices.sort_by(|a, b| {
+        b.contacts
+            .cmp(&a.contacts)
+            .then_with(|| a.client.cmp(&b.client))
+    });
+    devices.truncate(NETWORK_TOP_DEVICES);
+
+    Ok(Json(NetworkReport {
+        window,
+        from_ms,
+        to_ms,
+        total_contacts,
+        networks,
+        devices,
+    }))
+}
+
 #[derive(Deserialize)]
 struct QueryParams {
     limit: Option<usize>,
     /// Optional case-insensitive filter on the queried name, client address or
     /// device name.
     q: Option<String>,
+    /// Optional filter to answers that resolve into one country (ISO 3166-1
+    /// alpha-2, case-insensitive). Needs a GeoIP database; without one it matches
+    /// nothing.
+    country: Option<String>,
+    /// Optional filter to answers that resolve into one network, by ASN number.
+    asn: Option<u32>,
 }
 
 /// A logged query with its client's device name resolved, so the log can show
@@ -5838,6 +6085,67 @@ struct NamedQueryEvent {
     /// query feed (always local) and an older client both read it as this node.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     origin: String,
+    /// The distinct countries and networks the answer addresses resolve to, in
+    /// first-seen order. Filled on the read path only when a GeoIP database is
+    /// loaded; empty (and omitted) otherwise, so the column simply stays blank.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    networks: Vec<GeoInfo>,
+}
+
+/// Enrich a query's answer addresses with their country and network, dropping
+/// duplicates so a name that resolves to several addresses in one network shows
+/// that network once. Empty when no database is loaded or every address is
+/// private/unknown.
+fn geo_networks(geo: &Option<Arc<GeoDb>>, addresses: &[std::net::IpAddr]) -> Vec<GeoInfo> {
+    match geo {
+        Some(db) => distinct_networks(db, addresses),
+        None => Vec::new(),
+    }
+}
+
+/// The distinct countries/networks a set of addresses resolves into, in first-seen
+/// order, dropping duplicates so a name answered by several addresses in the same
+/// network counts that network once. Shared by the log enrichment and the
+/// "phone home" aggregation so both treat one query as one contact per network.
+fn distinct_networks(db: &GeoDb, addresses: &[std::net::IpAddr]) -> Vec<GeoInfo> {
+    let mut out: Vec<GeoInfo> = Vec::new();
+    for ip in addresses {
+        if let Some(info) = db.lookup(*ip) {
+            if !out.contains(&info) {
+                out.push(info);
+            }
+        }
+    }
+    out
+}
+
+/// Whether any answer address of `event` matches the requested country and/or
+/// ASN. With neither facet set it always matches; with a database absent it never
+/// does (the facets cannot be evaluated).
+fn event_matches_geo(
+    geo: &Option<Arc<GeoDb>>,
+    event: &QueryEvent,
+    country: Option<&str>,
+    asn: Option<u32>,
+) -> bool {
+    if country.is_none() && asn.is_none() {
+        return true;
+    }
+    let Some(db) = geo else {
+        return false;
+    };
+    event.addresses.iter().any(|ip| {
+        let Some(info) = db.lookup(*ip) else {
+            return false;
+        };
+        let country_ok = country.is_none_or(|want| {
+            info.country
+                .as_deref()
+                .is_some_and(|have| have.eq_ignore_ascii_case(want))
+        });
+        let asn_ok = asn.is_none_or(|want| info.asn == Some(want));
+        country_ok && asn_ok
+    })
 }
 
 /// How many recent events to scan when a search includes device names: the whole
@@ -5902,6 +6210,7 @@ async fn nodes(State(state): State<AppState>) -> Json<NodesResponse> {
 async fn queries(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<QueryParams>,
 ) -> Json<Vec<NamedQueryEvent>> {
     let limit = params
@@ -5910,34 +6219,49 @@ async fn queries(
         .min(MAX_QUERY_LIMIT);
     let resolver = ClientResolver::new(clients.view());
 
-    let events = match params.q.as_deref().map(str::trim) {
-        Some(needle) if !needle.is_empty() => {
-            // Filter in the web layer so a device name counts alongside the
-            // queried name and the client address. Scans the hot ring (the same
-            // depth the store's own search uses), newest first, up to the limit.
-            let needle = needle.to_lowercase();
-            store
-                .recent(QUERY_SCAN_LIMIT)
-                .into_iter()
-                .filter(|event| {
-                    event.name.to_lowercase().contains(&needle)
-                        || event.client.to_string().contains(&needle)
+    let needle = params
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_lowercase);
+    let country = params.country.as_deref();
+    let has_geo_filter = country.is_some() || params.asn.is_some();
+
+    // Any web-layer filter (a needle spanning the device name, or a geo facet the
+    // store does not know) means scanning the hot ring and filtering here, newest
+    // first, up to the limit. With no such filter the store's own tail is enough.
+    let events = if needle.is_some() || has_geo_filter {
+        store
+            .recent(QUERY_SCAN_LIMIT)
+            .into_iter()
+            .filter(|event| match &needle {
+                Some(needle) => {
+                    event.name.to_lowercase().contains(needle)
+                        || event.client.to_string().contains(needle)
                         || resolver
                             .name_for(event.client)
-                            .is_some_and(|name| name.to_lowercase().contains(&needle))
-                })
-                .take(limit)
-                .collect()
-        }
-        _ => store.recent(limit),
+                            .is_some_and(|name| name.to_lowercase().contains(needle))
+                }
+                None => true,
+            })
+            .filter(|event| event_matches_geo(&geo, event, country, params.asn))
+            .take(limit)
+            .collect()
+    } else {
+        store.recent(limit)
     };
 
     let named = events
         .into_iter()
-        .map(|event| NamedQueryEvent {
-            device_name: resolver.name_for(event.client).map(str::to_owned),
-            event,
-            origin: String::new(),
+        .map(|event| {
+            let networks = geo_networks(&geo, &event.addresses);
+            NamedQueryEvent {
+                device_name: resolver.name_for(event.client).map(str::to_owned),
+                event,
+                origin: String::new(),
+                networks,
+            }
         })
         .collect();
     Json(named)
@@ -5999,6 +6323,7 @@ struct HistoryResponse {
 async fn queries_history(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<HistoryParams>,
 ) -> Json<HistoryResponse> {
     let limit = params
@@ -6107,10 +6432,14 @@ async fn queries_history(
     let resolver = ClientResolver::new(clients.view());
     let rows = events
         .into_iter()
-        .map(|row| NamedQueryEvent {
-            device_name: resolver.name_for(row.event.client).map(str::to_owned),
-            event: row.event,
-            origin: row.origin,
+        .map(|row| {
+            let networks = geo_networks(&geo, &row.event.addresses);
+            NamedQueryEvent {
+                device_name: resolver.name_for(row.event.client).map(str::to_owned),
+                event: row.event,
+                origin: row.origin,
+                networks,
+            }
         })
         .collect();
 
@@ -6144,6 +6473,7 @@ struct DnssecResponse {
 async fn dnssec(
     State(store): State<Store>,
     State(clients): State<ClientStore>,
+    State(geo): State<Option<Arc<GeoDb>>>,
     Query(params): Query<DnssecParams>,
 ) -> Json<DnssecResponse> {
     let stats = store.stats();
@@ -6162,10 +6492,14 @@ async fn dnssec(
         .filter(|event| event.dnssec.is_some())
         .filter(|event| want.is_none_or(|w| event.dnssec == Some(w)))
         .take(limit)
-        .map(|event| NamedQueryEvent {
-            device_name: resolver.name_for(event.client).map(str::to_owned),
-            event,
-            origin: String::new(),
+        .map(|event| {
+            let networks = geo_networks(&geo, &event.addresses);
+            NamedQueryEvent {
+                device_name: resolver.name_for(event.client).map(str::to_owned),
+                event,
+                origin: String::new(),
+                networks,
+            }
         })
         .collect();
 
@@ -6627,6 +6961,7 @@ mod tests {
             ha: Arc::new(ha::Ha::from_env("v0.0.0-test")),
             reports: test_reports(),
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
+            geo: None,
         }
     }
 
@@ -7870,6 +8205,61 @@ mod tests {
         let response = get(store, "/api/stats/top-domains?client=10.0.0.9").await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(body_of(response).await, "[]");
+    }
+
+    #[tokio::test]
+    async fn privacy_networks_without_a_database_is_404() {
+        // No GeoIP database is loaded in tests, so the feature reports itself off
+        // and the UI hides the section.
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let response = get(store, "/api/privacy/networks").await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn queries_carry_no_networks_without_a_database() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "a.example.",
+            QuerySource::Upstream,
+        ));
+        let response = get(store, "/api/queries").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_of(response).await;
+        assert!(
+            !body.contains("networks"),
+            "rows carry no geo column without a database: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queries_country_filter_without_a_database_is_empty() {
+        // A geo facet can only match through a database; with none loaded the
+        // facet is unsatisfiable, so the filtered feed is honestly empty.
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        store.record(sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "a.example.",
+            QuerySource::Upstream,
+        ));
+        let response = get(store, "/api/queries?country=US").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_of(response).await, "[]");
+    }
+
+    #[test]
+    fn geo_filter_matches_only_with_facets_and_a_database() {
+        let event = sample(
+            Ipv4Addr::new(10, 0, 0, 1),
+            "a.example.",
+            QuerySource::Upstream,
+        );
+        // No facets always matches; any facet without a database never does.
+        assert!(event_matches_geo(&None, &event, None, None));
+        assert!(!event_matches_geo(&None, &event, Some("US"), None));
+        assert!(!event_matches_geo(&None, &event, None, Some(13335)));
+        assert!(geo_networks(&None, &event.addresses).is_empty());
     }
 
     #[tokio::test]
