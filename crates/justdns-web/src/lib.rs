@@ -18,7 +18,7 @@ use axum::Router;
 use axum::extract::{FromRef, FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
-use axum::middleware::{Next, from_fn_with_state};
+use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get, post, put};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
@@ -494,6 +494,65 @@ pub async fn serve(
     axum::serve(listener, router(app_state)).await
 }
 
+/// The Content-Security-Policy served with every response. It is deliberately
+/// tight — `default-src 'self'` — with only the exceptions the bundled dashboard
+/// actually needs:
+/// - `style-src` allows `'unsafe-inline'` because the UI sets inline `style`
+///   attributes (e.g. meter-bar widths); scripts carry no such allowance, as the
+///   build emits only external, self-hosted modules.
+/// - the Google Fonts hosts are allowed for the web fonts the dashboard loads
+///   (`fonts.googleapis.com` for the stylesheet, `fonts.gstatic.com` for the
+///   files). Self-hosting them later would let these drop out.
+///
+/// `frame-ancestors 'none'` blocks clickjacking; `object-src 'none'` and
+/// `base-uri 'self'` close off plugin and base-tag tricks.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
+base-uri 'self'; \
+object-src 'none'; \
+frame-ancestors 'none'; \
+form-action 'self'; \
+script-src 'self'; \
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+font-src 'self' https://fonts.gstatic.com; \
+img-src 'self' data:; \
+connect-src 'self'; \
+worker-src 'self'; \
+manifest-src 'self'";
+
+/// Attach the invisible browser-hardening headers to every response: a strict
+/// Content-Security-Policy, plus anti-sniffing, anti-clickjacking, a tight
+/// referrer policy and a locked-down permissions policy. On by default, nothing
+/// to configure. No `Strict-Transport-Security` yet — the dashboard is commonly
+/// reached over plain HTTP, and HSTS there would be a foot-gun; it belongs with
+/// serving the dashboard over HTTPS by default.
+async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        header::HeaderValue::from_static(CONTENT_SECURITY_POLICY),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::X_FRAME_OPTIONS,
+        header::HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        header::HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::HeaderName::from_static("permissions-policy"),
+        header::HeaderValue::from_static(
+            "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+        ),
+    );
+    response
+}
+
 fn router(state: AppState) -> Router {
     // The data API sits behind a login guard. The auth endpoints and the static
     // UI (so the login screen itself can load) stay public.
@@ -653,7 +712,10 @@ fn router(state: AppState) -> Router {
         .route("/api/auth/enroll/confirm", post(auth_enroll_confirm))
         .fallback(static_handler);
 
-    protected.merge(public).with_state(state)
+    protected
+        .merge(public)
+        .layer(from_fn(security_headers))
+        .with_state(state)
 }
 
 /// Who the current request is made by, injected by [`require_auth`] into the
@@ -6023,6 +6085,37 @@ mod tests {
             !lists.contains("doubleclick.net"),
             "per-device block must not touch the global list: {lists}"
         );
+    }
+
+    #[tokio::test]
+    async fn responses_carry_browser_hardening_headers() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, _cookie) = app_and_cookie(store);
+
+        // Even a public, unauthenticated response carries the hardening headers.
+        let res = app
+            .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let headers = res.headers();
+        assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
+        assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
+        assert!(headers.get("permissions-policy").is_some());
+
+        let csp = headers
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("default-src 'self'"), "{csp}");
+        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
+        assert!(csp.contains("object-src 'none'"), "{csp}");
+        // The SPA needs inline styles and the Google Fonts hosts; scripts do not.
+        assert!(csp.contains("style-src 'self' 'unsafe-inline'"), "{csp}");
+        assert!(csp.contains("fonts.googleapis.com"), "{csp}");
+        assert!(csp.contains("script-src 'self';"), "{csp}");
+        assert!(!csp.contains("script-src 'self' 'unsafe-inline'"), "{csp}");
     }
 
     /// A router whose `/metrics` endpoint is configured with `token` (or off when

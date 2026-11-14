@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.28.0] - 2026-11-14
+
+- Added: **Browser-hardening security headers.** Every dashboard response now carries a
+  strict Content-Security-Policy plus anti-clickjacking (`X-Frame-Options`,
+  `frame-ancestors`), no-sniff, a `no-referrer` policy and a locked-down permissions
+  policy. The browser will only run scripts and load resources that came from JustDNS
+  itself, and refuses to render the dashboard inside another site's frame. On by default,
+  nothing to configure. (No HSTS yet — that waits for serving the dashboard over HTTPS by
+  default.) See [the guide](docs/guides/browser-hardening.md).
+
 ## [0.27.0] - 2026-11-14
 
 - Added: **Block a company for a single device from the privacy dashboard.** Open a device

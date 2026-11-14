@@ -189,9 +189,12 @@ Aktion braucht, im Geist der HA-Peer-Verschlüsselung.
   beim ersten Start selbst um, der Schlüssel wird einmal erzeugt und in einem eigenen
   Volume getrennt von den Daten gehalten, und das Laden ist fail-closed. Siehe
   [den Guide](docs/guides/secrets-at-rest.de.md).
-- [ ] **Automatische Browser- & Transport-Härtung.** Security-Header (CSP,
-  Clickjacking-Schutz, Referrer- und Permissions-Policy), HTTPS fürs Dashboard ab Werk
-  und CSRF-Schutz — standardmäßig an, nichts einzurichten.
+- [x] **Security-Header.** Eine strenge Content-Security-Policy plus Clickjacking-Schutz,
+  No-Sniff, strenge Referrer-Policy und abgeriegelte Permissions-Policy auf jeder Antwort —
+  standardmäßig an, nichts einzurichten. CSRF ist bereits durch das `SameSite=Strict`-
+  Sitzungs-Cookie abgedeckt. Siehe [den Leitfaden](docs/guides/browser-hardening.de.md).
+- [ ] **HTTPS fürs Dashboard ab Werk.** Das Dashboard standardmäßig über TLS ausliefern
+  (mit einem Zertifikat aus dem Store) und dann HSTS ergänzen.
 - [ ] **Login-Härtung.** Brute-Force-Drosselung mit selbstheilender Sperre und gehärtete
   Session-Cookies, für einen normalen Login unsichtbar.
 - [ ] **Signierte Images.** Die Release-Images werden signiert und der Ein-Klick-Updater

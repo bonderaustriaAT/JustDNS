@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.28.0] - 2026-11-14
+
+- Neu: **Security-Header zur Browser-Härtung.** Jede Dashboard-Antwort trägt jetzt eine
+  strenge Content-Security-Policy plus Clickjacking-Schutz (`X-Frame-Options`,
+  `frame-ancestors`), No-Sniff, eine `no-referrer`-Policy und eine abgeriegelte
+  Permissions-Policy. Der Browser führt nur noch Skripte aus und lädt nur Ressourcen, die
+  von JustDNS selbst kommen, und weigert sich, das Dashboard im Rahmen einer fremden Seite
+  darzustellen. Standardmäßig an, nichts einzurichten. (Noch kein HSTS – das wartet auf das
+  Ausliefern des Dashboards über HTTPS per Default.) Siehe
+  [den Leitfaden](docs/guides/browser-hardening.de.md).
+
 ## [0.27.0] - 2026-11-14
 
 - Neu: **Eine Firma nur für ein einzelnes Gerät aus dem Privatsphäre-Dashboard blocken.**
