@@ -166,9 +166,12 @@ no action, in the spirit of the HA peer encryption.
   useless without the key. Fully automatic: an existing install upgrades itself on first
   start, the key is generated once and kept in its own volume apart from the data, and
   loading is fail-closed. See [the guide](docs/guides/secrets-at-rest.md).
-- [ ] **Automatic browser & transport hardening.** Security headers (CSP, anti-clickjacking,
-  referrer and permissions policy), HTTPS for the dashboard out of the box, and CSRF
-  protection — on by default, nothing to configure.
+- [x] **Security headers.** A strict Content-Security-Policy plus anti-clickjacking,
+  no-sniff, a tight referrer policy and a locked-down permissions policy on every response
+  — on by default, nothing to configure. CSRF is already covered by the `SameSite=Strict`
+  session cookie. See [the guide](docs/guides/browser-hardening.md).
+- [ ] **HTTPS for the dashboard out of the box.** Serve the dashboard over TLS by default
+  (with a stored certificate), and add HSTS once it does.
 - [ ] **Login hardening.** Brute-force throttling with a self-healing lockout and hardened
   session cookies, invisible to a normal login.
 - [ ] **Signed images.** The release images are signed and the one-click updater verifies
