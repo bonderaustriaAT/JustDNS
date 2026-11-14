@@ -11,6 +11,7 @@ import {
 } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
+import { useAuth } from "../state/auth";
 import styles from "./Privacy.module.css";
 
 /** The window choices offered in the segmented control, in order. */
@@ -145,8 +146,56 @@ function DeviceDetail({
   );
 }
 
+/** One domain row inside a company detail: the meter plus, for editors, a small
+ *  button that blocks just this domain. */
+function DomainRow({
+  domain,
+  max,
+  canEdit,
+  busy,
+  onBlock,
+  t,
+  nf,
+}: {
+  domain: CompanyDomain;
+  max: number;
+  canEdit: boolean;
+  busy: boolean;
+  onBlock: () => void;
+  t: ReturnType<typeof useI18n>["t"];
+  nf: Intl.NumberFormat;
+}) {
+  const width = max === 0 ? 0 : (domain.contacts / max) * 100;
+  const blockedWidth = domain.contacts === 0 ? 0 : (domain.blocked / domain.contacts) * 100;
+  return (
+    <li className={styles.domainRow}>
+      <span className={styles.domainName} title={domain.name}>
+        {domain.name}
+      </span>
+      <span className={styles.bar} aria-hidden="true">
+        <span className={styles.barTrack} style={{ inlineSize: `${Math.max(width, 3)}%` }}>
+          <span className={styles.barBlocked} style={{ inlineSize: `${blockedWidth}%` }} />
+        </span>
+      </span>
+      <span className={styles.domainCount}>{nf.format(domain.contacts)}</span>
+      {canEdit && (
+        <button
+          type="button"
+          className={styles.blockSmall}
+          disabled={busy}
+          aria-label={t("privacy.blockDomainLabel", { name: domain.name })}
+          onClick={onBlock}
+        >
+          {t("privacy.block")}
+        </button>
+      )}
+    </li>
+  );
+}
+
 /** The focused view for one company: which devices reached it and which exact
- *  names under it were looked up. */
+ *  names under it were looked up, plus — for editors — one-click blocking of the
+ *  whole company or a single domain. */
 function CompanyDetail({
   company,
   onBack,
@@ -158,19 +207,66 @@ function CompanyDetail({
   t: ReturnType<typeof useI18n>["t"];
   nf: Intl.NumberFormat;
 }) {
+  const { canEdit } = useAuth();
   const devices: CompanyDevice[] = company.devices ?? [];
   const domains: CompanyDomain[] = company.domains ?? [];
   const deviceMax = devices.reduce((peak, d) => Math.max(peak, d.contacts), 0);
   const domainMax = domains.reduce((peak, d) => Math.max(peak, d.contacts), 0);
+
+  // Which block call is in flight (the company, or one domain), and the result
+  // message to show once it returns.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ text: string; error: boolean } | null>(null);
+
+  const runBlock = (key: string, target: { org: string } | { domain: string }) => {
+    setBusy(key);
+    setResult(null);
+    api
+      .privacyBlock(target)
+      .then(({ added }) => {
+        setResult({
+          text: added > 0 ? t("privacy.blockDone", { n: added }) : t("privacy.blockNone"),
+          error: false,
+        });
+      })
+      .catch((err: unknown) => {
+        setResult({
+          text: t("privacy.blockFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+          error: true,
+        });
+      })
+      .finally(() => setBusy(null));
+  };
+
   return (
     <section className={styles.card}>
       <button type="button" className={styles.back} onClick={onBack}>
         <span aria-hidden="true">‹</span> {t("privacy.allCompanies")}
       </button>
-      <h2 className={styles.sectionTitle}>
-        <span className={styles.dot} data-cat={company.category} aria-hidden="true" />{" "}
-        {t("privacy.companyContacts", { org: company.org })}
-      </h2>
+      <div className={styles.companyHead}>
+        <h2 className={styles.sectionTitle}>
+          <span className={styles.dot} data-cat={company.category} aria-hidden="true" />{" "}
+          {t("privacy.companyContacts", { org: company.org })}
+        </h2>
+        {canEdit && (
+          <button
+            type="button"
+            className={styles.blockButton}
+            disabled={busy !== null}
+            title={t("privacy.blockHint")}
+            onClick={() => runBlock("org", { org: company.org })}
+          >
+            {t("privacy.block")}
+          </button>
+        )}
+      </div>
+      {result && (
+        <p className={styles.blockResult} data-error={result.error || undefined} role="status">
+          {result.text}
+        </p>
+      )}
 
       {devices.length > 0 && (
         <div className={styles.subSection}>
@@ -199,13 +295,13 @@ function CompanyDetail({
           <p className={styles.captionHint}>{t("privacy.companyDomainsHint")}</p>
           <ul className={styles.companyList}>
             {domains.map((domain) => (
-              <MeterRow
+              <DomainRow
                 key={domain.name}
-                label={domain.name}
-                mono
-                contacts={domain.contacts}
-                blocked={domain.blocked}
+                domain={domain}
                 max={domainMax}
+                canEdit={canEdit}
+                busy={busy !== null}
+                onBlock={() => runBlock(`domain:${domain.name}`, { domain: domain.name })}
                 t={t}
                 nf={nf}
               />

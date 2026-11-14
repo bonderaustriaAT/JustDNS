@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.26.0] - 2026-11-14
+
+- Added: **Block a company straight from the privacy dashboard.** Clicking a company now
+  shows a **Block** button (for Editors and Admins). *Block company* adds every domain the
+  catalogue knows for that company to your block list — not only the ones seen so far — so
+  it is blocked everywhere from the next query on; each domain row also has its own block
+  button for a single name. Blocking is idempotent (a re-block adds nothing, and the result
+  says how many entries were new), and the entries land in your own block list tagged with
+  the company name, so you can review or undo them on the Block & allow lists page. This
+  turns the dashboard's "who does this device talk to" into one-click action.
+
 ## [0.25.1] - 2026-11-14
 
 - Changed: **Privacy dashboard polish.** Clicking a company now opens its own view
