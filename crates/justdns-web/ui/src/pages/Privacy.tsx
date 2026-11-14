@@ -195,8 +195,8 @@ function DeviceDetail({
             added === 0
               ? t("privacy.blockNone")
               : added === 1
-                ? t("privacy.blockDoneOne")
-                : t("privacy.blockDone", { n: added }),
+                ? t("privacy.blockForDeviceDoneOne")
+                : t("privacy.blockForDeviceDone", { n: added }),
           error: false,
         });
       })
