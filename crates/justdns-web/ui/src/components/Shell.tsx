@@ -373,7 +373,7 @@ function LangSwitch() {
 
 export function Shell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
-  const { canEdit, isAdmin } = useAuth();
+  const { canEdit, isAdmin, isPrimary, primaryUrl } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
 
@@ -435,7 +435,10 @@ export function Shell({ children }: { children: ReactNode }) {
     path.startsWith("/zeitplaene") ||
     path.startsWith("/rewrites");
   const needsAdmin = path.startsWith("/einstellungen") || path.startsWith("/zertifikate");
-  const readOnly = (needsEdit && !canEdit) || (needsAdmin && !isAdmin);
+  // On a read-only follower every page is read-only — except the HA page itself,
+  // which stays usable so the follower can be repaired or take over a dead primary.
+  const follower = !isPrimary && !path.startsWith("/ha");
+  const readOnly = follower || (needsEdit && !canEdit) || (needsAdmin && !isAdmin);
 
   // Which collapsible section the current route belongs to, so it unfolds (and
   // its header reads active) on a deep link or a reload.
@@ -554,10 +557,24 @@ export function Shell({ children }: { children: ReactNode }) {
         <InstallBanner />
 
         <main className={styles.main}>
-          {readOnly && (
+          {follower ? (
             <p className={styles.readOnlyBanner} role="status">
-              {t("common.readOnly")}
+              {t("common.followerReadOnly")}
+              {primaryUrl && (
+                <>
+                  {" "}
+                  <a href={primaryUrl} className={styles.readOnlyLink}>
+                    {primaryUrl}
+                  </a>
+                </>
+              )}
             </p>
+          ) : (
+            readOnly && (
+              <p className={styles.readOnlyBanner} role="status">
+                {t("common.readOnly")}
+              </p>
+            )
           )}
           {children}
           <footer className={styles.footer}>

@@ -532,6 +532,18 @@ pub struct HaStatus {
     pub peers: Vec<Peer>,
     /// Count of live (non-tombstone) tracked entities — a cheap health signal.
     pub tracked: usize,
+    /// The node id of the cluster's primary (managing) node, if one is designated.
+    /// Empty/absent means no primary — every node stays writable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_node_id: Option<String>,
+    /// `true` when this node is the primary (or when no primary is designated, so
+    /// the node is writable). `false` on a read-only follower.
+    pub is_primary: bool,
+    /// Where to manage the cluster: the primary node's URL, resolved from the
+    /// roster (or this node's own advertised address when it is the primary).
+    /// Absent when no primary is designated or its address is not yet known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_url: Option<String>,
 }
 
 /// The connect handshake payload exchanged over `/api/ha/hello`.
@@ -897,6 +909,20 @@ impl Ha {
         self.version.clone()
     }
 
+    /// Fetch a peer's *live* running version over the public `/api/ha/hello`
+    /// handshake (the same source [`connect`](Self::connect) reads). Returns `None`
+    /// when the peer is unreachable or does not answer — which, during an update, is
+    /// exactly the "still restarting" signal. Used by the cluster-update
+    /// orchestrator to confirm a node came back up on the target version before it
+    /// moves on to the next one. A live GET each call (no caching), so it reflects
+    /// the version the peer is serving right now.
+    pub fn peer_hello_version(&self, url: &str) -> Option<String> {
+        let hello: Hello = self
+            .get_announced(&endpoint(url.trim().trim_end_matches('/'), "api/ha/hello"))
+            .ok()?;
+        Some(hello.version)
+    }
+
     /// The wizard-set sync key, for an admin to view and copy when joining another
     /// node. `None` when no key is set, or when the key is pinned by the
     /// environment — the app never echoes an environment secret, and the UI already
@@ -1015,6 +1041,11 @@ impl Ha {
             paired: state.enabled && !state.peers.is_empty(),
             peers: state.peers.clone(),
             tracked,
+            // The primary fields are filled by the status handler, which has the
+            // cluster config. Default here to "writable" (no primary designated).
+            primary_node_id: None,
+            is_primary: true,
+            primary_url: None,
         }
     }
 
@@ -1243,6 +1274,38 @@ impl Ha {
             .send_string(&body)
             .map(|_| ())
             .map_err(|error| error.to_string())
+    }
+
+    /// POST a JSON value to a peer endpoint, sealed under the shared key, with an
+    /// `X-Ha-Auth` token. The body is sealed so a secret it carries (e.g. a backup
+    /// password for a remote update) never crosses the wire in clear. A non-2xx
+    /// response — including the peer rejecting the request — is returned as an error
+    /// string. Any response body is ignored. Used for the managing node's
+    /// node-config push and remote-update trigger.
+    pub fn post_sealed_json(&self, peer_url: &str, path: &str, body: &Value) -> Result<(), String> {
+        let auth = self
+            .peer_auth_header()
+            .ok_or_else(|| "no sync key set".to_owned())?;
+        let plaintext = serde_json::to_vec(body).map_err(|error| error.to_string())?;
+        let sealed = self
+            .seal_for_peer(&plaintext)
+            .ok_or_else(|| "no sync key set".to_owned())?;
+        let url = endpoint(peer_url, path);
+        ureq::post(&url)
+            .timeout(PEER_TIMEOUT)
+            .set("X-Ha-Auth", &auth)
+            .set("User-Agent", &format!("justdns/{}", self.version))
+            .set("Content-Type", "application/octet-stream")
+            .send_bytes(&sealed)
+            .map_err(|error| error.to_string())
+            .map(|_| ())
+    }
+
+    /// GET and open a sealed JSON value from a peer endpoint (the managing node
+    /// reading a follower's current node-config for display). Same sealing and
+    /// size cap as the snapshot pull.
+    pub fn get_sealed_json(&self, peer_url: &str, path: &str) -> Result<Value, String> {
+        self.get_announced(&endpoint(peer_url, path))
     }
 }
 

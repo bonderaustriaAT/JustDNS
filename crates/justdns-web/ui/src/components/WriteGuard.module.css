@@ -1,0 +1,12 @@
+/* Layout-transparent wrapper: `display: contents` lets the children lay out exactly
+   as if the fieldset were not here, while the fieldset's `disabled` attribute still
+   disables every native form control nested inside it (that cascade is DOM-based, not
+   layout-based). The resets keep old engines without `display: contents` from drawing
+   a fieldset box. */
+.guard {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}

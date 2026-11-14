@@ -459,6 +459,12 @@
   margin-block-end: var(--space-5);
 }
 
+.readOnlyLink {
+  color: var(--accent);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* Quiet version line at the foot of every page. */
 .footer {
   margin-block-start: var(--space-6);

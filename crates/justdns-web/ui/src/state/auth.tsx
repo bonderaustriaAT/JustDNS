@@ -24,8 +24,14 @@ interface AuthContextValue {
   role: Role | null;
   /// Full control (user management, settings, TLS, backups).
   isAdmin: boolean;
-  /// May change filtering content (admins and editors).
+  /// May change filtering content (admins and editors) — and only when this node
+  /// is writable (the primary, or no primary designated). On a read-only follower
+  /// this is always false, so every edit control in the app hides at once.
   canEdit: boolean;
+  /// `false` only on a read-only follower of a live primary node.
+  isPrimary: boolean;
+  /// The primary node's URL, shown to a follower so the user knows where to manage.
+  primaryUrl: string | null;
   /// Create the first administrator and log in. Throws on failure.
   setup: (username: string, password: string) => Promise<void>;
   /// Mark setup finished locally after the wizard has already created the admin
@@ -51,6 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  // Default to writable: an older server without the field, or an unreachable one,
+  // behaves exactly as before this feature rather than locking the UI.
+  const [isPrimary, setIsPrimary] = useState(true);
+  const [primaryUrl, setPrimaryUrl] = useState<string | null>(null);
 
   // Ask the server once on load who we are. If the API is unreachable we treat
   // the box as configured-but-logged-out, so the user sees the login screen
@@ -64,6 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthenticated(state.authenticated);
         setUsername(state.username);
         setRole(state.role ?? null);
+        setIsPrimary(state.isPrimary ?? true);
+        setPrimaryUrl(state.primaryUrl ?? null);
       })
       .catch(() => {
         setConfigured(true);
@@ -94,6 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthenticated(state.authenticated);
     setUsername(state.username);
     setRole(state.role ?? null);
+    setIsPrimary(state.isPrimary ?? true);
+    setPrimaryUrl(state.primaryUrl ?? null);
   }, []);
 
   const setup = useCallback(async (user: string, password: string) => {
@@ -147,14 +161,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username,
       role,
       isAdmin: role === "admin",
-      canEdit: role === "admin" || role === "editor",
+      canEdit: (role === "admin" || role === "editor") && isPrimary,
+      isPrimary,
+      primaryUrl,
       setup,
       completeSetup,
       login,
       completeLogin,
       logout,
     }),
-    [status, configured, authenticated, username, role, setup, completeSetup, login, completeLogin, logout],
+    [
+      status,
+      configured,
+      authenticated,
+      username,
+      role,
+      isPrimary,
+      primaryUrl,
+      setup,
+      completeSetup,
+      login,
+      completeLogin,
+      logout,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

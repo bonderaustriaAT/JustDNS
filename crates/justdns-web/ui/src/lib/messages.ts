@@ -1065,6 +1065,8 @@ const de = {
   "nav.audit": "Audit-Log",
   "nav.accountMenu": "Konto-Menü",
   "common.readOnly": "Nur-Lese-Zugriff – Änderungen hier brauchen mehr Rechte.",
+  "common.followerReadOnly":
+    "Diese Node ist nur-lesend und wird von der Hauptnode verwaltet. Änderungen machst du dort:",
 
   // Setup-Wizard (Erst-Einrichtung).
   "wizard.stepCounter": "Schritt {n} von {total}",
@@ -1356,6 +1358,47 @@ const de = {
   "ha.health.error": "Fehler beim Abgleich",
   "ha.health.pending": "Erster Abgleich steht aus",
   "ha.cancel": "Abbrechen",
+  "ha.primaryBadge": "Hauptnode",
+  "ha.makePrimary": "Zur Hauptnode machen",
+  "ha.takeOver": "Als Hauptnode übernehmen",
+  "ha.node.edit": "Node-Einstellungen",
+  "ha.node.update": "Node updaten",
+  "ha.node.name": "Anzeigename",
+  "ha.node.hostname": "DoT/DoH-Hostname",
+  "ha.node.blockIpv4": "Block-Page-IPv4",
+  "ha.node.blockIpv6": "Block-Page-IPv6",
+  "ha.node.dotCert": "DoT-Zertifikat-ID",
+  "ha.node.dohCert": "DoH-Zertifikat-ID",
+  "ha.node.save": "Speichern",
+  "ha.node.saved": "Node-Einstellungen gespeichert.",
+  "ha.node.loadFailed": "Node-Einstellungen konnten nicht geladen werden.",
+  "ha.node.saveFailed": "Speichern fehlgeschlagen.",
+  "ha.node.updateFailed": "Update konnte nicht ausgelöst werden.",
+  "ha.node.updateTitle": "Diese Node updaten",
+  "ha.node.updateBody":
+    "Die Node sichert sich zuerst (mit dem Passwort verschlüsselt) und zieht dann die neueste Version. Du musst dich dafür nicht auf ihr einloggen.",
+  "ha.node.backupPassword": "Backup-Passwort",
+  "ha.cluster.updateHeading": "Ganzer Cluster",
+  "ha.cluster.updateButton": "Ganzen Cluster aktualisieren",
+  "ha.cluster.updateHint":
+    "Aktualisiert erst alle Follower – einen nach dem anderen, jeweils erst wenn er wieder gesund auf der neuen Version läuft – und zuletzt die Hauptnode. Kommt eine Node nicht rechtzeitig zurück, bricht der Vorgang ab und die Hauptnode bleibt unverändert.",
+  "ha.cluster.updateTitle": "Ganzen Cluster aktualisieren",
+  "ha.cluster.updateBody":
+    "Jede Node sichert sich zuerst (mit diesem Passwort verschlüsselt) und zieht dann dieselbe Version. Du musst dich auf keiner Node einloggen.",
+  "ha.cluster.updateFailed": "Cluster-Update konnte nicht gestartet werden.",
+  "ha.cluster.primaryTag": "Hauptnode",
+  "ha.cluster.phase.idle": "Kein Cluster-Update aktiv.",
+  "ha.cluster.phase.running": "Follower werden aktualisiert …",
+  "ha.cluster.phase.updatingPrimary":
+    "Hauptnode wird zuletzt aktualisiert – diese Seite ist gleich kurz nicht erreichbar.",
+  "ha.cluster.phase.done": "Alle Nodes aktualisiert.",
+  "ha.cluster.phase.aborted": "Abgebrochen – die Hauptnode wurde nicht aktualisiert.",
+  "ha.cluster.node.pending": "wartet",
+  "ha.cluster.node.updating": "wird aktualisiert",
+  "ha.cluster.node.restarting": "startet neu",
+  "ha.cluster.node.healthy": "gesund",
+  "ha.cluster.node.skipped": "schon aktuell",
+  "ha.cluster.node.failed": "fehlgeschlagen",
 } as const;
 
 type Catalog = Record<keyof typeof de, string>;
@@ -2396,6 +2439,8 @@ const en: Catalog = {
   "nav.audit": "Audit log",
   "nav.accountMenu": "Account menu",
   "common.readOnly": "Read-only access — changes here need a higher role.",
+  "common.followerReadOnly":
+    "This node is read-only and managed from the primary node. Make changes there:",
 
   // Setup wizard (first run).
   "wizard.stepCounter": "Step {n} of {total}",
@@ -2685,6 +2730,47 @@ const en: Catalog = {
   "ha.health.error": "Sync error",
   "ha.health.pending": "First sync pending",
   "ha.cancel": "Cancel",
+  "ha.primaryBadge": "Main node",
+  "ha.makePrimary": "Make main node",
+  "ha.takeOver": "Take over as main node",
+  "ha.node.edit": "Node settings",
+  "ha.node.update": "Update node",
+  "ha.node.name": "Display name",
+  "ha.node.hostname": "DoT/DoH hostname",
+  "ha.node.blockIpv4": "Block-page IPv4",
+  "ha.node.blockIpv6": "Block-page IPv6",
+  "ha.node.dotCert": "DoT certificate id",
+  "ha.node.dohCert": "DoH certificate id",
+  "ha.node.save": "Save",
+  "ha.node.saved": "Node settings saved.",
+  "ha.node.loadFailed": "Could not load the node settings.",
+  "ha.node.saveFailed": "Save failed.",
+  "ha.node.updateFailed": "Could not trigger the update.",
+  "ha.node.updateTitle": "Update this node",
+  "ha.node.updateBody":
+    "The node backs itself up first (encrypted with the password), then pulls the latest release. You do not need to log in to it.",
+  "ha.node.backupPassword": "Backup password",
+  "ha.cluster.updateHeading": "Whole cluster",
+  "ha.cluster.updateButton": "Update the whole cluster",
+  "ha.cluster.updateHint":
+    "Updates every follower first — one at a time, each only once it is back and healthy on the new version — and the main node last. If a node does not come back in time, the run aborts and the main node is left unchanged.",
+  "ha.cluster.updateTitle": "Update the whole cluster",
+  "ha.cluster.updateBody":
+    "Each node backs itself up first (encrypted with this password), then pulls the same version. You do not need to log in to any node.",
+  "ha.cluster.updateFailed": "Could not start the cluster update.",
+  "ha.cluster.primaryTag": "main node",
+  "ha.cluster.phase.idle": "No cluster update running.",
+  "ha.cluster.phase.running": "Updating the followers …",
+  "ha.cluster.phase.updatingPrimary":
+    "Updating the main node last — this page will be briefly unreachable.",
+  "ha.cluster.phase.done": "All nodes updated.",
+  "ha.cluster.phase.aborted": "Aborted — the main node was not updated.",
+  "ha.cluster.node.pending": "waiting",
+  "ha.cluster.node.updating": "updating",
+  "ha.cluster.node.restarting": "restarting",
+  "ha.cluster.node.healthy": "healthy",
+  "ha.cluster.node.skipped": "already current",
+  "ha.cluster.node.failed": "failed",
 };
 
 export type MessageKey = keyof typeof de;
