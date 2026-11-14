@@ -4337,17 +4337,34 @@ enum NodeUpdatePlan {
 fn plan_follower(current: Option<&str>, target: &str) -> NodeUpdatePlan {
     match current {
         None => NodeUpdatePlan::Unreachable,
-        Some(version) if version == target => NodeUpdatePlan::Skip,
-        Some(_) => NodeUpdatePlan::Update,
+        // Only update a node that is genuinely *behind* the target. A node already on
+        // the target — or ahead of it — is skipped, so a cluster update can never
+        // downgrade a node that happens to run a newer build. If a version does not
+        // parse as semver, fall back to an exact string match.
+        Some(version) => match update::version_at_least(version, target) {
+            Some(true) => NodeUpdatePlan::Skip,
+            Some(false) => NodeUpdatePlan::Update,
+            None if version == target => NodeUpdatePlan::Skip,
+            None => NodeUpdatePlan::Update,
+        },
     }
 }
 
-/// A follower to work through, as resolved at start time.
+/// A follower to work through. Its plan (skip / update / unreachable) is decided in
+/// the worker thread from a live version check, so the request handler does no
+/// blocking network I/O.
 struct FollowerWork {
     node_id: String,
     url: String,
-    /// `false` when it is already on the target version (shown as Skipped).
-    update: bool,
+}
+
+/// Lock the cluster-update state, recovering from a poisoned mutex rather than
+/// propagating the panic — a poisoned lock must never wedge every future run.
+fn lock_cluster(state: &AppState) -> std::sync::MutexGuard<'_, ClusterUpdate> {
+    state
+        .cluster_update
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[derive(Deserialize)]
@@ -4400,22 +4417,9 @@ async fn cluster_update_start(
         }
     };
 
-    // One run at a time.
-    if state
-        .cluster_update
-        .lock()
-        .expect("cluster update lock")
-        .is_active()
-    {
-        return Err((
-            StatusCode::CONFLICT,
-            "a cluster update is already running".to_owned(),
-        ));
-    }
-
-    // Pre-flight: classify each follower from its live version. Refuse to start if any
-    // is unreachable right now — better to touch nothing than to update some and get
-    // stuck before the primary.
+    // Build the node list (followers, then the primary last) from the roster. This is
+    // a plain state read — the live per-node version check that decides skip / update /
+    // unreachable happens in the worker thread, so the handler does no blocking I/O.
     let self_id = state.ha.node_id();
     let mut followers: Vec<FollowerWork> = Vec::new();
     let mut nodes: Vec<ClusterUpdateNode> = Vec::new();
@@ -4426,48 +4430,18 @@ async fn cluster_update_start(
         if node_id == self_id {
             continue;
         }
-        let current = state.ha.peer_hello_version(&peer.url);
-        match plan_follower(current.as_deref(), &target) {
-            NodeUpdatePlan::Unreachable => {
-                return Err((
-                    StatusCode::CONFLICT,
-                    format!(
-                        "node {} is not reachable right now; not starting a cluster update",
-                        peer.url
-                    ),
-                ));
-            }
-            NodeUpdatePlan::Skip => {
-                nodes.push(ClusterUpdateNode {
-                    node_id: node_id.clone(),
-                    label: peer.url.clone(),
-                    is_primary: false,
-                    phase: NodeUpdatePhase::Skipped,
-                    error: None,
-                });
-                followers.push(FollowerWork {
-                    node_id,
-                    url: peer.url,
-                    update: false,
-                });
-            }
-            NodeUpdatePlan::Update => {
-                nodes.push(ClusterUpdateNode {
-                    node_id: node_id.clone(),
-                    label: peer.url.clone(),
-                    is_primary: false,
-                    phase: NodeUpdatePhase::Pending,
-                    error: None,
-                });
-                followers.push(FollowerWork {
-                    node_id,
-                    url: peer.url,
-                    update: true,
-                });
-            }
-        }
+        nodes.push(ClusterUpdateNode {
+            node_id: node_id.clone(),
+            label: peer.url.clone(),
+            is_primary: false,
+            phase: NodeUpdatePhase::Pending,
+            error: None,
+        });
+        followers.push(FollowerWork {
+            node_id,
+            url: peer.url,
+        });
     }
-
     // The primary itself, updated last.
     let primary_label = cluster_role(&state)
         .primary_url
@@ -4487,19 +4461,39 @@ async fn cluster_update_start(
         message: None,
         nodes,
     };
-    *state.cluster_update.lock().expect("cluster update lock") = initial.clone();
+
+    // Reserve the run atomically: check "not already running" and mark it Running under
+    // the *same* lock, so two concurrent starts cannot both get past this point.
+    {
+        let mut cluster = lock_cluster(&state);
+        if cluster.is_active() {
+            return Err((
+                StatusCode::CONFLICT,
+                "a cluster update is already running".to_owned(),
+            ));
+        }
+        *cluster = initial.clone();
+    }
     record(
         &state,
         AuditEntry::success(&identity.username, "ha.cluster.update").target(&target),
     );
 
-    // The HA and health calls are blocking (ureq), so the orchestrator runs on its
-    // own thread, like the sync loop and the update checker — never on the async
-    // runtime.
+    // The HA and health calls are blocking (ureq), so the orchestrator runs on its own
+    // thread, like the sync loop and the update checker — never on the async runtime. A
+    // panic in the worker is caught so a stuck `Running` phase can never wedge future
+    // runs.
     let worker_state = state.clone();
     let password = body.password.clone();
     std::thread::spawn(move || {
-        run_cluster_update(worker_state, password, target, followers);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_cluster_update(&worker_state, &password, &target, &followers);
+        }));
+        if outcome.is_err() {
+            let mut cluster = lock_cluster(&worker_state);
+            cluster.phase = ClusterUpdatePhase::Aborted;
+            cluster.message = Some("the cluster update stopped unexpectedly".to_owned());
+        }
     });
 
     Ok((StatusCode::ACCEPTED, Json(initial)))
@@ -4507,13 +4501,7 @@ async fn cluster_update_start(
 
 /// The current cluster-update progress, for the UI to poll. Admin-only.
 async fn cluster_update_status(State(state): State<AppState>) -> Json<ClusterUpdate> {
-    Json(
-        state
-            .cluster_update
-            .lock()
-            .expect("cluster update lock")
-            .clone(),
-    )
+    Json(lock_cluster(&state).clone())
 }
 
 /// Set one node's phase (and optional error) in the live progress.
@@ -4523,7 +4511,7 @@ fn set_cluster_node_phase(
     phase: NodeUpdatePhase,
     error: Option<&str>,
 ) {
-    let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+    let mut cluster = lock_cluster(state);
     if let Some(node) = cluster
         .nodes
         .iter_mut()
@@ -4537,7 +4525,7 @@ fn set_cluster_node_phase(
 /// Mark a node as failed and stop the whole run (the primary is left untouched).
 fn abort_cluster_update(state: &AppState, node_id: &str, message: &str) {
     {
-        let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+        let mut cluster = lock_cluster(state);
         if let Some(node) = cluster
             .nodes
             .iter_mut()
@@ -4557,21 +4545,34 @@ fn abort_cluster_update(state: &AppState, node_id: &str, message: &str) {
     );
 }
 
-/// The cluster-update worker (own thread). Updates each follower in turn, waits for
-/// it to come back on the target version, and only when all followers are healthy
-/// updates the primary itself. Any failure or timeout aborts with the primary left
-/// running.
-fn run_cluster_update(
-    state: AppState,
-    password: String,
-    target: String,
-    followers: Vec<FollowerWork>,
-) {
-    for follower in &followers {
-        if !follower.update {
-            continue; // already on target — stays Skipped
+/// The cluster-update worker (own thread). For each follower it checks the live
+/// version (skip if already at/beyond the target, abort if unreachable), triggers the
+/// update and waits until the node is back on the target version, and only when all
+/// followers are healthy updates the primary itself. Any failure, timeout or
+/// unreachable node aborts with the primary left running.
+fn run_cluster_update(state: &AppState, password: &str, target: &str, followers: &[FollowerWork]) {
+    for follower in followers {
+        match plan_follower(
+            state.ha.peer_hello_version(&follower.url).as_deref(),
+            target,
+        ) {
+            NodeUpdatePlan::Skip => {
+                // Already on the target (or newer) — leave it be.
+                set_cluster_node_phase(state, &follower.node_id, NodeUpdatePhase::Skipped, None);
+                continue;
+            }
+            NodeUpdatePlan::Unreachable => {
+                abort_cluster_update(
+                    state,
+                    &follower.node_id,
+                    "the node is not reachable; stopping before the main node",
+                );
+                return;
+            }
+            NodeUpdatePlan::Update => {}
         }
-        set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Updating, None);
+
+        set_cluster_node_phase(state, &follower.node_id, NodeUpdatePhase::Updating, None);
         // Trigger the follower's own update over the sealed channel, pinning the
         // version so every node lands on the same release.
         let body = serde_json::json!({ "password": password, "targetVersion": target });
@@ -4580,26 +4581,26 @@ fn run_cluster_update(
             .post_sealed_json(&follower.url, "api/ha/update", &body)
         {
             abort_cluster_update(
-                &state,
+                state,
                 &follower.node_id,
                 &format!("could not start the update on this node: {error}"),
             );
             return;
         }
-        set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Restarting, None);
+        set_cluster_node_phase(state, &follower.node_id, NodeUpdatePhase::Restarting, None);
 
         // Wait until it is back and serving the target version. A failed hello (the
         // container is down mid-recreate) just means "not yet".
         let deadline = Instant::now() + CLUSTER_UPDATE_NODE_TIMEOUT;
         loop {
             std::thread::sleep(CLUSTER_UPDATE_POLL);
-            if state.ha.peer_hello_version(&follower.url).as_deref() == Some(target.as_str()) {
-                set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Healthy, None);
+            if state.ha.peer_hello_version(&follower.url).as_deref() == Some(target) {
+                set_cluster_node_phase(state, &follower.node_id, NodeUpdatePhase::Healthy, None);
                 break;
             }
             if Instant::now() >= deadline {
                 abort_cluster_update(
-                    &state,
+                    state,
                     &follower.node_id,
                     "the node did not come back on the new version in time",
                 );
@@ -4609,27 +4610,23 @@ fn run_cluster_update(
     }
 
     // All followers healthy (or already current) → update the primary itself, last.
-    {
-        let mut cluster = state.cluster_update.lock().expect("cluster update lock");
-        cluster.phase = ClusterUpdatePhase::UpdatingPrimary;
-    }
+    lock_cluster(state).phase = ClusterUpdatePhase::UpdatingPrimary;
     let self_id = state.ha.node_id();
-    set_cluster_node_phase(&state, &self_id, NodeUpdatePhase::Updating, None);
+    set_cluster_node_phase(state, &self_id, NodeUpdatePhase::Updating, None);
     let backup_path = std::path::PathBuf::from(state.update.default_backup_path());
-    match perform_update(&state, &backup_path, &password, "ha:cluster", Some(&target)) {
+    match perform_update(state, &backup_path, password, "ha:cluster", Some(target)) {
         Ok(version) => {
             record(
-                &state,
+                state,
                 AuditEntry::success("ha:cluster", "update.start").target(&version),
             );
             // The sidecar recreates this container shortly; this final state is
             // best-effort and is lost when the primary restarts onto the new version.
-            let mut cluster = state.cluster_update.lock().expect("cluster update lock");
-            cluster.phase = ClusterUpdatePhase::Done;
+            lock_cluster(state).phase = ClusterUpdatePhase::Done;
         }
         Err((_, message)) => {
             abort_cluster_update(
-                &state,
+                state,
                 &self_id,
                 &format!("the primary's own update could not start: {message}"),
             );
@@ -7142,6 +7139,11 @@ mod tests {
             plan_follower(Some("v0.28.0"), "v0.29.0"),
             NodeUpdatePlan::Update
         );
+        // A node ahead of the target is skipped, never downgraded.
+        assert_eq!(
+            plan_follower(Some("v0.30.0"), "v0.29.0"),
+            NodeUpdatePlan::Skip
+        );
     }
 
     #[tokio::test]
@@ -7172,14 +7174,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cluster_update_conflicts_without_an_available_update() {
+    async fn cluster_update_conflicts_without_an_updater() {
         let (store, _writer) = Store::in_memory(100).unwrap();
         let state = test_state(store);
         state.users.create_admin("admin", "hunter2hunter2").unwrap();
         let cookie = cookie_for(&state, "admin");
-        // This node is the primary by default (no primary id set). The test build has
-        // no updater sidecar and no newer release, so a cluster update cannot start —
-        // and nothing is triggered.
+        // This node is the primary by default (no primary id set), but the test build
+        // has no updater sidecar, so a cluster update cannot start — and nothing is
+        // triggered.
         let app = router(state.clone());
 
         let res = send(
@@ -7192,9 +7194,14 @@ mod tests {
         )
         .await;
         assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert!(
+            body_of(res).await.contains("updater sidecar"),
+            "expected the updater-absent conflict"
+        );
         assert_eq!(
-            state.cluster_update.lock().unwrap().phase,
-            ClusterUpdatePhase::Idle
+            lock_cluster(&state).phase,
+            ClusterUpdatePhase::Idle,
+            "no run should have been reserved"
         );
     }
 
