@@ -627,6 +627,31 @@
   outline-offset: 1px;
 }
 
+/* "Show more / less" toggle under a capped list (companies, devices), so the
+   world map below stays within quick reach. */
+.showMore {
+  appearance: none;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--step--1);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.showMore:hover {
+  border-color: var(--signal);
+  color: inherit;
+}
+
+.showMore:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
 /* Attribution for the bundled CC BY-SA 3.0 world map. */
 .mapCredit {
   margin: 0;

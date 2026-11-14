@@ -3,6 +3,12 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.32.1] - 2026-11-14
+
+- Changed: **The Privacy dashboard reaches the world map faster.** The "most-contacted
+  companies" and "devices" lists now show the top five by default, each with a "show more"
+  link to expand the rest, so the world map below them is in view without a long scroll.
+
 ## [0.32.0] - 2026-11-14
 
 - Added: **A world map of where your devices phone home, and watched networks.** The Privacy
