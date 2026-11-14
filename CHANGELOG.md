@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.27.0] - 2026-11-14
+
+- Added: **Block a company for a single device from the privacy dashboard.** Open a device
+  (tap it in the by-device list) and each company row now carries a **For this device**
+  button (for Editors and Admins). It blocks that company — every domain the catalogue
+  knows for it — for that one device only, by adding it to the device's own policy, so the
+  rest of the network is unaffected. Like the network-wide block it is idempotent and the
+  result says how many entries were new. The company view's **Block** button still blocks
+  network-wide; now you can choose the scope.
+
 ## [0.26.1] - 2026-11-14
 
 - Fixed: **Company and device names are fully readable on the privacy dashboard.** Long

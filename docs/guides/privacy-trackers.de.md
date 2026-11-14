@@ -36,6 +36,11 @@ Das ist die Ansicht für den Moment, in dem ein Gerät ungewöhnlich gesprächig
 nennt die Organisationen hinter dem Verkehr und zeigt, wie viel davon geblockt und wie viel
 beantwortet wurde. Mit **‹ Alle Geräte** geht es zurück.
 
+Wenn du Listen bearbeiten darfst, trägt hier jede Firmenzeile einen **Für dieses
+Gerät**-Knopf: Er blockt die Firma (alle Katalog-Domains dazu) nur für dieses eine Gerät,
+indem er sie der eigenen [Geräte-Richtlinie](policies.de.md) hinzufügt – der Rest des
+Netzwerks bleibt unberührt.
+
 ### Eine Firma von hier aus blocken
 
 Tippe in der Liste **meistkontaktierte Firmen** auf eine Firma, um ihre eigene Ansicht zu
@@ -73,9 +78,10 @@ Jede Firma im Katalog gehört zu einer von vier Familien, jede mit eigener Farbe
   wird hier schlicht nicht gezählt – das ist kein „unbekannter Verkehr", sondern Verkehr,
   den diese Funktion nicht zuordnet. Ein ruhiges Dashboard kann ein ruhiges Netzwerk heißen
   oder Listen, die die meisten Tracker schon vorher geblockt haben.
-- **Blocken wirkt global.** Der **Blocken**-Knopf fügt zur netzwerkweiten Blockliste hinzu,
-  nicht für ein einzelnes Gerät. Um eine Firma nur für ein Gerät zu blocken, nutze eine
-  [Geräte-Richtlinie](policies.de.md); um einen ganzen Dienst mit einem Schalter zu sperren,
+- **Zwei Block-Reichweiten.** Der **Blocken**-Knopf in der Firmenansicht fügt zur
+  netzwerkweiten Blockliste hinzu; der **Für dieses Gerät**-Knopf in einer Geräteansicht
+  blockt eine Firma nur für dieses eine Gerät, über seine
+  [Geräte-Richtlinie](policies.de.md). Um einen ganzen Dienst mit einem Schalter zu sperren,
   die [Blockierten Dienste](blocked-services.de.md).
 
 ---

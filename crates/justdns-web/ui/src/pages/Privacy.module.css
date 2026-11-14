@@ -253,6 +253,22 @@
   outline-offset: 1px;
 }
 
+/* A company row inside a device view: same shape as the clickable company row,
+   plus a per-device block button, so it uses the same four-column grid. */
+.deviceCompanyRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  align-items: center;
+}
+
+@media (min-width: 520px) {
+  .deviceCompanyRow {
+    grid-template-columns: minmax(13rem, 2.2fr) minmax(0, 1fr) auto auto;
+    gap: var(--space-3);
+  }
+}
+
 /* A labelled sub-section inside the company detail (devices, domains). */
 .subSection {
   display: flex;
