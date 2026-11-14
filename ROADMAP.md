@@ -150,6 +150,16 @@ The phases run roughly from near-term to long-term.
   history and lifetime figures survive a switch between nodes. Each row is tagged with
   its origin node; the live dashboard stays node-local. The retention setting is now
   enforced and prunes the log on every node.
+- [x] **Manage from one node (main node).** Designate a primary — the one place config
+  is edited — and every other node becomes a read-only follower that applies what the
+  primary syncs, shows where to manage, and refuses changes (its dashboard still opens for
+  debugging). From the primary you set each node's own non-syncing fields (name, DoT/DoH
+  hostname, certificate choice, block-page address), trigger a one-click update on any
+  node, and update the whole cluster in order (each follower first, confirmed healthy on the
+  new version, then the primary last) — all without logging into it. Any node can take over
+  as main if the primary is gone.
+  Off by default (no main node → every node writable). See
+  [the guide](docs/guides/high-availability.md).
 
 JustDNS deliberately does **not** automate failover (no node seizes the other's
 address). Clients use both resolver IPs, or an external virtual IP, and the

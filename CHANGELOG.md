@@ -3,6 +3,30 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.29.1] - 2026-11-14
+
+- Changed: **The read-only notice on a follower node is now impossible to miss.** On a node
+  managed by a main node, the banner that points you at the main node runs as a full-width
+  yellow strip across the very top of every page — above the sidebar and content, with a lock
+  icon and a link to the main node — instead of a quiet line inside the page.
+
+## [0.29.0] - 2026-11-14
+
+- Added: **Manage the whole cluster from one node.** You can now pick a **main node**
+  (primary) and do all your managing there — every other node becomes a read-only
+  follower that applies what the main node syncs. A follower's dashboard still opens (so
+  you can log in and look around to debug), shows a banner pointing at the main node, and
+  refuses changes. From the main node's High-availability page you can also set each
+  node's own settings that never sync — its display name, DoT/DoH hostname, certificate
+  choice and block-page address — and trigger a one-click update on any node, without ever
+  logging into it. You can also **update the whole cluster in order** from the main node:
+  each follower is updated one at a time and only moved past once it is back and serving the
+  new version, then the main node updates itself last — and if a node does not come back in
+  time the run stops with the main node left untouched. If the main node is ever gone, any
+  node can take over as main from its own High-availability page. Off by default: with no
+  main node chosen, every node stays writable exactly as before. See
+  [the guide](docs/guides/high-availability.md).
+
 ## [0.28.0] - 2026-11-14
 
 - Added: **Browser-hardening security headers.** Every dashboard response now carries a

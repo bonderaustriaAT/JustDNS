@@ -62,6 +62,14 @@ impl Semver {
     }
 }
 
+/// Whether `candidate` is the same as or newer than `baseline`, by semantic version
+/// (a leading `v` is ignored). `None` when either side is not three dotted integers.
+/// Used by the cluster-update orchestrator to skip a node already at or beyond the
+/// target instead of downgrading it.
+pub(crate) fn version_at_least(candidate: &str, baseline: &str) -> Option<bool> {
+    Some(Semver::parse(candidate)? >= Semver::parse(baseline)?)
+}
+
 /// The cached result of the most recent check.
 #[derive(Clone, Default)]
 struct Cached {

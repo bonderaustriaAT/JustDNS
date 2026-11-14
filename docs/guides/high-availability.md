@@ -159,6 +159,43 @@ MFA). So:
 > node still runs an older version, sync pauses until both are upgraded — resolution
 > keeps running the whole time, only the reconciliation waits.
 
+## Managing the whole cluster from one node
+
+By default every node is equal and writable, and a change on any of them syncs to the
+rest. If you would rather manage in one place, pick a **main node** (the primary) on the
+High-availability page. From then on:
+
+- **The main node is where you manage.** Everything you change there syncs out as before.
+- **Every other node is a read-only follower.** Its dashboard still opens — so you can log
+  in and look around to debug — but it shows a banner pointing at the main node and refuses
+  changes. (The High-availability page itself stays usable on a follower, so you can still
+  repair the cluster or take over.)
+- **The main node's settings always win.** Because followers never originate edits, there
+  is nothing to fight over — the cluster converges on what the main node holds.
+
+Each node also has a handful of settings that *never* sync, because they must differ per
+node: its display name, its DoT/DoH hostname, which stored certificate it presents, and
+its block-page address (each node points blocked names at itself). From the main node's
+High-availability page you can now set these on **any** node — open that node's card,
+edit **Node settings**, and save. You can also trigger a **one-click update** on any node
+from there (it backs itself up first, encrypted with the password you enter), so you never
+have to log into the other nodes at all.
+
+You can also update the **whole cluster in one go** from the main node. On its
+High-availability page, **Update the whole cluster** updates every node in a safe order:
+each follower one at a time, and the main node **last**. It only moves on to the next node
+once the one it just updated is back and serving the **new version** (so the cluster never
+has more than one node down at a time), and it updates the main node itself only after every
+follower is healthy. Each node pins the **same** version, backs itself up first (encrypted
+with the one password you enter), and nothing requires logging into the other nodes. If a
+node does not come back in time, the run **stops and the main node is left untouched**, so
+you are never left with the whole cluster mid-update — fix that node and run it again.
+
+If the main node is ever gone, open any surviving node's High-availability page and choose
+**Take over as main node**. That node becomes the primary and is writable again. To go back
+to the old everyone-equal behaviour, clear the main node (take over on the node you want,
+then unset it) — with no main node designated, every node is writable exactly as before.
+
 ## Pointing your clients at both
 
 Because JustDNS does not move traffic for you, your clients should be able to use
@@ -267,6 +304,51 @@ sync surface does not exist on an instance that is not using the feature. An exi
 pairing is deliberately **not** required (the key is the guard), or two fresh nodes
 could never connect the first time. The management endpoints (enable, set key, connect,
 sync now) sit behind the normal admin login.
+
+**The main node is enforced in two places.** The chosen primary's node id rides in the
+synced settings (`cluster.primaryNodeId`), so every node agrees on who it is. On a
+follower, the auth guard refuses every write (any non-GET) with a 403 that names the main
+node's URL — except the account-self and `/api/ha` surfaces, so you can still manage your
+own login and repair or take over the cluster from a follower. The dashboard mirrors the
+same rule by turning off its edit affordances, so you see a read-only view rather than
+buttons that would fail. Because a follower never writes, last-writer-wins already
+converges on the main node's values; the gate just makes "managed from one place" explicit
+and visible. Designating an **unknown** node id is refused, so the cluster can never be
+locked into a primary that does not exist (which would make *every* node read-only).
+
+**Remote node management rides the sealed peer channel.** The four per-node fields and the
+one-click update are set from the main node over the same key-authed, ChaCha20-Poly1305
+channel as the snapshot — the body (including a remote update's backup password) is sealed,
+never sent in clear. A node only ever writes its *own* identity fields and runs its *own*
+update (the backup is written to its own data dir), so the main node asks rather than
+reaches in. Only the node that *is* the current primary will drive remote management of
+another node; a follower that is asked to do so refuses, so the "managed from one place"
+rule holds for the management actions themselves, not only for ordinary edits. Holding the
+shared key is already the cluster's root credential (it unseals every password hash in the
+snapshot), so these add no new trust.
+
+**The cluster update is orchestrated, not fired-and-forgotten.** "Update the whole cluster"
+runs a small state machine on the main node. It pins one target version for the whole run,
+then for each follower in turn: triggers that node's own update over the sealed channel
+(sending the pinned version), then polls the node's `/api/ha/hello` until it answers with
+that exact version — which only happens once the container has been recreated on the new
+image and is serving again, so a node that merely restarted on the *old* image is not
+mistaken for done. Only when every follower reports the target version does the main node
+update itself. Any follower that fails or does not return within the timeout aborts the run
+with the main node untouched, so the cluster is never left with every node mid-update. The
+run state lives in memory on the main node (it resets on the main node's own update at the
+end), which is why the dashboard briefly goes away as the last step — that is the main node
+recreating itself.
+
+**The read-only follower is a convenience, not a security boundary between admins.** The
+main node answers "where is config edited", not "who may edit it". Because accounts and
+roles sync, *any* admin account is a full admin on every node: a follower's read-only
+dashboard is for the day-to-day "don't manage here" nudge and to stop accidental edits,
+but an admin logged into a follower can at any time press **Take over as main node** — a
+deliberate, confirmed action — and that node becomes writable. So treat an admin login as
+cluster-wide and fully privileged wherever it happens; do not rely on "it's only a
+follower" to contain a session. The real boundaries are the admin login itself and the
+shared HA key, not the primary flag.
 
 **Clock drift matters.** Last-writer-wins trusts the clocks, so keep both nodes on
 NTP. A node-id tiebreak keeps things from flapping when two stamps land on the exact

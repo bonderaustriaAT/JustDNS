@@ -102,7 +102,7 @@ function ServiceCard({
  *  group and schedule editors. */
 export function BlockedServices() {
   const { t } = useI18n();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isPrimary } = useAuth();
   const [services, setServices] = useState<Service[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -225,7 +225,7 @@ export function BlockedServices() {
               key={service.id}
               service={service}
               pending={pending.has(service.id)}
-              canEdit={isAdmin}
+              canEdit={isAdmin && isPrimary}
               onToggle={() => toggle(service)}
             />
           ))}

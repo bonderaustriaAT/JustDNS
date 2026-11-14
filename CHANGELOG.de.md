@@ -4,6 +4,31 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.29.1] - 2026-11-14
+
+- Geändert: **Der Nur-Lesen-Hinweis auf einer Follower-Node ist jetzt unübersehbar.** Auf einer
+  von einer Hauptnode verwalteten Node läuft der Hinweis, der auf die Hauptnode zeigt, jetzt als
+  gelber Streifen über die volle Breite ganz oben auf jeder Seite – über Sidebar und Inhalt, mit
+  Schloss-Icon und Link zur Hauptnode – statt als dezente Zeile im Inhalt.
+
+## [0.29.0] - 2026-11-14
+
+- Neu: **Den ganzen Cluster von einer Node aus verwalten.** Du kannst jetzt eine
+  **Hauptnode** festlegen und dort alles verwalten – jede andere Node wird zur
+  nur-lesenden Follower-Node, die nur anwendet, was die Hauptnode synchronisiert. Das
+  Dashboard einer Follower-Node öffnet sich weiterhin (zum Einloggen und Nachsehen beim
+  Debuggen), zeigt einen Hinweis mit der Adresse der Hauptnode und weist Änderungen ab.
+  Auf der HA-Seite der Hauptnode setzt du zusätzlich die Node-eigenen Felder, die nie
+  synchronisiert werden – Anzeigename, DoT/DoH-Hostname, Zertifikatswahl und
+  Block-Page-Adresse – und löst auf jeder Node ein Update aus, ohne dich je dort
+  einzuloggen. Du kannst von der Hauptnode aus auch den **ganzen Cluster der Reihe nach
+  aktualisieren**: jeder Follower wird einzeln aktualisiert und erst weitergeschaltet, wenn
+  er wieder läuft und die neue Version ausliefert, danach aktualisiert sich die Hauptnode
+  zuletzt selbst – kommt eine Node nicht rechtzeitig zurück, stoppt der Vorgang und die
+  Hauptnode bleibt unangetastet. Fällt die Hauptnode aus, kann jede Node auf ihrer eigenen
+  HA-Seite die Rolle übernehmen. Standardmäßig aus: ohne gewählte Hauptnode bleibt jede Node
+  beschreibbar wie bisher. Siehe [den Leitfaden](docs/guides/high-availability.de.md).
+
 ## [0.28.0] - 2026-11-14
 
 - Neu: **Security-Header zur Browser-Härtung.** Jede Dashboard-Antwort trägt jetzt eine
