@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.27.0] - 2026-11-14
+
+- Neu: **Eine Firma nur für ein einzelnes Gerät aus dem Privatsphäre-Dashboard blocken.**
+  Öffne ein Gerät (tippe es in der Liste „Nach Gerät" an) – jede Firmenzeile trägt jetzt
+  einen **Für dieses Gerät**-Knopf (für Editor und Admin). Er blockt die Firma – alle
+  Domains, die der Katalog zu ihr kennt – nur für dieses eine Gerät, indem er sie der
+  eigenen Geräte-Richtlinie hinzufügt; der Rest des Netzwerks bleibt unberührt. Wie der
+  netzwerkweite Block ist er idempotent, und das Ergebnis sagt, wie viele Einträge neu
+  waren. Der **Blocken**-Knopf in der Firmenansicht blockt weiterhin netzwerkweit – jetzt
+  kannst du die Reichweite wählen.
+
 ## [0.26.1] - 2026-11-14
 
 - Behoben: **Firmen- und Gerätenamen im Privatsphäre-Dashboard sind voll lesbar.** Lange

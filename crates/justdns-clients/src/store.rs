@@ -224,6 +224,68 @@ impl ClientStore {
         })
     }
 
+    /// Add several domains to one device's own block delta, creating the device
+    /// (named after its address) if it does not exist yet. Returns how many were
+    /// newly added; a domain already blocked for the device is left as it is, and
+    /// a blank one is skipped. The device's group and allow list are preserved,
+    /// and nothing is written when nothing is new. Used by the privacy
+    /// dashboard's "block for this device" action, which adds a whole company's
+    /// catalogue of domains at once.
+    pub fn add_device_blocks(&self, target: &str, domains: &[&str]) -> Result<usize, ClientError> {
+        let target = normalise_target(target)?;
+        let added;
+        {
+            let mut state = self.inner.state.write().expect("clients lock poisoned");
+            // Work out what is genuinely new before touching the device, so a
+            // re-block creates no stray device and triggers no rebuild.
+            let mut seen: std::collections::HashSet<String> = state
+                .devices
+                .iter()
+                .find(|d| d.target == target)
+                .map(|d| d.policy.block.iter().cloned().collect())
+                .unwrap_or_default();
+            let mut to_add = Vec::new();
+            for domain in domains {
+                let domain = domain.trim();
+                if domain.is_empty() {
+                    continue;
+                }
+                if seen.insert(domain.to_owned()) {
+                    to_add.push(domain.to_owned());
+                }
+            }
+            if to_add.is_empty() {
+                return Ok(0);
+            }
+            added = to_add.len();
+
+            let device = match state.devices.iter_mut().find(|d| d.target == target) {
+                Some(existing) => existing,
+                None => {
+                    state.devices.push(Device {
+                        target: target.clone(),
+                        name: target.clone(),
+                        note: None,
+                        kind: DeviceKind::Other,
+                        group: None,
+                        policy: PolicyDelta::default(),
+                    });
+                    state
+                        .devices
+                        .iter_mut()
+                        .find(|d| d.target == target)
+                        .expect("just pushed")
+                }
+            };
+            device.policy.block.extend(to_add);
+            device.policy.block.sort();
+            state.devices.sort_by(|a, b| a.target.cmp(&b.target));
+            write_atomic(&self.inner.path, &state)?;
+        }
+        self.fire_on_change();
+        Ok(added)
+    }
+
     /// Remove the device matching `target`; an unknown target is reported.
     pub fn remove(&self, target: &str) -> Result<(), ClientError> {
         let target = normalise_target(target)?;
@@ -603,6 +665,64 @@ mod tests {
             store.remove("192.168.20.10"),
             Err(ClientError::Unknown(_))
         ));
+    }
+
+    #[test]
+    fn add_device_blocks_creates_merges_and_preserves() {
+        let (_dir, store) = store();
+
+        // An unknown client is created, named after its address.
+        assert_eq!(
+            store
+                .add_device_blocks("192.168.20.10", &["a.test", "b.test"])
+                .unwrap(),
+            2
+        );
+        let view = store.view();
+        assert_eq!(view.len(), 1);
+        assert_eq!(view[0].target, "192.168.20.10");
+        assert_eq!(view[0].name, "192.168.20.10", "named after its address");
+        assert_eq!(
+            view[0].policy.block,
+            vec!["a.test".to_owned(), "b.test".to_owned()]
+        );
+
+        // A re-block (including blanks and repeats) adds nothing.
+        assert_eq!(
+            store
+                .add_device_blocks("192.168.20.10", &["a.test", "", "a.test"])
+                .unwrap(),
+            0
+        );
+        assert_eq!(store.view().len(), 1);
+
+        // The device's group and allow list survive a later block.
+        let group = store.add_group("Kids", PolicyDelta::default()).unwrap();
+        store
+            .set_device_policy(
+                "192.168.20.20",
+                Some(&group.id),
+                delta(&["ok.test"], &["old.test"]),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .add_device_blocks("192.168.20.20", &["new.test", "old.test"])
+                .unwrap(),
+            1,
+            "only the genuinely new domain counts"
+        );
+        let dev = store
+            .view()
+            .into_iter()
+            .find(|d| d.target == "192.168.20.20")
+            .unwrap();
+        assert_eq!(dev.group.as_deref(), Some(group.id.as_str()), "group kept");
+        assert_eq!(dev.policy.allow, vec!["ok.test".to_owned()], "allow kept");
+        assert_eq!(
+            dev.policy.block,
+            vec!["new.test".to_owned(), "old.test".to_owned()]
+        );
     }
 
     #[test]
