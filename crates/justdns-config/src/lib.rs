@@ -284,6 +284,10 @@ pub struct Notifications {
     /// Alert when a device makes an unusual number of blocked lookups in a short
     /// window (possible malware beaconing). A heuristic — off by default.
     pub on_device_spike: bool,
+    /// Alert when an answer resolves into a watched country or network (see
+    /// [`Settings::geo_watch`] and a scope's `watch_countries`/`watch_asns`). Off
+    /// by default; purely a read-path marker, never a block.
+    pub on_watched_geo: bool,
     /// How many days before a certificate's expiry to start warning.
     pub cert_expiry_days: u32,
     /// How many blocked lookups from one device within `spike_window_mins` count
@@ -304,11 +308,28 @@ impl Default for Notifications {
             on_update: true,
             on_cert_expiry: true,
             on_device_spike: false,
+            on_watched_geo: false,
             cert_expiry_days: 14,
             spike_blocked_threshold: 100,
             spike_window_mins: 10,
         }
     }
+}
+
+/// The globally watched countries and networks: answers that resolve into one are
+/// highlighted in the log for every device and, when [`Notifications::on_watched_geo`]
+/// is on, can raise a webhook alert. A group or device can watch more of its own
+/// via its `watch_countries`/`watch_asns` delta; the effective watch set for a
+/// client is the union of global, group and device. Purely a read-path marker —
+/// it is never folded into the blocking policy, so the DNS hot path is unaffected.
+/// Part of [`Settings`], so it syncs across an HA cluster as one unit.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GeoWatch {
+    /// Watched countries (ISO 3166-1 alpha-2, lower-case).
+    pub countries: Vec<String>,
+    /// Watched networks, by ASN number.
+    pub asns: Vec<u32>,
 }
 
 /// When scheduled summary reports are generated. Both cadences are off by
@@ -430,6 +451,11 @@ pub struct Settings {
     /// legacy `JUSTDNS_METRICS_TOKEN` environment variable still applies.
     #[serde(default)]
     pub metrics_token: String,
+    /// The globally watched countries and networks (Privacy "where do my devices
+    /// phone home" map). Empty by default — nothing is watched until the admin
+    /// marks a country or network.
+    #[serde(default)]
+    pub geo_watch: GeoWatch,
 }
 
 impl Default for Settings {
@@ -459,6 +485,7 @@ impl Default for Settings {
             notifications: Notifications::default(),
             cluster: Cluster::default(),
             metrics_token: String::new(),
+            geo_watch: GeoWatch::default(),
         }
     }
 }
@@ -1102,6 +1129,7 @@ mod tests {
                 on_update: false,
                 on_cert_expiry: true,
                 on_device_spike: true,
+                on_watched_geo: false,
                 cert_expiry_days: 7,
                 spike_blocked_threshold: 250,
                 spike_window_mins: 5,
@@ -1236,5 +1264,30 @@ mod tests {
             3,
             "callback saw the new profile"
         );
+    }
+
+    #[test]
+    fn geo_watch_defaults_empty_and_round_trips() {
+        assert!(Settings::default().geo_watch.countries.is_empty());
+        assert!(Settings::default().geo_watch.asns.is_empty());
+        assert!(!Settings::default().notifications.on_watched_geo);
+
+        let mut settings = Settings::default();
+        settings.geo_watch = GeoWatch {
+            countries: vec!["ru".to_owned(), "cn".to_owned()],
+            asns: vec![13335],
+        };
+        settings.notifications.on_watched_geo = true;
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("geoWatch") && json.contains("onWatchedGeo"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.geo_watch.countries, vec!["ru", "cn"]);
+        assert_eq!(back.geo_watch.asns, vec![13335]);
+        assert!(back.notifications.on_watched_geo);
+
+        // An older config without the fields still loads them as empty/off.
+        let legacy: Settings = serde_json::from_str(r#"{"instanceName":"Old"}"#).unwrap();
+        assert!(legacy.geo_watch.countries.is_empty());
+        assert!(!legacy.notifications.on_watched_geo);
     }
 }

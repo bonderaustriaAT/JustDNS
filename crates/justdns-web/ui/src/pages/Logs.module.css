@@ -343,6 +343,30 @@
   box-shadow: inset 2px 0 0 var(--danger);
 }
 
+/* A watched-geo entry carries a quiet amber edge; a blocked row keeps red, with
+   the amber alongside it, so the two markers never fight for the same edge. */
+.item[data-watched] .row {
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
+.item[data-watched][data-blocked] .row {
+  box-shadow:
+    inset 2px 0 0 var(--danger),
+    inset 4px 0 0 var(--amber);
+}
+
+/* The "watched" badge sits ahead of the network chips in amber. */
+.watchedBadge {
+  font-size: var(--step--2);
+  font-weight: 600;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  white-space: nowrap;
+}
+
 .time {
   font-family: var(--font-mono);
   font-size: var(--step--1);

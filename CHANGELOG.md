@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.32.0] - 2026-11-14
+
+- Added: **A world map of where your devices phone home, and watched networks.** The Privacy
+  dashboard's "where your devices phone home" section now opens with an offline world map,
+  shading each country by how many answers resolved into it; click a country to filter the
+  network list to it. You can mark a country or network (ASN) as **watched** — globally from
+  the map, or per device and group in their policy — and JustDNS then flags every matching
+  answer in the query log with an amber badge, and can post a webhook alert when a watched
+  network is contacted (off by default). Watching is a read-path marker only: it highlights
+  and alerts, and never blocks or touches the DNS hot path. The map is a bundled, offline SVG
+  (Simple World Map by Al MacDonald and Fritz Lekschas, CC BY-SA 3.0) — no map library and no
+  network calls.
+
 ## [0.31.0] - 2026-11-14
 
 - Changed: **A smoother, safer cluster update.** Updating the whole cluster is now easier to
