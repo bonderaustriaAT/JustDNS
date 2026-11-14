@@ -145,6 +145,9 @@ const de = {
   "privacy.cat.social": "Social Media",
   "privacy.cat.fingerprinting": "Fingerprinting",
   "privacy.note": "Die Zuordnung stammt aus einem kuratierten, mitgelieferten Firmenkatalog. Er deckt die großen Werbe-, Analyse-, Social- und Fingerprinting-Netzwerke ab, ist aber bewusst nicht vollständig.",
+  "privacy.networksTitle": "Wohin telefonieren deine Geräte",
+  "privacy.networksHint": "Länder und Netze (ASN), in die die Antworten im Zeitraum {window} aufgelöst wurden – offline aus der GeoIP-Datenbank.",
+  "privacy.networkUnknown": "Unbekanntes Netz",
 
   // Activity chart.
   "chart.summary": "Anfragen pro Stunde, letzte {n} Stunden. Höchstwert {max}.",
@@ -1537,6 +1540,9 @@ const en: Catalog = {
   "privacy.cat.social": "Social media",
   "privacy.cat.fingerprinting": "Fingerprinting",
   "privacy.note": "Attribution comes from a curated, built-in company catalogue. It covers the large advertising, analytics, social and fingerprinting networks, but is deliberately not exhaustive.",
+  "privacy.networksTitle": "Where your devices phone home",
+  "privacy.networksHint": "The countries and networks (ASN) the answers resolved into over {window}, offline from the GeoIP database.",
+  "privacy.networkUnknown": "Unknown network",
 
   "chart.summary": "Queries per hour, last {n} hours. Peak {max}.",
   "chart.caption": "Queries per hour, last {n} hours",

@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.30.0] - 2026-11-14
+
+- Neu: **Land und Netz hinter jeder Antwort sehen (GeoIP).** JustDNS ordnet jetzt jede
+  Adresse, zu der ein Name auflöst, ihrem **Land** und **Netz (ASN)** zu – so erkennst du auf
+  einen Blick, dass ein Gerät gerade einen Namen in ein Netz in einem anderen Land aufgelöst
+  hat. Das Protokoll zeigt neben den aufgelösten Adressen eine Flagge und den Netzbetreiber,
+  der Live-Feed lässt sich auf ein Land oder einen ASN einschränken, und die
+  Privatsphäre-Seite bekommt einen Abschnitt **Wohin telefonieren deine Geräte**, der die
+  Ziele des ganzen Netzwerks nach Land und Netz gruppiert. Es läuft **ausschließlich offline**
+  – eine lokale Datenbankdatei, nie eine Online-Abfrage – und ist mit den DB-IP-Lite-Daten
+  sofort einsatzbereit; mit eigenen MaxMind-GeoLite2-Dateien austauschbar oder ganz
+  abschaltbar. Am DNS-Dienst und am Protokoll ändert sich nichts; die Zuordnung passiert beim
+  Lesen des Dashboards. Siehe [den Leitfaden](docs/guides/geoip.de.md).
+
 ## [0.29.1] - 2026-11-14
 
 - Geändert: **Der Nur-Lesen-Hinweis auf einer Follower-Node ist jetzt unübersehbar.** Auf einer

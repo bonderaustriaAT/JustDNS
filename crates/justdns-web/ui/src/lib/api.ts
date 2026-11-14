@@ -264,6 +264,58 @@ export interface TrackerReport {
   devices: DeviceTrackers[];
 }
 
+/** The country and network one answer address resolves into, from the offline
+ *  GeoIP database. Every field is optional: a database may know the country but
+ *  not the network, and a private address carries neither. */
+export interface GeoInfo {
+  /** ISO 3166-1 alpha-2 country code (e.g. "US"); the UI turns it into a flag
+   *  and a localised name. */
+  country?: string;
+  /** Autonomous-system number of the announcing network. */
+  asn?: number;
+  /** Human-readable operator of that network (e.g. "CLOUDFLARENET"). */
+  org?: string;
+}
+
+/** One device in a network's drill-down: how many of its answers resolved there. */
+export interface NetworkDevice {
+  client: string;
+  name?: string;
+  contacts: number;
+}
+
+/** One destination network the answers resolved into — an ASN, or a country-only
+ *  bucket when only the country is known. `devices` is present in the
+ *  network-wide list and omitted inside a single device's breakdown. */
+export interface NetworkContact {
+  asn?: number;
+  org?: string;
+  country?: string;
+  contacts: number;
+  devices?: NetworkDevice[];
+}
+
+/** One device's outward destinations over the window: total resolved contacts
+ *  and the networks it reached most. */
+export interface DeviceNetworks {
+  client: string;
+  name?: string;
+  contacts: number;
+  networks: NetworkContact[];
+}
+
+/** The "where your devices phone home" payload: network-wide destinations and a
+ *  per-device breakdown, grouped by the country and ASN each answer resolves
+ *  into. The endpoint answers 404 when no GeoIP database is loaded. */
+export interface NetworkReport {
+  window: TrackerWindow;
+  fromMs: number;
+  toMs: number;
+  totalContacts: number;
+  networks: NetworkContact[];
+  devices: DeviceNetworks[];
+}
+
 /// How a stored certificate came to be. Matches the Rust `CertKind`: one JustDNS
 /// minted itself (self-signed, with a local CA to install), or one the operator
 /// uploaded.
@@ -461,6 +513,9 @@ export interface QueryRow {
   /** The node this row came from in a high-availability cluster: absent for this
    *  node's own queries, a peer's node id for one pulled over the mesh. */
   origin?: string;
+  /** The distinct countries and networks the answer addresses resolve into, from
+   *  the offline GeoIP database. Absent when no database is loaded. */
+  networks?: GeoInfo[];
 }
 
 /** One cluster node as the explorer shows it: the stable id, the host a person
@@ -1178,9 +1233,25 @@ export const api = {
       | { org: string; client?: string }
       | { domain: string; note?: string; client?: string },
   ) => sendJson<{ added: number }>("POST", "/api/privacy/block", target),
-  queries: (limit = 50, query = "", signal?: AbortSignal) => {
+  /** Where the network's answers resolve to over the window (`day`/`week`/`month`):
+   *  network-wide destinations and a per-device breakdown, grouped by the country
+   *  and ASN each answer address lands in. Rejects with a 404 `ApiError` when no
+   *  GeoIP database is loaded, so the caller can hide the section. */
+  privacyNetworks: (window: TrackerWindow = "day", signal?: AbortSignal) =>
+    getJson<NetworkReport>(`/api/privacy/networks?window=${window}`, signal),
+  /** The live query feed (the hot ring), newest first. `country` (ISO 3166-1
+   *  alpha-2) and `asn` narrow it to answers resolving into that country or
+   *  network; both need a GeoIP database loaded. */
+  queries: (
+    limit = 50,
+    query = "",
+    signal?: AbortSignal,
+    geo?: { country?: string; asn?: number },
+  ) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());
+    if (geo?.country) params.set("country", geo.country);
+    if (geo?.asn != null) params.set("asn", String(geo.asn));
     return getJson<QueryRow[]>(`/api/queries?${params}`, signal);
   },
   /** A filtered, paginated page of the **full durable history** (DuckDB), newest

@@ -51,6 +51,31 @@ COPY --from=ui /ui/dist crates/justdns-web/ui/dist
 RUN cargo build --release --locked --bin justdns \
     && cp target/release/justdns /usr/local/bin/justdns
 
+# Fetch the offline GeoIP databases (DB-IP Lite, CC BY 4.0) so the dashboard can
+# show the country and network each answer resolves into out of the box, with no
+# runtime network lookups. The free DB-IP files are published monthly with the
+# month in the path, so we try the current month and fall back to the previous
+# one. An operator can override these at runtime with their own MaxMind GeoLite2
+# files via JUSTDNS_GEOIP_COUNTRY_DB / JUSTDNS_GEOIP_ASN_DB; see
+# docs/guides/geoip.md for attribution and the bring-your-own setup.
+FROM debian:13.7-slim AS geoip
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /geoip
+RUN set -eu; \
+    base="https://download.db-ip.com/free"; \
+    for kind in country asn; do \
+      ok=0; \
+      for month in "$(date -u +%Y-%m)" "$(date -u -d 'last month' +%Y-%m)"; do \
+        if curl -fsSL "$base/dbip-$kind-lite-$month.mmdb.gz" -o "dbip-$kind-lite.mmdb.gz"; then \
+          ok=1; break; \
+        fi; \
+      done; \
+      [ "$ok" = 1 ] || { echo "could not download dbip-$kind-lite" >&2; exit 1; }; \
+      gunzip "dbip-$kind-lite.mmdb.gz"; \
+    done
+
 # Runtime: just the binary. TLS roots are compiled in (webpki-roots), so no
 # system certificate store is needed for DoT/DoH upstreams. curl is added only
 # so the container HEALTHCHECK below can probe the web endpoint.
@@ -59,6 +84,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
+# The bundled offline GeoIP databases; the binary's defaults point here.
+COPY --from=geoip /geoip/dbip-country-lite.mmdb /usr/share/justdns/geoip/dbip-country-lite.mmdb
+COPY --from=geoip /geoip/dbip-asn-lite.mmdb /usr/share/justdns/geoip/dbip-asn-lite.mmdb
 
 # The release version (git tag) so the backend can report it at /api/diag. The
 # build arg is the same one the UI stage bakes into the bundle; re-declaring it
@@ -81,7 +109,9 @@ ENV JUSTDNS_LISTEN=0.0.0.0:53 \
     JUSTDNS_TLS_DIR=/data/tls \
     JUSTDNS_CERTS_DIR=/data/certs \
     JUSTDNS_SYSLOG_DIR=/data/logs \
-    JUSTDNS_SECRET_KEY_PATH=/keys/master.key
+    JUSTDNS_SECRET_KEY_PATH=/keys/master.key \
+    JUSTDNS_GEOIP_COUNTRY_DB=/usr/share/justdns/geoip/dbip-country-lite.mmdb \
+    JUSTDNS_GEOIP_ASN_DB=/usr/share/justdns/geoip/dbip-asn-lite.mmdb
 
 # The query log and secret files persist here; mount a volume to keep them
 # across restarts.

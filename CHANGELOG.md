@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.30.0] - 2026-11-14
+
+- Added: **See the country and network behind every answer (GeoIP).** JustDNS now maps each
+  address a name resolves to onto its **country** and **network (ASN)**, so you can tell at a
+  glance that a device just resolved a name into a network in another country. The query log
+  shows a flag and the network operator next to the resolved addresses, the live feed can be
+  narrowed to one country or ASN, and the Privacy page gains a **Where your devices phone
+  home** section that groups the whole network's destinations by country and network. It is
+  **offline only** — a local database file, never an online lookup — and ships ready to use
+  with the DB-IP Lite databases; point it at your own MaxMind GeoLite2 files to swap it, or
+  leave it off entirely. Nothing about the DNS service or the log changes; the lookup happens
+  as the dashboard is read. See [the guide](docs/guides/geoip.md).
+
 ## [0.29.1] - 2026-11-14
 
 - Changed: **The read-only notice on a follower node is now impossible to miss.** On a node

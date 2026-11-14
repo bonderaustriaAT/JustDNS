@@ -8,6 +8,7 @@ members = [
     "crates/justdns-config",
     "crates/justdns-dns",
     "crates/justdns-filter",
+    "crates/justdns-geoip",
     "crates/justdns-lists",
     "crates/justdns-rewrite",
     "crates/justdns-schedule",

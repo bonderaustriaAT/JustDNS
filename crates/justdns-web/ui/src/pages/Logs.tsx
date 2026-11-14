@@ -11,6 +11,7 @@ import {
   type ResolverStat,
 } from "../lib/api";
 import { RECORD_TYPES, RESPONSE_CODES, recordTypeLabel, responseCodeLabel, sourceLabel } from "../lib/dns";
+import { countryName, describeGeo } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
 import { LOG_LIMIT, useHistory, useLogs, type LogRow } from "../lib/useLogs";
 import { LogDetail } from "./LogDetail";
@@ -469,7 +470,7 @@ function LogList({
   setOpenKey: (key: string | null) => void;
   showDate?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { nodeLabels, selfLabel, showNodes } = useNodeLabels();
   return (
     <ol className={styles.list}>
@@ -507,6 +508,25 @@ function LogList({
                       →
                     </span>{" "}
                     {row.addresses.join(", ")}
+                  </span>
+                ) : null}
+                {row.networks && row.networks.length > 0 ? (
+                  <span className={styles.networks}>
+                    {row.networks.map((net, i) => (
+                      <span
+                        key={i}
+                        className={styles.network}
+                        title={
+                          net.asn != null
+                            ? `${countryName(net.country, lang)} · AS${net.asn}${
+                                net.org ? ` ${net.org}` : ""
+                              }`
+                            : countryName(net.country, lang)
+                        }
+                      >
+                        {describeGeo(net, lang)}
+                      </span>
+                    ))}
                   </span>
                 ) : null}
               </span>
