@@ -36,6 +36,10 @@ to open when one device looks unusually chatty: it names the organisations behin
 traffic, and shows how much of it was blocked versus answered. Use **‹ All devices** to
 go back.
 
+If you can edit lists, each company row here carries a **For this device** button: it
+blocks that company (every catalogue domain for it) for this one device only, by adding
+it to the device's own [policy](policies.md) — the rest of the network is unaffected.
+
 ### Blocking a company from here
 
 Tap a company in the **most-contacted** list to open its own view: which devices reached
@@ -73,10 +77,10 @@ colour:
   simply not counted here — it is not "unknown traffic", just traffic this feature does
   not attribute. A quiet dashboard can mean a quiet network, or lists that blocked most
   trackers upstream before they could be attributed.
-- **Blocking is global.** The **Block** button adds to your network-wide block list, not
-  to a single device. To block a company for one device only, use a
-  [per-device policy](policies.md); to block a whole product with one switch, use
-  [blocked services](blocked-services.md).
+- **Two scopes of block.** The company view's **Block** button adds to your network-wide
+  block list; a device view's **For this device** button blocks a company for that one
+  device only, via its [per-device policy](policies.md). To block a whole product with one
+  switch, use [blocked services](blocked-services.md).
 
 ---
 

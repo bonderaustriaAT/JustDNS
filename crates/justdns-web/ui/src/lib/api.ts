@@ -1112,10 +1112,14 @@ export const api = {
   privacyTrackers: (window: TrackerWindow = "day", signal?: AbortSignal) =>
     getJson<TrackerReport>(`/api/privacy/trackers?window=${window}`, signal),
   /** Block a whole company (every domain the catalogue attributes to it) or a
-   *  single domain, straight from the privacy dashboard. Editor-gated and
-   *  idempotent; returns how many entries were newly added to the block list. */
-  privacyBlock: (target: { org: string } | { domain: string; note?: string }) =>
-    sendJson<{ added: number }>("POST", "/api/privacy/block", target),
+   *  single domain, straight from the privacy dashboard. With `client` the block
+   *  applies to that one device's own policy instead of the global list.
+   *  Editor-gated and idempotent; returns how many entries were newly added. */
+  privacyBlock: (
+    target:
+      | { org: string; client?: string }
+      | { domain: string; note?: string; client?: string },
+  ) => sendJson<{ added: number }>("POST", "/api/privacy/block", target),
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (query.trim()) params.set("q", query.trim());

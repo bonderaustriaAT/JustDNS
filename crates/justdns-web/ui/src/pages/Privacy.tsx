@@ -106,7 +106,65 @@ function categoryLabel(category: string, t: ReturnType<typeof useI18n>["t"]): st
   return key ? t(key) : category;
 }
 
-/** The focused view for one device: its companies, busiest first. */
+/** One company row inside a device view: the meter plus, for editors, a button
+ *  that blocks that company for this one device. */
+function DeviceCompanyRow({
+  company,
+  max,
+  canEdit,
+  busy,
+  onBlock,
+  t,
+  nf,
+}: {
+  company: CompanyContact;
+  max: number;
+  canEdit: boolean;
+  busy: boolean;
+  onBlock: () => void;
+  t: ReturnType<typeof useI18n>["t"];
+  nf: Intl.NumberFormat;
+}) {
+  const width = max === 0 ? 0 : (company.contacts / max) * 100;
+  const blockedWidth = company.contacts === 0 ? 0 : (company.blocked / company.contacts) * 100;
+  return (
+    <li className={styles.deviceCompanyRow}>
+      <span className={styles.companyName}>
+        <span className={styles.dot} data-cat={company.category} aria-hidden="true" />
+        <span className={styles.companyOrg}>{company.org}</span>
+        <span className={styles.companyCat}>{categoryLabel(company.category, t)}</span>
+      </span>
+      <span className={styles.bar} aria-hidden="true">
+        <span className={styles.barTrack} style={{ inlineSize: `${Math.max(width, 3)}%` }}>
+          <span className={styles.barBlocked} style={{ inlineSize: `${blockedWidth}%` }} />
+        </span>
+      </span>
+      <span className={styles.companyMeta}>
+        <span className={styles.companyContacts}>{nf.format(company.contacts)}</span>
+        <span className={styles.companyShare}>
+          {t("privacy.contactsOf", {
+            blocked: nf.format(company.blocked),
+            total: nf.format(company.contacts),
+          })}
+        </span>
+      </span>
+      {canEdit && (
+        <button
+          type="button"
+          className={styles.blockSmall}
+          disabled={busy}
+          aria-label={t("privacy.blockForDeviceLabel", { org: company.org })}
+          onClick={onBlock}
+        >
+          {t("privacy.blockForDevice")}
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** The focused view for one device: its companies, busiest first, with — for
+ *  editors — one-click blocking of a company for just this device. */
 function DeviceDetail({
   device,
   onBack,
@@ -118,8 +176,41 @@ function DeviceDetail({
   t: ReturnType<typeof useI18n>["t"];
   nf: Intl.NumberFormat;
 }) {
+  const { canEdit } = useAuth();
   const label = device.name ?? device.client;
   const max = device.companies.reduce((peak, c) => Math.max(peak, c.contacts), 0);
+
+  // Which company block is in flight, and the result message once it returns.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<{ text: string; error: boolean } | null>(null);
+
+  const runBlock = (org: string) => {
+    setBusy(org);
+    setResult(null);
+    api
+      .privacyBlock({ org, client: device.client })
+      .then(({ added }) => {
+        setResult({
+          text:
+            added === 0
+              ? t("privacy.blockNone")
+              : added === 1
+                ? t("privacy.blockDoneOne")
+                : t("privacy.blockDone", { n: added }),
+          error: false,
+        });
+      })
+      .catch((err: unknown) => {
+        setResult({
+          text: t("privacy.blockFailed", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+          error: true,
+        });
+      })
+      .finally(() => setBusy(null));
+  };
+
   return (
     <section className={styles.card}>
       <button type="button" className={styles.back} onClick={onBack}>
@@ -127,16 +218,21 @@ function DeviceDetail({
       </button>
       <h2 className={styles.sectionTitle}>{t("privacy.deviceCompanies", { device: label })}</h2>
       {device.name && <p className={styles.deviceAddr}>{device.client}</p>}
+      {canEdit && <p className={styles.captionHint}>{t("privacy.blockForDeviceHint")}</p>}
+      {result && (
+        <p className={styles.blockResult} data-error={result.error || undefined} role="status">
+          {result.text}
+        </p>
+      )}
       <ul className={styles.companyList}>
         {device.companies.map((company) => (
-          <MeterRow
+          <DeviceCompanyRow
             key={company.org}
-            label={company.org}
-            dotCat={company.category}
-            sublabel={categoryLabel(company.category, t)}
-            contacts={company.contacts}
-            blocked={company.blocked}
+            company={company}
             max={max}
+            canEdit={canEdit}
+            busy={busy !== null}
+            onBlock={() => runBlock(company.org)}
             t={t}
             nf={nf}
           />
