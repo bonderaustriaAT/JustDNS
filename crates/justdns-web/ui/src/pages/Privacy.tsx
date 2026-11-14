@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   api,
+  ApiError,
   type CompanyContact,
   type CompanyDevice,
   type CompanyDomain,
@@ -445,11 +446,15 @@ function NetworksSection({
         setReport(data);
         setAvailable(true);
       })
-      .catch(() => {
+      .catch((error) => {
         if (controller.signal.aborted) return;
-        // A 404 (or any error) means no GeoIP database is loaded: hide the section
-        // rather than surface a failure for a feature that is simply off.
-        setAvailable(false);
+        // Only a 404 means the feature is genuinely off (no GeoIP database):
+        // hide the section for good. Any other error (a transient scan failure,
+        // a dropped connection) must not permanently hide a working feature, so
+        // leave it available — the next window change or remount retries.
+        if (error instanceof ApiError && error.status === 404) {
+          setAvailable(false);
+        }
       });
     return () => controller.abort();
   }, [window]);

@@ -87,6 +87,11 @@ export function Logs() {
   const [resolverOptions, setResolverOptions] = useState<ResolverStat[]>([]);
   const [deviceOptions, setDeviceOptions] = useState<ClientRow[]>([]);
   const [groupOptions, setGroupOptions] = useState<Group[]>([]);
+  // Country (ISO 3166-1 alpha-2) and ASN refine the *live* feed only: the geo
+  // lookup runs on the read path over the hot ring, and durable history has no
+  // geo index, so these stay separate from the history facets below.
+  const [geoCountry, setGeoCountry] = useState("");
+  const [geoAsn, setGeoAsn] = useState("");
 
   useEffect(() => {
     const id = setTimeout(() => setQuery(input), SEARCH_DEBOUNCE_MS);
@@ -126,6 +131,16 @@ export function Logs() {
   const startMs = useMemo(() => toMs(startStr), [startStr]);
   const endMs = useMemo(() => toMs(endStr), [endStr]);
 
+  // Normalise the live geo filter: an upper-cased country code and a parsed ASN,
+  // each left undefined when blank or unparseable so the feed is not narrowed.
+  const geoCountryVal = geoCountry.trim().toUpperCase() || undefined;
+  const geoAsnVal = useMemo(() => {
+    const raw = geoAsn.trim();
+    if (raw === "") return undefined;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : undefined;
+  }, [geoAsn]);
+
   const facetsActive =
     sources.length > 0 ||
     recordType !== null ||
@@ -143,7 +158,7 @@ export function Logs() {
     [sources, recordType, responseCode, resolver, device, group, startMs, endMs, query],
   );
 
-  const liveState = useLogs(query, live, !facetsActive);
+  const liveState = useLogs(query, live, !facetsActive, geoCountryVal, geoAsnVal);
   const history = useHistory(historyFilter, facetsActive);
 
   function toggleSource(source: QuerySource) {
@@ -221,6 +236,33 @@ export function Logs() {
                 </span>
               </label>
             ))}
+          </fieldset>
+
+          <fieldset className={styles.facet} disabled={facetsActive}>
+            <legend className={styles.facetLabel}>{t("logs.filterGeo")}</legend>
+            <input
+              type="text"
+              className={styles.select}
+              value={geoCountry}
+              onChange={(event) => setGeoCountry(event.target.value)}
+              placeholder={t("logs.filterGeoCountry")}
+              maxLength={2}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <input
+              type="number"
+              className={styles.select}
+              value={geoAsn}
+              onChange={(event) => setGeoAsn(event.target.value)}
+              placeholder={t("logs.filterGeoAsn")}
+              min={0}
+              step={1}
+              autoComplete="off"
+            />
+            <span className={styles.facetHint}>
+              {facetsActive ? t("logs.filterGeoLiveOnly") : t("logs.filterGeoHint")}
+            </span>
           </fieldset>
 
           <label className={styles.facet}>
