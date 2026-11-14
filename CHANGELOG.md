@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.29.1] - 2026-11-14
+
+- Changed: **The read-only notice on a follower node is now impossible to miss.** On a node
+  managed by a main node, the banner that points you at the main node runs as a full-width
+  yellow strip across the very top of every page — above the sidebar and content, with a lock
+  icon and a link to the main node — instead of a quiet line inside the page.
+
 ## [0.29.0] - 2026-11-14
 
 - Added: **Manage the whole cluster from one node.** You can now pick a **main node**
