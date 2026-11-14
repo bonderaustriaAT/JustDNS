@@ -489,12 +489,16 @@ impl ListStore {
         let note = clean_note(note);
         let mut lists = self.write();
         let bucket = Which::Block.bucket_mut(&mut lists);
+        // Seed a set from the existing domains so each candidate is an O(1) check
+        // (and dedups repeats within `domains`) instead of re-scanning the bucket.
+        let mut seen: std::collections::HashSet<String> =
+            bucket.iter().map(|entry| entry.domain.clone()).collect();
         let mut added = 0usize;
         for domain in domains {
             let Some(normalised) = parse_rule(domain) else {
                 continue;
             };
-            if bucket.iter().any(|entry| entry.domain == normalised) {
+            if !seen.insert(normalised.clone()) {
                 continue;
             }
             bucket.push(ListEntry {

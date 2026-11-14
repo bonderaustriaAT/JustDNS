@@ -4774,6 +4774,10 @@ struct PrivacyBlockBody {
     org: Option<String>,
     #[serde(default)]
     domain: Option<String>,
+    /// Optional provenance tag for a single-domain block (the company it was
+    /// blocked from); ignored for a company block, which tags with the org name.
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// How many entries a block action newly added (a re-block adds nothing).
@@ -4804,7 +4808,15 @@ async fn privacy_block(
             .ok_or((StatusCode::NOT_FOUND, format!("unknown company: {org}")))?;
         lists.add_blocks(domains, Some(org)).map_err(list_error)?
     } else if let Some(domain) = domain {
-        lists.add_blocks(&[domain], None).map_err(list_error)?
+        if justdns_filter::parse_rule(domain).is_none() {
+            return Err((StatusCode::BAD_REQUEST, format!("invalid domain: {domain}")));
+        }
+        let note = body
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        lists.add_blocks(&[domain], note).map_err(list_error)?
     } else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -5902,6 +5914,10 @@ mod tests {
         let res = post("/api/privacy/block", r#"{"org":"NoSuchCo"}"#).await;
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
         let res = post("/api/privacy/block", r#"{}"#).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // A single domain that does not parse as a host is a 400, not a silent 0.
+        let res = post("/api/privacy/block", r#"{"domain":"not a host!!"}"#).await;
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 
         // The custom block list ended up with the Google domains.
