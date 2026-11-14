@@ -19,7 +19,8 @@ mod trackers;
 pub use domain::{DomainSet, parse_rule};
 pub use services::{SERVICE_PREFIX, Service, service, services};
 pub use trackers::{
-    CATEGORIES as TRACKER_CATEGORIES, Tracker, classify as classify_tracker, trackers,
+    CATEGORIES as TRACKER_CATEGORIES, Tracker, classify as classify_tracker,
+    domains_for_org as tracker_domains_for_org, trackers,
 };
 
 use std::collections::HashMap;

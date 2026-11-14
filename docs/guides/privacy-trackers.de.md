@@ -36,6 +36,23 @@ Das ist die Ansicht für den Moment, in dem ein Gerät ungewöhnlich gesprächig
 nennt die Organisationen hinter dem Verkehr und zeigt, wie viel davon geblockt und wie viel
 beantwortet wurde. Mit **‹ Alle Geräte** geht es zurück.
 
+### Eine Firma von hier aus blocken
+
+Tippe in der Liste **meistkontaktierte Firmen** auf eine Firma, um ihre eigene Ansicht zu
+öffnen: welche Geräte sie erreicht haben und welche genauen Domains aufgelöst wurden. Wenn
+du Listen bearbeiten darfst (Editor oder Admin), trägt jede Ansicht einen **Blocken**-Knopf:
+
+- **Firma blocken** fügt *alle* Domains, die der Katalog zu dieser Firma kennt, zu deiner
+  [Blockliste](lists.de.md) hinzu – nicht nur die bisher gesehenen – damit sie ab der
+  nächsten Anfrage überall geblockt ist.
+- **Blocken** neben einer einzelnen Domain fügt nur diesen einen Namen hinzu.
+
+Das Blocken ist idempotent: Noch einmal gedrückt wird nichts doppelt hinzugefügt, und das
+Ergebnis sagt dir, wie viele Einträge neu waren. Die Einträge landen in deiner eigenen
+Blockliste (mit dem Firmennamen markiert), du kannst sie also jederzeit auf der Seite
+[Sperr- & Erlauben-Listen](lists.de.md) prüfen oder rückgängig machen. Das ist die einzige
+Aktion, die das Dashboard ausführt; alles andere ist nur Ansicht.
+
 ## Kategorien
 
 Jede Firma im Katalog gehört zu einer von vier Familien, jede mit eigener Farbe:
@@ -56,9 +73,10 @@ Jede Firma im Katalog gehört zu einer von vier Familien, jede mit eigener Farbe
   wird hier schlicht nicht gezählt – das ist kein „unbekannter Verkehr", sondern Verkehr,
   den diese Funktion nicht zuordnet. Ein ruhiges Dashboard kann ein ruhiges Netzwerk heißen
   oder Listen, die die meisten Tracker schon vorher geblockt haben.
-- **Keine Blockier-Steuerung.** Das ist eine reine Leseansicht. Um auf einen Fund zu
-  reagieren, nutze [Sperr- & Erlauben-Listen](lists.de.md), [Blockierte Dienste](blocked-services.de.md)
-  oder eine [Geräte-Richtlinie](policies.de.md).
+- **Blocken wirkt global.** Der **Blocken**-Knopf fügt zur netzwerkweiten Blockliste hinzu,
+  nicht für ein einzelnes Gerät. Um eine Firma nur für ein Gerät zu blocken, nutze eine
+  [Geräte-Richtlinie](policies.de.md); um einen ganzen Dienst mit einem Schalter zu sperren,
+  die [Blockierten Dienste](blocked-services.de.md).
 
 ---
 

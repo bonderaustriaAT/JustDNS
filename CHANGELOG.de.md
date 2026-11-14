@@ -4,6 +4,18 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.26.0] - 2026-11-14
+
+- Neu: **Eine Firma direkt aus dem Privatsphäre-Dashboard blocken.** Ein Klick auf eine Firma
+  zeigt jetzt einen **Blocken**-Knopf (für Editor und Admin). *Firma blocken* fügt alle
+  Domains, die der Katalog zu dieser Firma kennt, zu deiner Blockliste hinzu – nicht nur die
+  bisher gesehenen – damit sie ab der nächsten Anfrage überall geblockt ist; jede Domain-Zeile
+  hat zusätzlich einen eigenen Blocken-Knopf für einen einzelnen Namen. Das Blocken ist
+  idempotent (noch einmal gedrückt kommt nichts dazu, und das Ergebnis sagt, wie viele Einträge
+  neu waren), und die Einträge landen in deiner eigenen Blockliste, markiert mit dem Firmennamen
+  – prüfen oder rückgängig machen kannst du sie auf der Seite Sperr- & Erlauben-Listen. Damit
+  wird aus „mit wem redet dieses Gerät?" ein Klick zum Handeln.
+
 ## [0.25.1] - 2026-11-14
 
 - Geändert: **Feinschliff am Privatsphäre-Dashboard.** Ein Klick auf eine Firma öffnet
