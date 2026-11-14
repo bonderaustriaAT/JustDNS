@@ -24,7 +24,7 @@ use justdns_geoip::{GeoDb, GeoInfo};
 use justdns_store::{QueryFilter, Store};
 use tracing::warn;
 
-use crate::geo_watch::{anything_watched, effective_watch};
+use crate::geo_watch::{WatchSet, anything_watched, effective_watch};
 
 use crate::ha;
 use crate::update::UpdateChecker;
@@ -430,6 +430,13 @@ impl AlertEvaluator {
             return;
         }
 
+        // Drop cooldown entries that have aged out, so the map stays bounded by
+        // the networks contacted within the last cooldown window rather than
+        // growing for the life of the process (stale clients, un-watched nets).
+        state
+            .watched_last_ms
+            .retain(|_, last| now - *last < WATCHED_GEO_COOLDOWN_MS);
+
         let groups: HashMap<String, Group> =
             groups_list.into_iter().map(|g| (g.id.clone(), g)).collect();
         let resolver = ClientResolver::new(devices);
@@ -454,9 +461,14 @@ impl AlertEvaluator {
             }
         };
 
+        // Resolve each distinct client's effective watch set once; a 5-minute scan
+        // of a busy node repeats the same handful of clients across many rows.
+        let mut watch_cache: HashMap<IpAddr, WatchSet> = HashMap::new();
         for row in &rows {
             let client = row.event.client;
-            let watch = effective_watch(&global, resolver.resolve(client), &groups);
+            let watch = watch_cache
+                .entry(client)
+                .or_insert_with(|| effective_watch(&global, resolver.resolve(client), &groups));
             if watch.is_empty() {
                 continue;
             }
