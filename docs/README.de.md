@@ -19,6 +19,8 @@ Neu bei JustDNS? Beginne mit [Ersteinrichtung](guides/setup.de.md), danach
 | [Die Übersicht](guides/overview.de.md) | Das Live-Dashboard: Zähler, Diagramm, aktivste Clients |
 | [Das Protokoll](guides/query-log.de.md) | Was gefragt wurde, von welchem Gerät, wie es beantwortet wurde |
 | [Privatsphäre-Dashboard](guides/privacy-trackers.de.md) | Sehen, mit welchen Firmen jedes Gerät redet; Tracker-Anfragen der Organisation dahinter zugeordnet |
+| [Land & Netz der Antworten (GeoIP)](guides/geoip.de.md) | Land und Netz (ASN) hinter jeder Antwort sehen – offline |
+| [Weltkarte & beobachtete Netze](guides/world-map.de.md) | Weltkarte, wohin die Geräte telefonieren; ein Land oder Netz beobachten, um es zu markieren und zu alarmieren |
 | [DNSSEC-Validierung](guides/dnssec.de.md) | Antwort-Signaturen prüfen und manipulierte Antworten abweisen |
 | [Sperr- & Erlauben-Listen](guides/lists.de.md) | Werbung/Schadsoftware blocken, Feeds abonnieren, einzelne Domains erlauben oder sperren |
 | [Blockierte Dienste](guides/blocked-services.de.md) | Ganze Dienste (TikTok, YouTube, …) mit einem Schalter sperren, global oder je Ebene |
