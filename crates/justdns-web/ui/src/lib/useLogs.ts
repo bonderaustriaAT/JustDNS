@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type HistoryCursor, type HistoryFilter, type QueryRow, type QuerySource } from "./api";
+import {
+  api,
+  type GeoInfo,
+  type HistoryCursor,
+  type HistoryFilter,
+  type QueryRow,
+  type QuerySource,
+} from "./api";
 import {
   displayName,
   recordTypeDescription,
@@ -71,6 +78,9 @@ export interface LogRow {
   answers: number;
   /** The IPs the query resolved to, in answer order. */
   addresses: string[];
+  /** The distinct countries and networks those addresses resolve into, from the
+   *  offline GeoIP database; absent when no database is loaded. */
+  networks?: GeoInfo[];
   durationMs: number;
   /** The peer node this row was pulled from, in a cluster; absent for this
    *  node's own queries. */
@@ -110,6 +120,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     rcodeTone: rcodeTone(row.response_code, isBlocked),
     answers: row.answers,
     addresses: row.addresses ?? [],
+    networks: row.networks,
     durationMs: row.duration_ms,
     origin: row.origin,
   };

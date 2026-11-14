@@ -384,6 +384,28 @@
   color: var(--signal);
 }
 
+/* The country/network each answer resolved into — small pills under the name,
+   from the offline GeoIP database. Only shown when a database is loaded. */
+.networks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-block-start: 2px;
+}
+
+.network {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  white-space: nowrap;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .meta {
   display: inline-flex;
   align-items: center;

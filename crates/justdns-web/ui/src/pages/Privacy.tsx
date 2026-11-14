@@ -6,9 +6,11 @@ import {
   type CompanyDevice,
   type CompanyDomain,
   type DeviceTrackers,
+  type NetworkReport,
   type TrackerReport,
   type TrackerWindow,
 } from "../lib/api";
+import { countryName, flagEmoji } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import { useAuth } from "../state/auth";
@@ -416,6 +418,83 @@ function CompanyDetail({
   );
 }
 
+/** "Where your devices phone home": the destinations the network's answers
+ *  resolve into over the window, grouped by country and ASN, from the offline
+ *  GeoIP database. Hidden entirely when no database is loaded (the endpoint 404s)
+ *  or nothing resolved, so an install without the feature sees no empty section. */
+function NetworksSection({
+  window,
+  t,
+  locale,
+  nf,
+}: {
+  window: TrackerWindow;
+  t: ReturnType<typeof useI18n>["t"];
+  locale: string;
+  nf: Intl.NumberFormat;
+}) {
+  const [report, setReport] = useState<NetworkReport | null>(null);
+  const [available, setAvailable] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setReport(null);
+    api
+      .privacyNetworks(window, controller.signal)
+      .then((data) => {
+        setReport(data);
+        setAvailable(true);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        // A 404 (or any error) means no GeoIP database is loaded: hide the section
+        // rather than surface a failure for a feature that is simply off.
+        setAvailable(false);
+      });
+    return () => controller.abort();
+  }, [window]);
+
+  if (!available || !report || report.totalContacts === 0 || report.networks.length === 0) {
+    return null;
+  }
+  const max = report.networks.reduce((peak, n) => Math.max(peak, n.contacts), 0);
+
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.sectionTitle}>{t("privacy.networksTitle")}</h2>
+      <p className={styles.captionHint}>
+        {t("privacy.networksHint", { window: t(`privacy.window.${window}`) })}
+      </p>
+      <ul className={styles.companyList}>
+        {report.networks.map((net, i) => {
+          const width = max === 0 ? 0 : (net.contacts / max) * 100;
+          const flag = flagEmoji(net.country);
+          const land = countryName(net.country, locale);
+          const primary = net.org ?? land ?? t("privacy.networkUnknown");
+          return (
+            <li key={i} className={styles.companyRow}>
+              <span className={styles.companyName}>
+                <span className={styles.companyOrg}>
+                  {flag ? `${flag} ` : ""}
+                  {primary || t("privacy.networkUnknown")}
+                </span>
+                {net.asn != null && <span className={styles.companyCat}>AS{net.asn}</span>}
+                {net.org && land && <span className={styles.companyCat}>{land}</span>}
+              </span>
+              <span className={styles.bar} aria-hidden="true">
+                <span className={styles.barTrack} style={{ inlineSize: `${Math.max(width, 3)}%` }} />
+              </span>
+              <span className={styles.companyMeta}>
+                <span className={styles.companyContacts}>{nf.format(net.contacts)}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function Privacy() {
   const { t, locale } = useI18n();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
@@ -544,6 +623,7 @@ export function Privacy() {
       ) : selectedDevice ? (
         <DeviceDetail device={selectedDevice} onBack={() => setSelected(null)} t={t} nf={nf} />
       ) : (
+        <>
         <div className={styles.columns}>
           <section className={styles.card}>
             <h2 className={styles.sectionTitle}>{t("privacy.topCompanies")}</h2>
@@ -646,6 +726,8 @@ export function Privacy() {
             </ul>
           </section>
         </div>
+        <NetworksSection window={window} t={t} locale={locale} nf={nf} />
+        </>
       )}
 
       <p className={styles.note}>{t("privacy.note")}</p>
