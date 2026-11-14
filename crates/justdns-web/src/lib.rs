@@ -506,6 +506,7 @@ fn router(state: AppState) -> Router {
         .route("/api/queries", get(queries))
         .route("/api/queries/history", get(queries_history))
         .route("/api/privacy/trackers", get(privacy_trackers))
+        .route("/api/privacy/block", post(privacy_block))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
         .route("/api/settings", get(get_settings).put(put_settings))
@@ -4635,7 +4636,11 @@ fn network_companies(
                     allowed: a.allowed,
                 })
                 .collect();
-            domains.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.name.cmp(&b.name)));
+            domains.sort_by(|a, b| {
+                b.contacts
+                    .cmp(&a.contacts)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
             domains.truncate(COMPANY_TOP_DOMAINS);
 
             CompanyContact {
@@ -4709,14 +4714,16 @@ async fn privacy_trackers(
             .add(tracker.category, row.count, row.blocked);
         let org = network.entry(tracker.org).or_default();
         org.totals.add(tracker.category, row.count, row.blocked);
-        org.devices
-            .entry(row.client.clone())
-            .or_default()
-            .add(tracker.category, row.count, row.blocked);
-        org.domains
-            .entry(row.name.clone())
-            .or_default()
-            .add(tracker.category, row.count, row.blocked);
+        org.devices.entry(row.client.clone()).or_default().add(
+            tracker.category,
+            row.count,
+            row.blocked,
+        );
+        org.domains.entry(row.name.clone()).or_default().add(
+            tracker.category,
+            row.count,
+            row.blocked,
+        );
     }
 
     let mut devices: Vec<DeviceTrackers> = per_device
@@ -4756,6 +4763,68 @@ async fn privacy_trackers(
         companies: network_companies(network, &resolver),
         devices,
     }))
+}
+
+/// Block request from the privacy dashboard: a whole company by `org` (every
+/// domain the catalogue attributes to it) or a single `domain`. Exactly one is
+/// expected; `org` wins if both are sent.
+#[derive(Deserialize)]
+struct PrivacyBlockBody {
+    #[serde(default)]
+    org: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
+    /// Optional provenance tag for a single-domain block (the company it was
+    /// blocked from); ignored for a company block, which tags with the org name.
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// How many entries a block action newly added (a re-block adds nothing).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrivacyBlockResult {
+    added: usize,
+}
+
+/// Act on what the privacy dashboard shows: add a whole company's catalogue
+/// domains (or a single domain) to the user's block list. A content change, so
+/// Editor-gated like the other list edits, and idempotent — re-blocking simply
+/// adds nothing. Company-wide blocks tag each entry with the company name so the
+/// block list shows where it came from.
+async fn privacy_block(
+    State(lists): State<ListStore>,
+    Json(body): Json<PrivacyBlockBody>,
+) -> Result<Json<PrivacyBlockResult>, (StatusCode, String)> {
+    let org = body.org.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let domain = body
+        .domain
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let added = if let Some(org) = org {
+        let domains = justdns_filter::tracker_domains_for_org(org)
+            .ok_or((StatusCode::NOT_FOUND, format!("unknown company: {org}")))?;
+        lists.add_blocks(domains, Some(org)).map_err(list_error)?
+    } else if let Some(domain) = domain {
+        if justdns_filter::parse_rule(domain).is_none() {
+            return Err((StatusCode::BAD_REQUEST, format!("invalid domain: {domain}")));
+        }
+        let note = body
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        lists.add_blocks(&[domain], note).map_err(list_error)?
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "either org or domain is required".to_owned(),
+        ));
+    };
+
+    Ok(Json(PrivacyBlockResult { added }))
 }
 
 #[derive(Deserialize)]
@@ -5791,6 +5860,77 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("duckdb.wal"));
+    }
+
+    #[tokio::test]
+    async fn privacy_block_adds_a_company_or_a_single_domain() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let (app, cookie) = app_and_cookie(store);
+
+        let post = |path: &'static str, json: &'static str| {
+            let app = app.clone();
+            let cookie = cookie.clone();
+            async move {
+                app.oneshot(
+                    Request::post(path)
+                        .header("content-type", "application/json")
+                        .header("cookie", &cookie)
+                        .body(Body::from(json))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        // Block a whole company: every catalogue domain for Google is added.
+        let res = post("/api/privacy/block", r#"{"org":"Google"}"#).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(body.contains("\"added\""), "{body}");
+        let first_added: u64 = serde_json::from_str::<serde_json::Value>(&body).unwrap()["added"]
+            .as_u64()
+            .unwrap();
+        assert!(first_added >= 2, "Google has several domains: {body}");
+
+        // The block list now holds a known Google domain.
+        let res = post("/api/privacy/block", r#"{"org":"Google"}"#).await;
+        let body = body_of(res).await;
+        assert!(
+            body.contains("\"added\":0"),
+            "re-block adds nothing: {body}"
+        );
+
+        // A single domain can be blocked on its own.
+        let res = post(
+            "/api/privacy/block",
+            r#"{"domain":"telemetry.example.com"}"#,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(body_of(res).await.contains("\"added\":1"));
+
+        // An unknown company is a 404, and an empty body is a 400.
+        let res = post("/api/privacy/block", r#"{"org":"NoSuchCo"}"#).await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        let res = post("/api/privacy/block", r#"{}"#).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // A single domain that does not parse as a host is a 400, not a silent 0.
+        let res = post("/api/privacy/block", r#"{"domain":"not a host!!"}"#).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // The custom block list ended up with the Google domains.
+        let res = app
+            .oneshot(
+                Request::get("/api/lists")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(body_of(res).await.contains("doubleclick.net"));
     }
 
     /// A router whose `/metrics` endpoint is configured with `token` (or off when
