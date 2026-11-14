@@ -185,6 +185,38 @@
   }
 }
 
+/* The rolling cluster update's live progress, shown on the System page when this
+   node is the primary of a cluster. */
+.clusterProgress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-sm);
+}
+
+.clusterProgressTitle {
+  font-size: var(--step-0);
+}
+
+.clusterNodes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clusterNode {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
 .done {
   padding: var(--space-3);
   border-radius: var(--radius-sm);
