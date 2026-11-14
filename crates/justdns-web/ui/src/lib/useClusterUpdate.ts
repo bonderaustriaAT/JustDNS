@@ -66,7 +66,12 @@ export interface ClusterUpdate {
   start: () => Promise<boolean>;
 }
 
-export function useClusterUpdate(): ClusterUpdate {
+/**
+ * @param enabled Whether this node is (or might be) a cluster. When `false` the
+ *   hook makes no cluster-status request, so a standalone install never hits the
+ *   HA endpoint. The caller flips it to `true` once it knows it is in a cluster.
+ */
+export function useClusterUpdate(enabled = true): ClusterUpdate {
   const { t } = useI18n();
   const [state, setState] = useState<ClusterUpdateState | null>(null);
   const [password, setPassword] = useState("");
@@ -75,8 +80,10 @@ export function useClusterUpdate(): ClusterUpdate {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // One fetch on mount to pick up a run already in progress (or the last result).
+  // One fetch to pick up a run already in progress (or the last result) — only
+  // once the caller says this is a cluster, so a standalone node stays quiet.
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     api
       .haClusterUpdateStatus(controller.signal)
@@ -85,7 +92,7 @@ export function useClusterUpdate(): ClusterUpdate {
         // Transient — keep whatever we have.
       });
     return () => controller.abort();
-  }, []);
+  }, [enabled]);
 
   const running = state?.phase === "running" || state?.phase === "updatingPrimary";
 
