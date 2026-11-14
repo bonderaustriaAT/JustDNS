@@ -528,7 +528,7 @@ export function Privacy() {
                         {top && (
                           <span className={styles.devicePreview}>
                             <span className={styles.dot} data-cat={top.category} aria-hidden="true" />
-                            {top.org}
+                            <span className={styles.devicePreviewOrg}>{top.org}</span>
                           </span>
                         )}
                       </span>

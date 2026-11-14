@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.26.1] - 2026-11-14
+
+- Behoben: **Firmen- und Gerätenamen im Privatsphäre-Dashboard sind voll lesbar.** Lange
+  Namen wurden abgeschnitten, obwohl Platz da war. Die Firmenliste und die Firmenansicht
+  geben der Namensspalte jetzt genug Breite, und lange Gerätenamen brechen auf eine zweite
+  Zeile um, statt abgeschnitten zu werden.
+
 ## [0.26.0] - 2026-11-14
 
 - Neu: **Eine Firma direkt aus dem Privatsphäre-Dashboard blocken.** Ein Klick auf eine Firma

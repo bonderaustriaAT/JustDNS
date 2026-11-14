@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.26.1] - 2026-11-14
+
+- Fixed: **Company and device names are fully readable on the privacy dashboard.** Long
+  names were cut off even when there was room for them. The company list and the company
+  view now give the name column the space it needs, and long device names wrap to a second
+  line instead of being clipped.
+
 ## [0.26.0] - 2026-11-14
 
 - Added: **Block a company straight from the privacy dashboard.** Clicking a company now
