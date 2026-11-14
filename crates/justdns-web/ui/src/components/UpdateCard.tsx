@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
-import { ApiError, api, type UpdateInfo } from "../lib/api";
+import { ApiError, api, type HaStatus, type UpdateInfo } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import {
+  CLUSTER_NODE_PHASE_KEY,
+  CLUSTER_PHASE_KEY,
+  useClusterUpdate,
+} from "../lib/useClusterUpdate";
+import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./UpdateCard.module.css";
 
 /** How often to poll progress while an update runs. */
@@ -46,6 +53,27 @@ export function UpdateCard() {
   // in a password that cannot be recovered is caught before the update runs.
   const [backupPw, setBackupPw] = useState("");
   const [backupPw2, setBackupPw2] = useState("");
+
+  // Cluster awareness: on a primary in a cluster the one-click update becomes a
+  // rolling cluster update; a follower manages updates from the primary instead.
+  const [ha, setHa] = useState<HaStatus | null>(null);
+  const cluster = useClusterUpdate();
+  const [clusterDialog, setClusterDialog] = useState(false);
+  const inCluster = (ha?.peers.length ?? 0) > 0;
+  const isPrimary = ha?.isPrimary ?? true;
+  const clusterMode = inCluster && isPrimary;
+  const isFollower = inCluster && !isPrimary;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .haStatus(controller.signal)
+      .then(setHa)
+      .catch(() => {
+        /* No HA status just means we treat this as a standalone node. */
+      });
+    return () => controller.abort();
+  }, []);
 
   // Load the cached status once on mount.
   useEffect(() => {
@@ -172,6 +200,54 @@ export function UpdateCard() {
     }
   }
 
+  // The cluster path (primary in a cluster): check for a release first, then a
+  // password-confirmed rolling update driven by the shared hook.
+  async function openClusterDialog() {
+    cluster.clearError();
+    const next = await cluster.check();
+    if (next) {
+      setInfo(next);
+      setBackupPath(next.defaultBackupPath);
+      if (!next.updateAvailable) return; // Card now shows "up to date".
+    }
+    cluster.resetPassword();
+    setClusterDialog(true);
+  }
+  function closeClusterDialog() {
+    setClusterDialog(false);
+    cluster.resetPassword();
+  }
+  async function confirmCluster() {
+    if (await cluster.start()) closeClusterDialog();
+  }
+
+  // A follower manages updates from the primary; never a local one-click update.
+  if (isFollower) {
+    return (
+      <section className={styles.card} aria-label={t("update.cardTitle")}>
+        <div className={styles.head}>
+          <h2 className={styles.title}>{t("update.cardTitle")}</h2>
+        </div>
+        <p className={styles.note}>
+          {t("update.manageOnPrimary")}
+          {ha?.primaryUrl ? (
+            <>
+              {" "}
+              <a
+                className={styles.releaseLink}
+                href={ha.primaryUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {ha.primaryUrl}
+              </a>
+            </>
+          ) : null}
+        </p>
+      </section>
+    );
+  }
+
   if (!info) return null;
 
   // The instance's real data directory, read off the suggested backup path, so
@@ -237,8 +313,17 @@ export function UpdateCard() {
             </div>
           ) : null}
           <div className={styles.actions}>
-            <button type="button" className={styles.update} onClick={openDialog}>
-              {t("update.updateButton")}
+            <button
+              type="button"
+              className={styles.update}
+              onClick={clusterMode ? openClusterDialog : openDialog}
+              disabled={clusterMode && (cluster.checking || cluster.running)}
+            >
+              {clusterMode
+                ? cluster.checking
+                  ? t("update.checking")
+                  : t("update.updateCluster")
+                : t("update.updateButton")}
             </button>
             {info.releaseUrl ? (
               <a
@@ -257,6 +342,33 @@ export function UpdateCard() {
           {t("update.upToDate")} · {t("update.currentIs", { version: info.currentVersion })}
         </p>
       )}
+
+      {clusterMode && cluster.error ? (
+        <p className={styles.note} role="alert">{cluster.error}</p>
+      ) : null}
+
+      {clusterMode && cluster.state && cluster.state.phase !== "idle" ? (
+        <div className={styles.clusterProgress} role="status" aria-live="polite">
+          <strong className={styles.clusterProgressTitle}>
+            {t(CLUSTER_PHASE_KEY[cluster.state.phase])}
+            {cluster.state.target ? ` → ${cluster.state.target}` : ""}
+          </strong>
+          <ul className={styles.clusterNodes}>
+            {cluster.state.nodes.map((node) => (
+              <li key={node.nodeId} className={styles.clusterNode}>
+                <span>
+                  {node.label}
+                  {node.isPrimary ? ` (${t("ha.cluster.primaryTag")})` : ""}
+                </span>
+                <span data-phase={node.phase}>{t(CLUSTER_NODE_PHASE_KEY[node.phase])}</span>
+              </li>
+            ))}
+          </ul>
+          <Link className={styles.releaseLink} to="/ha">
+            {t("update.clusterDetails")}
+          </Link>
+        </div>
+      ) : null}
 
       <p className={styles.checked}>{t("update.lastChecked", { time: lastChecked })}</p>
 
@@ -363,6 +475,50 @@ export function UpdateCard() {
             )}
           </div>
         </div>
+      ) : null}
+
+      {clusterDialog && info.latestVersion ? (
+        <ConfirmDialog
+          title={t("update.dialogTitle", { version: info.latestVersion })}
+          body={t("ha.cluster.updateBody")}
+          details={
+            <>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>{t("update.backupPasswordLabel")}</span>
+                <input
+                  className={styles.input}
+                  type="password"
+                  autoComplete="new-password"
+                  value={cluster.password}
+                  onChange={(event) => cluster.setPassword(event.target.value)}
+                  placeholder={t("update.backupPasswordPlaceholder")}
+                />
+              </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>{t("update.backupPasswordConfirmLabel")}</span>
+                <input
+                  className={styles.input}
+                  type="password"
+                  autoComplete="new-password"
+                  value={cluster.confirm}
+                  onChange={(event) => cluster.setConfirm(event.target.value)}
+                  placeholder={t("update.backupPasswordConfirmPlaceholder")}
+                />
+                <span className={styles.fieldHint}>
+                  {cluster.mismatch
+                    ? t("update.passwordMismatch")
+                    : t("update.backupPasswordHint")}
+                </span>
+              </label>
+            </>
+          }
+          confirmLabel={t("update.updateCluster")}
+          cancelLabel={t("update.cancel")}
+          busy={cluster.busy}
+          confirmDisabled={!cluster.valid}
+          onConfirm={confirmCluster}
+          onCancel={closeClusterDialog}
+        />
       ) : null}
 
     </section>
