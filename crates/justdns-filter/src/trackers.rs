@@ -51,6 +51,18 @@ pub fn trackers() -> &'static [Tracker] {
 /// The distinct categories present, in display order.
 pub const CATEGORIES: &[Category] = &["advertising", "analytics", "social", "fingerprinting"];
 
+/// Every registrable domain the catalogue attributes to `org`, or `None` when no
+/// company by that exact name is listed. The match is case-sensitive on the
+/// display name, so pass the `org` string exactly as [`classify`] reports it.
+/// Lets a caller block a whole company — all the domains behind it, not only the
+/// ones already seen.
+pub fn domains_for_org(org: &str) -> Option<&'static [&'static str]> {
+    TRACKERS
+        .iter()
+        .find(|tracker| tracker.org == org)
+        .map(|tracker| tracker.domains)
+}
+
 /// The domain → tracker index, built once on first use. Keys are the registrable
 /// domains; the parent-suffix walk in [`classify`] reaches them from any
 /// sub-domain.

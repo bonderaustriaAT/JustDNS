@@ -480,6 +480,39 @@ impl ListStore {
         self.remove_entry(domain, Which::Block)
     }
 
+    /// Add several domains to the block list in one go, persisting and rebuilding
+    /// only once. Returns how many were newly added; a domain already on the list
+    /// is left as it is, and one that does not parse as a host is skipped. Used by
+    /// the "block this company" action, which adds a whole catalogue of domains at
+    /// once. `note` is attached to each newly added entry.
+    pub fn add_blocks(&self, domains: &[&str], note: Option<&str>) -> Result<usize, ListError> {
+        let note = clean_note(note);
+        let mut lists = self.write();
+        let bucket = Which::Block.bucket_mut(&mut lists);
+        let mut added = 0usize;
+        for domain in domains {
+            let Some(normalised) = parse_rule(domain) else {
+                continue;
+            };
+            if bucket.iter().any(|entry| entry.domain == normalised) {
+                continue;
+            }
+            bucket.push(ListEntry {
+                domain: normalised,
+                note: note.clone(),
+            });
+            added += 1;
+        }
+        if added > 0 {
+            bucket.sort_by(|a, b| a.domain.cmp(&b.domain));
+            self.persist(&lists)?;
+            self.rebuild(&lists);
+            drop(lists);
+            self.fire_on_change();
+        }
+        Ok(added)
+    }
+
     /// Set or clear the note on an existing block entry. An empty note clears it.
     pub fn set_block_note(&self, domain: &str, note: Option<&str>) -> Result<(), ListError> {
         self.set_note(domain, note, Which::Block)
