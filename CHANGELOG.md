@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.31.0] - 2026-11-14
+
+- Changed: **A smoother, safer cluster update.** Updating the whole cluster is now easier to
+  reach and harder to get wrong. On the main node, the update button under **System &
+  diagnostics** reads **Update cluster** and starts the rolling update right there (a follower
+  points you at the main node instead); a quick check runs first, so you are not asked for a
+  backup password when there is nothing new to install. The backup password is entered twice
+  to catch a typo in a password that cannot be recovered, and a glitch where that field lost
+  focus after a single keystroke is fixed.
+
 ## [0.30.0] - 2026-11-14
 
 - Added: **See the country and network behind every answer (GeoIP).** JustDNS now maps each

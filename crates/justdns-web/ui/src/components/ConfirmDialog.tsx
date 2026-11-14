@@ -16,6 +16,9 @@ interface ConfirmDialogProps {
   cancelLabel: string;
   /** While true, the buttons are disabled (the action is in flight). */
   busy?: boolean;
+  /** When true, only the confirm button is disabled (e.g. the form in `details`
+   *  is incomplete or invalid). Cancel stays usable. */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -31,22 +34,43 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const bodyId = useId();
 
-  // Focus the dismiss button on open, and let Escape cancel.
+  // Set the initial focus once, when the dialog opens. When `details` carries a
+  // form (e.g. a password field), focus that field so the dialog is usable from
+  // the keyboard at once; otherwise focus the dismiss button — the safe default
+  // for a destructive "are you sure?". This runs on mount only: a dependency on
+  // `busy`/`onCancel` (an inline arrow from the caller, new on every render)
+  // would re-fire on each keystroke and yank focus out of the field — the classic
+  // "type one letter and lose the field" bug.
   useEffect(() => {
-    cancelRef.current?.focus();
+    const field = dialogRef.current?.querySelector<HTMLElement>(
+      "input, textarea, select",
+    );
+    if (field) field.focus();
+    else cancelRef.current?.focus();
+  }, []);
+
+  // Escape cancels. The listener is registered once; it reads the latest
+  // `busy`/`onCancel` through refs so re-renders never re-run this effect.
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) onCancel();
+      if (event.key === "Escape" && !busyRef.current) onCancelRef.current();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [busy, onCancel]);
+  }, []);
 
   return (
     <div
@@ -58,6 +82,7 @@ export function ConfirmDialog({
       }}
     >
       <div
+        ref={dialogRef}
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
@@ -85,7 +110,7 @@ export function ConfirmDialog({
             type="button"
             className={styles.confirm}
             onClick={onConfirm}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
           >
             {confirmLabel}
           </button>
