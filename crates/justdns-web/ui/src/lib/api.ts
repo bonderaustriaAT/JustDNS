@@ -1114,7 +1114,7 @@ export const api = {
   /** Block a whole company (every domain the catalogue attributes to it) or a
    *  single domain, straight from the privacy dashboard. Editor-gated and
    *  idempotent; returns how many entries were newly added to the block list. */
-  privacyBlock: (target: { org: string } | { domain: string }) =>
+  privacyBlock: (target: { org: string } | { domain: string; note?: string }) =>
     sendJson<{ added: number }>("POST", "/api/privacy/block", target),
   queries: (limit = 50, query = "", signal?: AbortSignal) => {
     const params = new URLSearchParams({ limit: String(limit) });

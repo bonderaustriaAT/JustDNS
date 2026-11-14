@@ -218,14 +218,19 @@ function CompanyDetail({
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<{ text: string; error: boolean } | null>(null);
 
-  const runBlock = (key: string, target: { org: string } | { domain: string }) => {
+  const runBlock = (key: string, target: { org: string } | { domain: string; note?: string }) => {
     setBusy(key);
     setResult(null);
     api
       .privacyBlock(target)
       .then(({ added }) => {
         setResult({
-          text: added > 0 ? t("privacy.blockDone", { n: added }) : t("privacy.blockNone"),
+          text:
+            added === 0
+              ? t("privacy.blockNone")
+              : added === 1
+                ? t("privacy.blockDoneOne")
+                : t("privacy.blockDone", { n: added }),
           error: false,
         });
       })
@@ -301,7 +306,9 @@ function CompanyDetail({
                 max={domainMax}
                 canEdit={canEdit}
                 busy={busy !== null}
-                onBlock={() => runBlock(`domain:${domain.name}`, { domain: domain.name })}
+                onBlock={() =>
+                  runBlock(`domain:${domain.name}`, { domain: domain.name, note: company.org })
+                }
                 t={t}
                 nf={nf}
               />
