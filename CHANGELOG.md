@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.25.1] - 2026-11-14
+
+- Changed: **Privacy dashboard polish.** Clicking a company now opens its own view
+  showing **which devices** reached it and **which exact domains** under it were looked
+  up (for example `graph.facebook.com`, `connect.facebook.net`), each with its blocked
+  share. The "Got through" figure is now red to read as the number to watch, the
+  per-device cards are easier to read against the card behind them, and the one-line
+  headline sentence was removed.
+
 ## [0.25.0] - 2026-11-12
 
 - Added: **Privacy dashboard.** A new **Privacy** page (in the sidebar, next to the

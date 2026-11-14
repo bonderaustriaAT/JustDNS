@@ -4465,13 +4465,47 @@ struct TrackerParams {
     window: Option<String>,
 }
 
+/// How many devices and domains a company's drill-down carries at most, busiest
+/// first — plenty for the detail view without an unbounded payload.
+const COMPANY_TOP_DEVICES: usize = 50;
+const COMPANY_TOP_DOMAINS: usize = 40;
+
 /// One company a device (or the whole network) reached, with how many lookups
-/// went to it and how many of those the filter blocked versus let through.
+/// went to it and how many of those the filter blocked versus let through. For a
+/// network-wide company the drill-down fields `devices` and `domains` are filled
+/// (which devices reached it, which names under it were looked up); for a single
+/// device's company they stay empty and are omitted.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct CompanyContact {
     org: String,
     category: String,
+    contacts: u64,
+    blocked: u64,
+    allowed: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    devices: Vec<CompanyDevice>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    domains: Vec<CompanyDomain>,
+}
+
+/// One device in a company's drill-down: how much it reached that company.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CompanyDevice {
+    client: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    contacts: u64,
+    blocked: u64,
+    allowed: u64,
+}
+
+/// One name in a company's drill-down: how often that exact domain was looked up.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CompanyDomain {
+    name: String,
     contacts: u64,
     blocked: u64,
     allowed: u64,
@@ -4527,6 +4561,7 @@ impl TrackerAccum {
 }
 
 /// Turn a per-company accumulation into the response rows, busiest company first.
+/// Used for a single device's list, so the drill-down fields stay empty.
 fn tracker_companies(
     map: std::collections::HashMap<&'static str, TrackerAccum>,
 ) -> Vec<CompanyContact> {
@@ -4538,6 +4573,80 @@ fn tracker_companies(
             contacts: a.contacts,
             blocked: a.blocked,
             allowed: a.allowed,
+            devices: Vec::new(),
+            domains: Vec::new(),
+        })
+        .collect();
+    companies.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.org.cmp(&b.org)));
+    companies
+}
+
+/// A network-wide company's running totals plus its drill-down maps: which
+/// devices reached it (by client address) and which exact names under it were
+/// looked up.
+#[derive(Default)]
+struct OrgAgg {
+    totals: TrackerAccum,
+    devices: std::collections::HashMap<String, TrackerAccum>,
+    domains: std::collections::HashMap<String, TrackerAccum>,
+}
+
+/// Build the network company list from the per-org aggregation, busiest company
+/// first, each carrying its busiest devices and domains (capped). Device names
+/// are resolved from the client catalogue.
+fn network_companies(
+    network: std::collections::HashMap<&'static str, OrgAgg>,
+    resolver: &ClientResolver,
+) -> Vec<CompanyContact> {
+    let mut companies: Vec<CompanyContact> = network
+        .into_iter()
+        .map(|(org, agg)| {
+            let mut devices: Vec<CompanyDevice> = agg
+                .devices
+                .into_iter()
+                .map(|(client, a)| {
+                    let name = client
+                        .parse()
+                        .ok()
+                        .and_then(|ip| resolver.name_for(ip).map(str::to_owned));
+                    CompanyDevice {
+                        client,
+                        name,
+                        contacts: a.contacts,
+                        blocked: a.blocked,
+                        allowed: a.allowed,
+                    }
+                })
+                .collect();
+            devices.sort_by(|a, b| {
+                b.contacts
+                    .cmp(&a.contacts)
+                    .then_with(|| a.client.cmp(&b.client))
+            });
+            devices.truncate(COMPANY_TOP_DEVICES);
+
+            let mut domains: Vec<CompanyDomain> = agg
+                .domains
+                .into_iter()
+                .map(|(name, a)| CompanyDomain {
+                    name,
+                    contacts: a.contacts,
+                    blocked: a.blocked,
+                    allowed: a.allowed,
+                })
+                .collect();
+            domains.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.name.cmp(&b.name)));
+            domains.truncate(COMPANY_TOP_DOMAINS);
+
+            CompanyContact {
+                org: org.to_string(),
+                category: agg.totals.category.to_string(),
+                contacts: agg.totals.contacts,
+                blocked: agg.totals.blocked,
+                allowed: agg.totals.allowed,
+                devices,
+                domains,
+            }
         })
         .collect();
     companies.sort_by(|a, b| b.contacts.cmp(&a.contacts).then_with(|| a.org.cmp(&b.org)));
@@ -4576,7 +4685,7 @@ async fn privacy_trackers(
         String,
         std::collections::HashMap<&'static str, TrackerAccum>,
     > = std::collections::HashMap::new();
-    let mut network: std::collections::HashMap<&'static str, TrackerAccum> =
+    let mut network: std::collections::HashMap<&'static str, OrgAgg> =
         std::collections::HashMap::new();
     let mut total_contacts = 0u64;
     let mut total_blocked = 0u64;
@@ -4598,8 +4707,14 @@ async fn privacy_trackers(
             .entry(tracker.org)
             .or_default()
             .add(tracker.category, row.count, row.blocked);
-        network
-            .entry(tracker.org)
+        let org = network.entry(tracker.org).or_default();
+        org.totals.add(tracker.category, row.count, row.blocked);
+        org.devices
+            .entry(row.client.clone())
+            .or_default()
+            .add(tracker.category, row.count, row.blocked);
+        org.domains
+            .entry(row.name.clone())
             .or_default()
             .add(tracker.category, row.count, row.blocked);
     }
@@ -4638,7 +4753,7 @@ async fn privacy_trackers(
         total_contacts,
         total_blocked,
         total_allowed,
-        companies: tracker_companies(network),
+        companies: network_companies(network, &resolver),
         devices,
     }))
 }
@@ -5666,6 +5781,13 @@ mod tests {
         // Two devices, each with its own company.
         assert!(body.contains("10.0.0.1"), "{body}");
         assert!(body.contains("10.0.0.2"), "{body}");
+
+        // The company drill-down keeps the exact domains that were looked up, so
+        // the detail view can list them.
+        assert!(body.contains("ad.doubleclick.net"), "{body}");
+        assert!(body.contains("pagead2.googlesyndication.com"), "{body}");
+        assert!(body.contains("graph.facebook.com"), "{body}");
+        assert!(body.contains("\"domains\""), "{body}");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("duckdb.wal"));
