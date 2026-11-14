@@ -547,7 +547,7 @@ async fn security_headers(request: Request, next: Next) -> Response {
     headers.insert(
         header::HeaderName::from_static("permissions-policy"),
         header::HeaderValue::from_static(
-            "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+            "camera=(), microphone=(), geolocation=(), browsing-topics=(), interest-cohort=()",
         ),
     );
     response
@@ -6090,32 +6090,76 @@ mod tests {
     #[tokio::test]
     async fn responses_carry_browser_hardening_headers() {
         let (store, _writer) = Store::in_memory(100).unwrap();
-        let (app, _cookie) = app_and_cookie(store);
+        let (app, cookie) = app_and_cookie(store);
 
-        // Even a public, unauthenticated response carries the hardening headers.
-        let res = app
+        fn assert_hardening(headers: &HeaderMap, label: &str) {
+            assert_eq!(
+                headers.get("x-content-type-options").unwrap(),
+                "nosniff",
+                "{label}"
+            );
+            assert_eq!(headers.get("x-frame-options").unwrap(), "DENY", "{label}");
+            assert_eq!(
+                headers.get("referrer-policy").unwrap(),
+                "no-referrer",
+                "{label}"
+            );
+            let perms = headers.get("permissions-policy").unwrap().to_str().unwrap();
+            // The modern Topics API is gated by `browsing-topics`, not the
+            // retired FLoC `interest-cohort`.
+            assert!(perms.contains("browsing-topics=()"), "{label}: {perms}");
+
+            let csp = headers
+                .get("content-security-policy")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert!(csp.contains("default-src 'self'"), "{label}: {csp}");
+            assert!(csp.contains("frame-ancestors 'none'"), "{label}: {csp}");
+            assert!(csp.contains("object-src 'none'"), "{label}: {csp}");
+            // The SPA needs inline styles and the Google Fonts hosts; scripts do not.
+            assert!(
+                csp.contains("style-src 'self' 'unsafe-inline'"),
+                "{label}: {csp}"
+            );
+            assert!(csp.contains("fonts.googleapis.com"), "{label}: {csp}");
+            assert!(csp.contains("script-src 'self';"), "{label}: {csp}");
+            assert!(
+                !csp.contains("script-src 'self' 'unsafe-inline'"),
+                "{label}: {csp}"
+            );
+        }
+
+        // A public, unauthenticated API response carries the hardening headers.
+        let public = app
+            .clone()
             .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
             .await
             .unwrap();
-        let headers = res.headers();
-        assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
-        assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
-        assert_eq!(headers.get("referrer-policy").unwrap(), "no-referrer");
-        assert!(headers.get("permissions-policy").is_some());
+        assert_hardening(public.headers(), "public /api/health");
 
-        let csp = headers
-            .get("content-security-policy")
-            .unwrap()
-            .to_str()
+        // A protected API response (behind the login guard) carries them too, so
+        // moving the layer off the merged router would be caught here.
+        let protected = app
+            .clone()
+            .oneshot(
+                Request::get("/api/stats")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
             .unwrap();
-        assert!(csp.contains("default-src 'self'"), "{csp}");
-        assert!(csp.contains("frame-ancestors 'none'"), "{csp}");
-        assert!(csp.contains("object-src 'none'"), "{csp}");
-        // The SPA needs inline styles and the Google Fonts hosts; scripts do not.
-        assert!(csp.contains("style-src 'self' 'unsafe-inline'"), "{csp}");
-        assert!(csp.contains("fonts.googleapis.com"), "{csp}");
-        assert!(csp.contains("script-src 'self';"), "{csp}");
-        assert!(!csp.contains("script-src 'self' 'unsafe-inline'"), "{csp}");
+        assert_eq!(protected.status(), StatusCode::OK);
+        assert_hardening(protected.headers(), "protected /api/stats");
+
+        // The static SPA fallback (the dashboard document itself) carries them.
+        let spa = app
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(spa.status(), StatusCode::OK);
+        assert_hardening(spa.headers(), "static /");
     }
 
     /// A router whose `/metrics` endpoint is configured with `token` (or off when
