@@ -2,9 +2,38 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Toggle } from "../components/Toggle";
-import { api, type HaPeer, type HaStatus, type HaPrefer } from "../lib/api";
+import {
+  api,
+  type HaPeer,
+  type HaStatus,
+  type HaPrefer,
+  type NodeConfig,
+  type ClusterUpdateState,
+  type ClusterUpdatePhase,
+  type ClusterNodePhase,
+} from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import styles from "./HighAvailability.module.css";
+
+/** Overall cluster-update phase → message key. */
+const CLUSTER_PHASE_KEY: Record<ClusterUpdatePhase, MessageKey> = {
+  idle: "ha.cluster.phase.idle",
+  running: "ha.cluster.phase.running",
+  updatingPrimary: "ha.cluster.phase.updatingPrimary",
+  done: "ha.cluster.phase.done",
+  aborted: "ha.cluster.phase.aborted",
+};
+
+/** Per-node cluster-update phase → message key. */
+const CLUSTER_NODE_PHASE_KEY: Record<ClusterNodePhase, MessageKey> = {
+  pending: "ha.cluster.node.pending",
+  updating: "ha.cluster.node.updating",
+  restarting: "ha.cluster.node.restarting",
+  healthy: "ha.cluster.node.healthy",
+  skipped: "ha.cluster.node.skipped",
+  failed: "ha.cluster.node.failed",
+};
 
 /** How often the status refreshes while the page is open, so a sync that runs on
  *  the background thread shows up here without a reload. */
@@ -514,6 +543,124 @@ function AddNodeGuide({ status }: { status: HaStatus }) {
   );
 }
 
+/** Update the whole cluster in order from the primary: a password-confirmed start,
+ *  then live per-node progress. Shown only on the primary, when there are peers. */
+function ClusterUpdatePanel() {
+  const { t } = useI18n();
+  const [password, setPassword] = useState<string | null>(null);
+  const [state, setState] = useState<ClusterUpdateState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Poll the progress so a running update (driven on the server) shows live, and so
+  // the last result is picked up when the page opens.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    async function poll() {
+      try {
+        const next = await api.haClusterUpdateStatus(controller.signal);
+        if (active) setState(next);
+      } catch {
+        // Transient (e.g. the primary restarting at the end) — keep the last state.
+      }
+    }
+    void poll();
+    const timer = setInterval(() => void poll(), 3_000);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, []);
+
+  const running = state?.phase === "running" || state?.phase === "updatingPrimary";
+
+  async function start() {
+    if (password == null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setState(await api.haClusterUpdate(password));
+      setPassword(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ha.cluster.updateFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.clusterUpdate}>
+      <div className={styles.nodeManageRow}>
+        <span className={styles.clusterUpdateLabel}>{t("ha.cluster.updateHeading")}</span>
+        <button
+          type="button"
+          className={styles.linkButton}
+          onClick={() => {
+            setPassword("");
+            setError(null);
+          }}
+          disabled={busy || running}
+        >
+          {t("ha.cluster.updateButton")}
+        </button>
+      </div>
+      <p className={styles.summarySub}>{t("ha.cluster.updateHint")}</p>
+
+      {error && <p className={styles.fieldError}>{error}</p>}
+
+      {state && state.phase !== "idle" && (
+        <div className={styles.clusterUpdateState}>
+          <p className={styles.clusterUpdateOverall} data-phase={state.phase}>
+            {t(CLUSTER_PHASE_KEY[state.phase])}
+            {state.target ? ` → ${state.target}` : ""}
+          </p>
+          {state.message && <p className={styles.fieldError}>{state.message}</p>}
+          <ul className={styles.clusterUpdateNodes}>
+            {state.nodes.map((node) => (
+              <li key={node.nodeId} className={styles.clusterUpdateNode}>
+                <span className={styles.clusterNodeLabel}>
+                  {node.label}
+                  {node.isPrimary ? ` (${t("ha.cluster.primaryTag")})` : ""}
+                </span>
+                <span className={styles.clusterNodePhase} data-phase={node.phase}>
+                  {t(CLUSTER_NODE_PHASE_KEY[node.phase])}
+                </span>
+                {node.error && <span className={styles.clusterNodeError}>{node.error}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {password != null && (
+        <ConfirmDialog
+          title={t("ha.cluster.updateTitle")}
+          body={t("ha.cluster.updateBody")}
+          details={
+            <label className={styles.nodeField}>
+              <span>{t("ha.node.backupPassword")}</span>
+              <input
+                className={styles.input}
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+          }
+          confirmLabel={t("ha.cluster.updateButton")}
+          cancelLabel={t("ha.cancel")}
+          busy={busy}
+          onConfirm={start}
+          onCancel={() => setPassword(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 function Cluster({
   status,
   lang,
@@ -594,11 +741,15 @@ function Cluster({
             lang={lang}
             busy={busy}
             onRemove={setPendingRemove}
+            status={status}
+            reload={reload}
           />
         ))}
       </ul>
 
       <AddNodeGuide status={status} />
+
+      {status.isPrimary && status.peers.length > 0 && <ClusterUpdatePanel />}
 
       {synced && <p className={styles.fieldOk}>{t("ha.synced")}</p>}
 
@@ -647,6 +798,193 @@ function Cluster({
           busy={busy}
           onConfirm={confirmRemove}
           onCancel={() => setPendingRemove(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Per-node management, shown on every node card (this node and each peer): the
+ *  primary badge or a "make primary / take over" action, a node-settings editor
+ *  for the fields that never sync (name, DoT/DoH hostname, certificate ids,
+ *  block-page IPs), and a remote-update trigger. Editing and updating are only
+ *  offered from the managing node; designating a primary is always offered so a
+ *  surviving node can take over a dead one. */
+function NodeManage({
+  nodeId,
+  status,
+  reload,
+}: {
+  nodeId: string;
+  status: HaStatus;
+  reload: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const isPrimaryNode = status.primaryNodeId != null && status.primaryNodeId === nodeId;
+  const hasPrimary = status.primaryNodeId != null && status.primaryNodeId !== "";
+  // "Managing" = this (self) node may drive the others: it is the primary, or no
+  // primary is designated yet.
+  const managing = status.isPrimary;
+
+  const [editing, setEditing] = useState(false);
+  const [config, setConfig] = useState<NodeConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [updatePassword, setUpdatePassword] = useState<string | null>(null);
+
+  async function openEditor() {
+    setEditing(true);
+    setError(null);
+    setSaved(false);
+    setConfig(null);
+    try {
+      setConfig(await api.haNodeConfig(nodeId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ha.node.loadFailed"));
+    }
+  }
+
+  async function saveConfig(event: React.FormEvent) {
+    event.preventDefault();
+    if (!config) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.haSetNodeConfig(nodeId, config);
+      setSaved(true);
+      setEditing(false);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ha.node.saveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function makePrimary() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.haSetPrimary(nodeId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ha.node.saveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runUpdate() {
+    if (updatePassword == null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.haNodeUpdate(nodeId, updatePassword);
+      setUpdatePassword(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("ha.node.updateFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const field = (key: keyof NodeConfig, label: string, placeholder?: string) => (
+    <label className={styles.nodeField}>
+      <span>{label}</span>
+      <input
+        className={styles.input}
+        type="text"
+        value={config?.[key] ?? ""}
+        placeholder={placeholder}
+        onChange={(event) =>
+          setConfig((prev) => (prev ? { ...prev, [key]: event.target.value } : prev))
+        }
+      />
+    </label>
+  );
+
+  return (
+    <div className={styles.nodeManage}>
+      <div className={styles.nodeManageRow}>
+        {isPrimaryNode ? (
+          <span className={styles.primaryBadge}>{t("ha.primaryBadge")}</span>
+        ) : (
+          <button
+            type="button"
+            className={styles.linkButton}
+            onClick={makePrimary}
+            disabled={busy}
+          >
+            {hasPrimary ? t("ha.takeOver") : t("ha.makePrimary")}
+          </button>
+        )}
+        {managing && (
+          <button
+            type="button"
+            className={styles.linkButton}
+            onClick={() => (editing ? setEditing(false) : openEditor())}
+            disabled={busy}
+          >
+            {t("ha.node.edit")}
+          </button>
+        )}
+        {managing && (
+          <button
+            type="button"
+            className={styles.linkButton}
+            onClick={() => {
+              setUpdatePassword("");
+              setError(null);
+            }}
+            disabled={busy}
+          >
+            {t("ha.node.update")}
+          </button>
+        )}
+      </div>
+
+      {saved && <p className={styles.fieldOk}>{t("ha.node.saved")}</p>}
+      {error && <p className={styles.fieldError}>{error}</p>}
+
+      {editing && config && (
+        <form className={styles.nodeForm} onSubmit={saveConfig}>
+          {field("instanceName", t("ha.node.name"))}
+          {field("hostname", t("ha.node.hostname"), "dns.example.org")}
+          {field("blockPageIpv4", t("ha.node.blockIpv4"), "10.0.0.2")}
+          {field("blockPageIpv6", t("ha.node.blockIpv6"))}
+          {field("dotCertId", t("ha.node.dotCert"))}
+          {field("dohCertId", t("ha.node.dohCert"))}
+          <div className={styles.nodeFormActions}>
+            <button className={styles.copyButton} type="submit" disabled={busy}>
+              {t("ha.node.save")}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {updatePassword != null && (
+        <ConfirmDialog
+          title={t("ha.node.updateTitle")}
+          body={t("ha.node.updateBody")}
+          details={
+            <label className={styles.nodeField}>
+              <span>{t("ha.node.backupPassword")}</span>
+              <input
+                className={styles.input}
+                type="password"
+                autoComplete="new-password"
+                value={updatePassword}
+                onChange={(event) => setUpdatePassword(event.target.value)}
+              />
+            </label>
+          }
+          confirmLabel={t("ha.node.update")}
+          cancelLabel={t("ha.cancel")}
+          busy={busy}
+          onConfirm={runUpdate}
+          onCancel={() => setUpdatePassword(null)}
         />
       )}
     </div>
@@ -714,6 +1052,7 @@ function SelfNode({ status, reload }: { status: HaStatus; reload: () => Promise<
           </div>
         </dl>
       )}
+      <NodeManage nodeId={status.nodeId} status={status} reload={reload} />
     </li>
   );
 }
@@ -726,12 +1065,16 @@ function PeerNode({
   lang,
   busy,
   onRemove,
+  status,
+  reload,
 }: {
   peer: HaPeer;
   health: Health;
   lang: string;
   busy: boolean;
   onRemove: (peer: HaPeer) => void;
+  status: HaStatus;
+  reload: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const formatTime = (ms?: number) =>
@@ -775,6 +1118,7 @@ function PeerNode({
         </div>
       </dl>
       {peer.lastError && <p className={styles.fieldError}>{t("ha.lastError")}: {peer.lastError}</p>}
+      {peer.peerNodeId && <NodeManage nodeId={peer.peerNodeId} status={status} reload={reload} />}
     </li>
   );
 }

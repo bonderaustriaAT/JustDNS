@@ -175,6 +175,47 @@ und verändern (und damit auch MFA aushebeln). Darum:
 > Version, pausiert der Sync, bis beide aktualisiert sind — die Auflösung läuft die ganze
 > Zeit weiter, nur der Abgleich wartet.
 
+## Den ganzen Cluster von einer Node aus verwalten
+
+Standardmäßig sind alle Knoten gleichwertig und beschreibbar, und eine Änderung auf einem
+beliebigen Knoten synchronisiert zu den anderen. Willst du lieber an einem Ort verwalten,
+wähle auf der HA-Seite eine **Hauptnode** (den Primary). Ab dann gilt:
+
+- **Die Hauptnode ist der Ort zum Verwalten.** Alles, was du dort änderst, synchronisiert
+  wie bisher nach außen.
+- **Jede andere Node ist eine nur-lesende Follower-Node.** Ihr Dashboard öffnet sich
+  weiterhin – zum Einloggen und Nachsehen beim Debuggen – zeigt aber einen Hinweis mit der
+  Adresse der Hauptnode und weist Änderungen ab. (Die HA-Seite selbst bleibt auf einer
+  Follower-Node bedienbar, damit du den Cluster reparieren oder die Rolle übernehmen
+  kannst.)
+- **Die Einstellungen der Hauptnode gewinnen immer.** Weil Follower nie selbst Änderungen
+  erzeugen, gibt es nichts zu streiten – der Cluster konvergiert auf den Stand der
+  Hauptnode.
+
+Jeder Knoten hat zudem ein paar Einstellungen, die *nie* synchronisieren, weil sie pro
+Knoten verschieden sein müssen: Anzeigename, DoT/DoH-Hostname, welches gespeicherte
+Zertifikat er zeigt und seine Block-Page-Adresse (jeder Knoten zeigt blockierte Namen auf
+sich selbst). Von der HA-Seite der Hauptnode aus setzt du diese jetzt auf **jeder** Node –
+öffne die Karte der Node, bearbeite **Node-Einstellungen** und speichere. Ebenso löst du
+dort ein **Ein-Klick-Update** auf jeder Node aus (sie sichert sich zuerst, verschlüsselt mit
+dem eingegebenen Passwort), sodass du dich nie auf den anderen Knoten einloggen musst.
+
+Du kannst von der Hauptnode aus auch den **ganzen Cluster auf einmal** aktualisieren. Auf
+ihrer HA-Seite aktualisiert **Ganzen Cluster aktualisieren** jede Node in sicherer
+Reihenfolge: jeden Follower einzeln, die Hauptnode **zuletzt**. Zur nächsten Node geht es
+erst, wenn die eben aktualisierte wieder läuft und die **neue Version** ausliefert (so ist
+nie mehr als eine Node gleichzeitig unten), und die Hauptnode selbst kommt erst dran, wenn
+alle Follower gesund sind. Jede Node nimmt **dieselbe** Version, sichert sich zuerst
+(verschlüsselt mit dem einen Passwort, das du eingibst), und du musst dich auf keiner Node
+einloggen. Kommt eine Node nicht rechtzeitig zurück, **stoppt der Vorgang und die Hauptnode
+bleibt unangetastet** – du stehst also nie mit dem ganzen Cluster mitten im Update da:
+Node in Ordnung bringen und erneut starten.
+
+Ist die Hauptnode einmal weg, öffne die HA-Seite einer überlebenden Node und wähle **Als
+Hauptnode übernehmen**. Diese Node wird zum Primary und ist wieder beschreibbar. Zurück zum
+alten „alle gleich"-Verhalten kommst du, indem du die Hauptnode leerst – ohne festgelegte
+Hauptnode ist jede Node beschreibbar wie zuvor.
+
 ## Beide Knoten bei den Clients eintragen
 
 Weil JustDNS den Verkehr nicht selbst umschwenkt, sollten deine Clients **beide**
@@ -296,6 +337,59 @@ Funktion nicht nutzt, existiert die Sync-Fläche also gar nicht. Eine bestehende
 wird bewusst **nicht** verlangt (der Schlüssel ist die Absicherung), sonst könnten sich
 zwei frische Knoten nie zum ersten Mal verbinden. Die Verwaltungs-Endpunkte (aktivieren,
 Schlüssel setzen, verbinden, jetzt abgleichen) liegen hinter dem normalen Admin-Login.
+
+**Die Hauptnode wird an zwei Stellen durchgesetzt.** Die Knoten-ID des gewählten Primary
+reist in den synchronisierten Einstellungen mit (`cluster.primaryNodeId`), sodass alle
+Knoten übereinstimmen, wer es ist. Auf einer Follower-Node weist der Auth-Guard jeden
+Schreibzugriff (jedes Nicht-GET) mit einem 403 ab, das die Adresse der Hauptnode nennt –
+außer der Fläche für das eigene Konto und `/api/ha`, damit du deinen eigenen Login
+verwalten und den Cluster von einer Follower-Node aus reparieren oder übernehmen kannst.
+Das Dashboard spiegelt dieselbe Regel, indem es seine Bearbeiten-Elemente abschaltet – du
+siehst also eine Nur-Lese-Ansicht statt Knöpfen, die fehlschlagen würden. Weil eine
+Follower-Node nie schreibt, konvergiert Last-Writer-Wins ohnehin auf die Werte der
+Hauptnode; das Gate macht „an einem Ort verwaltet" nur explizit und sichtbar. Eine
+**unbekannte** Knoten-ID als Hauptnode wird abgelehnt, damit der Cluster nie auf einen
+nicht existierenden Primary festgenagelt werden kann (was *jede* Node nur-lesend machen
+würde).
+
+**Die Fern-Verwaltung der Knoten nutzt den versiegelten Peer-Kanal.** Die vier
+Node-eigenen Felder und das Ein-Klick-Update werden von der Hauptnode über denselben
+schlüssel-authentifizierten ChaCha20-Poly1305-Kanal wie der Snapshot gesetzt – die Nutzlast
+(samt dem Backup-Passwort eines Fern-Updates) ist versiegelt, nie im Klartext. Eine Node
+schreibt immer nur ihre *eigenen* Identitätsfelder und führt ihr *eigenes* Update aus (das
+Backup landet in ihrem eigenen Datenverzeichnis), die Hauptnode fragt also an, statt
+hineinzugreifen. Nur der Knoten, der *gerade* die Hauptnode ist, verwaltet einen anderen
+Knoten aus der Ferne; ein Follower, der dazu aufgefordert wird, lehnt ab – „Verwaltung von
+einer Stelle" gilt also auch für die Verwaltungsaktionen selbst, nicht nur für normale
+Änderungen. Der gemeinsame Schlüssel ist ohnehin das Wurzel-Credential des Clusters
+(er öffnet jeden Passwort-Hash im Snapshot), diese Endpunkte fügen also kein neues
+Vertrauen hinzu.
+
+**Das Cluster-Update ist orchestriert, nicht einfach ausgelöst.** „Ganzen Cluster
+aktualisieren" fährt eine kleine Zustandsmaschine auf der Hauptnode. Sie fixiert eine
+Zielversion für den ganzen Lauf und je Follower der Reihe nach: löst das Update der Node
+über den versiegelten Kanal aus (mit der fixierten Version) und pollt dann deren
+`/api/ha/hello`, bis es genau diese Version meldet – das passiert erst, wenn der Container
+auf dem neuen Image neu erstellt wurde und wieder ausliefert, sodass eine Node, die nur auf
+dem *alten* Image neu gestartet ist, nicht fälschlich als fertig gilt. Erst wenn jeder
+Follower die Zielversion meldet, aktualisiert sich die Hauptnode selbst. Scheitert ein
+Follower oder kommt er nicht im Zeitfenster zurück, bricht der Lauf ab und die Hauptnode
+bleibt unangetastet – der Cluster steht nie mit allen Nodes mitten im Update. Der
+Lauf-Zustand liegt im Speicher der Hauptnode (er wird beim eigenen Update am Ende
+zurückgesetzt); deshalb ist das Dashboard beim letzten Schritt kurz weg – das ist die
+Hauptnode, die sich selbst neu erstellt.
+
+**Der Read-only-Follower ist eine Bequemlichkeit, keine Sicherheitsgrenze zwischen
+Admins.** Die Hauptnode beantwortet „wo wird konfiguriert", nicht „wer darf
+konfigurieren". Da Konten und Rollen mitsynchronisiert werden, ist *jedes* Admin-Konto auf
+jedem Knoten ein vollwertiger Admin: Das read-only Dashboard eines Followers ist der
+alltägliche „hier nicht verwalten"-Hinweis und schützt vor versehentlichen Änderungen,
+aber ein auf einem Follower eingeloggter Admin kann jederzeit **Zur Hauptnode machen**
+drücken – eine bewusste, bestätigte Aktion – und dieser Knoten wird beschreibbar. Behandle
+einen Admin-Login daher als clusterweit und voll privilegiert, egal wo er stattfindet;
+verlass dich nicht auf „ist ja nur ein Follower", um eine Sitzung einzugrenzen. Die echten
+Grenzen sind der Admin-Login selbst und der gemeinsame HA-Schlüssel, nicht das
+Hauptnode-Kennzeichen.
 
 **Uhren-Drift ist wichtig.** Last-Writer-Wins vertraut den Uhren, halte also beide
 Knoten per NTP synchron. Der Knoten-ID-Tiebreak verhindert Flattern, wenn zwei Stempel

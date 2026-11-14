@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, type Role, type UserInfo } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useAuth } from "../state/auth";
+import { WriteGuard } from "../components/WriteGuard";
 import { useSettings } from "../state/settings";
 import { Modal } from "../components/Modal";
 import { Toggle } from "../components/Toggle";
@@ -148,6 +149,7 @@ export function Users() {
   }
 
   return (
+    <WriteGuard>
     <div className={styles.page}>
       <div className={styles.topRow}>
         <header className={styles.header}>
@@ -352,5 +354,6 @@ export function Users() {
         </form>
       </Modal>
     </div>
+    </WriteGuard>
   );
 }

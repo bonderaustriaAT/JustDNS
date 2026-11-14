@@ -217,6 +217,22 @@ impl Default for BlockPage {
     }
 }
 
+/// Cluster-wide role settings. In an HA cluster one node is the **primary** (the
+/// "main node"): the only place config is edited. Every other node is a read-only
+/// follower that applies what the primary syncs and shows where to manage instead.
+/// Part of [`Settings`], so the choice of primary syncs across the cluster as one
+/// unit. An empty `primary_node_id` means no primary is designated yet — then every
+/// node stays writable, exactly as before this feature, so an upgrade never locks a
+/// running cluster.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Cluster {
+    /// The node id of the primary (managing) node. Empty = no primary designated;
+    /// every node is then writable. When set, only the node whose own id matches
+    /// may change configuration; the others serve a read-only dashboard.
+    pub primary_node_id: String,
+}
+
 /// Which shape a notification webhook payload takes, so the same URL field can
 /// target the common self-hosted and chat services without per-service code in
 /// the UI. `Generic` posts `{title, message}` JSON; `Ntfy` posts the message as
@@ -404,6 +420,10 @@ pub struct Settings {
     /// Active notifications (webhook alerts). Off by default.
     #[serde(default)]
     pub notifications: Notifications,
+    /// Cluster role: which node is the primary (managing) node. Empty by default
+    /// (no primary designated — every node writable).
+    #[serde(default)]
+    pub cluster: Cluster,
     /// The bearer token that guards the Prometheus `GET /metrics` endpoint. Empty
     /// leaves the endpoint off (404). A write-only secret: it is blanked for
     /// non-admin readers and stripped from downloaded backups. When empty, the
@@ -437,6 +457,7 @@ impl Default for Settings {
             reports: ReportSettings::default(),
             block_page: BlockPage::default(),
             notifications: Notifications::default(),
+            cluster: Cluster::default(),
             metrics_token: String::new(),
         }
     }
@@ -576,6 +597,19 @@ impl ConfigStore {
             .settings
             .read()
             .expect("config lock poisoned")
+            .clone()
+    }
+
+    /// The configured primary (managing) node id, cloned alone without copying the
+    /// whole settings object — the cluster read-only check reads it on every write,
+    /// so it stays off the hot path.
+    pub fn primary_node_id(&self) -> String {
+        self.inner
+            .settings
+            .read()
+            .expect("config lock poisoned")
+            .cluster
+            .primary_node_id
             .clone()
     }
 
@@ -1081,6 +1115,32 @@ mod tests {
         assert!(json.contains("\"spikeBlockedThreshold\":250"), "{json}");
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn cluster_defaults_unset_and_round_trips() {
+        // No primary designated by default — every node stays writable.
+        assert!(Settings::default().cluster.primary_node_id.is_empty());
+
+        let settings = Settings {
+            cluster: Cluster {
+                primary_node_id: "node-abc".to_owned(),
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"cluster\":{"), "{json}");
+        assert!(json.contains("\"primaryNodeId\":\"node-abc\""), "{json}");
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn older_config_without_cluster_loads_with_defaults() {
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        assert!(store.get().cluster.primary_node_id.is_empty());
     }
 
     #[test]

@@ -171,6 +171,17 @@ langfristig.
   überstehen. Jede Zeile trägt ihren Herkunftsknoten; das Live-Dashboard bleibt
   knotenlokal. Die Aufbewahrungs-Einstellung wird jetzt durchgesetzt und beschneidet das
   Log auf jedem Knoten.
+- [x] **Von einer Node aus verwalten (Hauptnode).** Lege eine Hauptnode fest – den einen
+  Ort, an dem konfiguriert wird – und jede andere Node wird zur nur-lesenden Follower-Node,
+  die anwendet, was die Hauptnode synchronisiert, zeigt wo verwaltet wird und Änderungen
+  abweist (ihr Dashboard öffnet sich weiterhin zum Debuggen). Von der Hauptnode aus setzt du
+  die Node-eigenen, nie synchronisierten Felder (Name, DoT/DoH-Hostname, Zertifikatswahl,
+  Block-Page-Adresse), löst auf jeder Node ein Update aus und aktualisierst den ganzen
+  Cluster der Reihe nach (jeder Follower zuerst, gesund auf der neuen Version bestätigt, die
+  Hauptnode zuletzt) – alles ohne dich dort einzuloggen.
+  Fällt die Hauptnode aus, kann jede Node die Rolle übernehmen. Standardmäßig aus (ohne
+  Hauptnode bleibt jede Node beschreibbar). Siehe
+  [den Leitfaden](docs/guides/high-availability.de.md).
 
 JustDNS automatisiert bewusst **kein** Failover (kein Knoten reißt die Adresse des
 anderen an sich). Clients nutzen beide Resolver-IPs oder eine externe virtuelle IP;

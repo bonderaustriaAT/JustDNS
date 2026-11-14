@@ -588,6 +588,64 @@
   outline-offset: 1px;
 }
 
+/* Per-node management block under each node card: the primary action/badge row,
+   plus the node-settings editor when open. */
+.nodeManage {
+  margin-block-start: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.nodeManageRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The "this is the main node" marker. */
+.primaryBadge {
+  font-size: var(--step--2, 0.72rem);
+  font-weight: 600;
+  color: var(--accent, var(--signal));
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+.nodeForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+}
+
+.nodeField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--step--1);
+}
+
+.nodeField span {
+  color: var(--text-muted);
+}
+
+.nodeFormActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 640px) {
+  .nodeForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 640px) {
   .header {
     flex-direction: column;
@@ -761,4 +819,98 @@
   block-size: 6px;
   border-radius: 999px;
   background: var(--text-muted);
+}
+
+/* --- Whole-cluster rolling update ------------------------------------- */
+.clusterUpdate {
+  margin-block-start: var(--space-4);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.clusterUpdateLabel {
+  font-weight: 600;
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
+.clusterUpdateState {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block-start: var(--space-2);
+}
+
+.clusterUpdateOverall {
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The primary-update step and an abort are the two moments worth a colour. */
+.clusterUpdateOverall[data-phase="updatingPrimary"] {
+  color: var(--accent, var(--signal));
+}
+
+.clusterUpdateOverall[data-phase="aborted"] {
+  color: var(--danger);
+}
+
+.clusterUpdateOverall[data-phase="done"] {
+  color: var(--signal-strong, var(--signal));
+}
+
+.clusterUpdateNodes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.clusterUpdateNode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+}
+
+.clusterNodeLabel {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.clusterNodePhase {
+  color: var(--text-muted);
+  font-size: var(--step--2, 0.72rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-2);
+}
+
+.clusterNodePhase[data-phase="healthy"] {
+  color: var(--signal-strong, var(--signal));
+  border-color: color-mix(in srgb, var(--signal) 40%, transparent);
+}
+
+.clusterNodePhase[data-phase="failed"] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.clusterNodePhase[data-phase="updating"],
+.clusterNodePhase[data-phase="restarting"] {
+  color: var(--accent, var(--signal));
+  border-color: color-mix(in srgb, var(--signal) 40%, transparent);
+}
+
+.clusterNodeError {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: var(--step--2, 0.72rem);
 }

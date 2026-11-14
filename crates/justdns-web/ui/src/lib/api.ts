@@ -816,6 +816,11 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   role?: Role;
+  /** Whether this node may be edited (it is the primary, or no primary is set).
+   *  Absent on an older server, which is treated as writable. */
+  isPrimary?: boolean;
+  /** Where to manage the cluster — the primary node's URL — shown to a follower. */
+  primaryUrl?: string;
 }
 
 /** Where a login stands after a step. `authenticated` is done; `mfa` means a
@@ -1005,12 +1010,65 @@ export interface HaStatus {
   peers: HaPeer[];
   /** Count of live (non-tombstone) tracked entities — a cheap health signal. */
   tracked: number;
+  /** The primary (managing) node's id, if one is designated. */
+  primaryNodeId?: string;
+  /** Whether this node is the primary (or no primary is designated). */
+  isPrimary: boolean;
+  /** The primary node's URL, resolved from the roster, if known. */
+  primaryUrl?: string;
+}
+
+/** A node's own identity fields — the per-node settings that never sync, managed
+ *  from the primary. Matches the Rust `NodeConfig`. */
+export interface NodeConfig {
+  instanceName: string;
+  hostname: string;
+  dotCertId: string;
+  dohCertId: string;
+  blockPageIpv4: string;
+  blockPageIpv6: string;
 }
 
 /** The peer handshake result returned by a successful connect. */
 export interface HaHello {
   nodeId: string;
   version: string;
+}
+
+/** Per-node phase within a cluster-wide update. */
+export type ClusterNodePhase =
+  | "pending"
+  | "updating"
+  | "restarting"
+  | "healthy"
+  | "skipped"
+  | "failed";
+
+/** Overall phase of a cluster-wide update. */
+export type ClusterUpdatePhase =
+  | "idle"
+  | "running"
+  | "updatingPrimary"
+  | "done"
+  | "aborted";
+
+/** One node's row in the cluster-update progress. */
+export interface ClusterUpdateNode {
+  nodeId: string;
+  /** A human label — the node's URL. */
+  label: string;
+  isPrimary: boolean;
+  phase: ClusterNodePhase;
+  error?: string;
+}
+
+/** Live progress of a cluster-wide rolling update, matches the Rust `ClusterUpdate`. */
+export interface ClusterUpdateState {
+  phase: ClusterUpdatePhase;
+  target?: string;
+  startedAtMs?: number;
+  message?: string;
+  nodes: ClusterUpdateNode[];
 }
 
 /** Which config wins the first join: `local` (ours) or `peer` (adopt the cluster). */
@@ -1472,6 +1530,29 @@ export const api = {
     ),
   /** Run a mesh sync immediately (the "Sync now" button). */
   haSyncNow: () => sendJson<void>("POST", "/api/ha/sync"),
+  /** Designate the primary (managing) node, or take over as primary. An empty id
+   *  clears the designation (every node writable again). */
+  haSetPrimary: (nodeId: string) => sendJson<void>("POST", "/api/ha/primary", { nodeId }),
+  /** Read a node's own identity fields (name, hostname, certificate selection,
+   *  block-page IPs) — the local node directly, or a peer over the HA channel. */
+  haNodeConfig: (nodeId: string, signal?: AbortSignal) =>
+    getJson<NodeConfig>(`/api/ha/nodes/${encodeURIComponent(nodeId)}/config`, signal),
+  /** Set a node's own identity fields from the managing node. */
+  haSetNodeConfig: (nodeId: string, config: NodeConfig) =>
+    sendJson<void>("PUT", `/api/ha/nodes/${encodeURIComponent(nodeId)}/config`, config),
+  /** Trigger a one-click update on a node from the managing node. The backup
+   *  password encrypts the pre-update safety backup written on that node. */
+  haNodeUpdate: (nodeId: string, password: string) =>
+    sendJson<void>("POST", `/api/ha/nodes/${encodeURIComponent(nodeId)}/update`, { password }),
+  /** Start a rolling update of the whole cluster from the primary: every follower
+   *  first (one at a time, each confirmed back on the new version), then the primary
+   *  itself last. Returns at once with the initial progress; poll
+   *  `haClusterUpdateStatus` for the rest. */
+  haClusterUpdate: (password: string) =>
+    sendJson<ClusterUpdateState>("POST", "/api/ha/cluster-update", { password }),
+  /** Poll the progress of a running (or the most recent) cluster-wide update. */
+  haClusterUpdateStatus: (signal?: AbortSignal) =>
+    getJson<ClusterUpdateState>("/api/ha/cluster-update", signal),
   /** Reveal the shared sync key so an admin can copy it to a new node. Returns
    *  `null` when no key is set or the key is pinned by the environment. */
   haRevealKey: (signal?: AbortSignal) =>

@@ -11,6 +11,7 @@ import { NavLink } from "react-router-dom";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
+import { WriteGuard } from "../components/WriteGuard";
 import { ApiError, api, type CertListItem, type TlsSettings, type TlsStatus } from "../lib/api";
 import { bytesToBase64, looksEncrypted } from "../lib/backupFile";
 import { useI18n } from "../lib/i18n";
@@ -1549,6 +1550,7 @@ export function Settings() {
           {!settings.expertMode && <p className={styles.railHint}>{t("settings.railHint")}</p>}
         </nav>
 
+        <WriteGuard>
         <div className={styles.sections}>
           {active === "schutz" && (
             <Category
@@ -1884,6 +1886,7 @@ export function Settings() {
             </Category>
           )}
         </div>
+        </WriteGuard>
       </div>
     </div>
   );

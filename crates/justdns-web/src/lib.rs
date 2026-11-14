@@ -229,6 +229,11 @@ struct AppState {
     /// Generated summary reports, persisted on the data volume. The scheduler
     /// thread writes into it; the `/api/reports` handlers read from it.
     reports: ReportStore,
+    /// Live progress of a cluster-wide rolling update, driven from the primary
+    /// node. Shared so the orchestrator thread writes it and the status endpoint
+    /// reads it. Idle until an admin starts one; node-local and not persisted (a
+    /// restart — including the primary's own update at the end — resets it).
+    cluster_update: Arc<Mutex<ClusterUpdate>>,
 }
 
 impl FromRef<AppState> for Store {
@@ -407,6 +412,7 @@ pub async fn serve(
         update,
         ha,
         reports,
+        cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
     };
 
     // Fill the block-page server IP from this node's own cluster address when the
@@ -681,6 +687,23 @@ fn router(state: AppState) -> Router {
         .route("/api/ha/address", put(ha_set_address))
         .route("/api/ha/peers", post(ha_connect).delete(ha_disconnect))
         .route("/api/ha/sync", post(ha_sync_now))
+        // Designate (or take over as) the primary managing node.
+        .route("/api/ha/primary", post(ha_set_primary))
+        // Read or set a node's own identity fields (name, DoT/DoH hostname,
+        // certificate selection, block-page IPs) from the managing node — for the
+        // local node directly, or a peer over the key-authed channel.
+        .route(
+            "/api/ha/nodes/{node_id}/config",
+            get(ha_node_config_fetch).put(ha_node_config_put),
+        )
+        // Trigger a one-click update on a node from the managing node.
+        .route("/api/ha/nodes/{node_id}/update", post(ha_node_update))
+        // Update the whole cluster in order from the primary: followers first (one at
+        // a time, each confirmed healthy on the new version), the primary itself last.
+        .route(
+            "/api/ha/cluster-update",
+            post(cluster_update_start).get(cluster_update_status),
+        )
         // Scheduled summary reports (admin): list, view, generate now, download.
         .route("/api/reports", get(reports_list))
         .route("/api/reports/run", post(reports_run))
@@ -702,6 +725,14 @@ fn router(state: AppState) -> Router {
         .route("/api/ha/snapshot", get(ha_snapshot))
         .route("/api/ha/depart", post(ha_depart))
         .route("/api/ha/queries", get(ha_queries))
+        // Key-authed peer side of remote node management: the managing node reads
+        // or sets this node's identity fields, or triggers its update. Sealed under
+        // the shared key, like the snapshot.
+        .route(
+            "/api/ha/node-config",
+            get(ha_node_config_local).post(ha_node_config_apply),
+        )
+        .route("/api/ha/update", post(ha_remote_update))
         .route("/api/auth/state", get(auth_state))
         .route("/api/auth/setup", post(auth_setup))
         .route("/api/auth/login", post(auth_login))
@@ -806,9 +837,37 @@ async fn require_auth(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    let needed = required_role(request.method(), request.uri().path());
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let needed = required_role(&method, &path);
     if !role.at_least(needed) {
         return StatusCode::FORBIDDEN.into_response();
+    }
+
+    // Read-only follower gate: when this node is a read-only follower of a live
+    // primary, refuse writes so the cluster is managed from one place. Two
+    // surfaces stay writable: the cluster control plane (`/api/ha`), so a follower
+    // can still be repaired or take over a dead primary, and a user's own account
+    // (`/api/account`), so anyone can still manage their own login while debugging.
+    // Reads are never blocked — a follower is a full, viewable dashboard.
+    let is_write = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+    let exempt = path == "/api/ha"
+        || path.starts_with("/api/ha/")
+        || path == "/api/account"
+        || path.starts_with("/api/account/");
+    if is_write && !exempt {
+        let role = cluster_role(&state);
+        if !role.is_primary {
+            let hint = role
+                .primary_url
+                .map(|url| format!(" Manage the cluster at {url}."))
+                .unwrap_or_default();
+            return (
+                StatusCode::FORBIDDEN,
+                format!("this node is a read-only follower of the primary node.{hint}"),
+            )
+                .into_response();
+        }
     }
 
     request.extensions_mut().insert(Identity { username, role });
@@ -829,6 +888,7 @@ fn session_cookie(token: String) -> Cookie<'static> {
 /// as. The UI reads this on load to choose between first-run setup, the login
 /// screen and the dashboard.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AuthState {
     configured: bool,
     authenticated: bool,
@@ -837,22 +897,38 @@ struct AuthState {
     /// `None` when not signed in.
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<Role>,
+    /// `true` when this node may be edited (it is the primary, or no primary is
+    /// designated). `false` on a read-only follower, so the whole UI can switch to
+    /// read-only in one place.
+    is_primary: bool,
+    /// Where to manage the cluster — the primary node's URL — shown to a follower.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    primary_url: Option<String>,
 }
 
-async fn auth_state(
-    State(users): State<UserStore>,
-    State(sessions): State<SessionStore>,
-    jar: CookieJar,
-) -> Json<AuthState> {
+async fn auth_state(State(state): State<AppState>, jar: CookieJar) -> Json<AuthState> {
     let username = jar
         .get(SESSION_COOKIE)
-        .and_then(|cookie| sessions.username_for(cookie.value()));
-    let role = username.as_deref().and_then(|name| users.role_of(name));
+        .and_then(|cookie| state.sessions.username_for(cookie.value()));
+    let role = username
+        .as_deref()
+        .and_then(|name| state.users.role_of(name));
+    let cluster = cluster_role(&state);
+    // `is_primary` drives the UI's read-only state, which only matters once signed
+    // in, but it is a harmless boolean. The primary's URL, however, is an internal
+    // cluster address: only hand it to an authenticated caller, never pre-login.
+    let authenticated = username.is_some();
     Json(AuthState {
-        configured: users.is_configured(),
-        authenticated: username.is_some(),
+        configured: state.users.is_configured(),
+        authenticated,
         username,
         role,
+        is_primary: cluster.is_primary,
+        primary_url: if authenticated {
+            cluster.primary_url
+        } else {
+            None
+        },
     })
 }
 
@@ -3757,8 +3833,808 @@ async fn ha_queries(
 }
 
 /// The HA status for the management UI (never includes the key).
+/// This node's cluster role, derived from the synced `cluster.primary_node_id`
+/// and the live roster. The single source of truth for both the status view and
+/// the read-only follower gate, so the UI and the API agree on who may write.
+struct ClusterRole {
+    /// The designated primary's node id, or `None` when no primary is set.
+    primary_node_id: Option<String>,
+    /// `true` when this node may be written to: it is the primary, or no primary
+    /// is designated at all. `false` only on a follower of a live primary.
+    is_primary: bool,
+    /// Where to manage the cluster — the primary's reachable URL, if known.
+    primary_url: Option<String>,
+}
+
+/// Resolve [`ClusterRole`] from the cluster config and roster. An empty
+/// `primary_node_id` means no primary is designated, so every node stays writable
+/// (exactly as before this feature). When a primary is set, only the node whose id
+/// matches it is writable; the rest are read-only followers that point at the
+/// primary's URL.
+fn cluster_role(state: &AppState) -> ClusterRole {
+    let primary_id = state.config.primary_node_id().trim().to_owned();
+    if primary_id.is_empty() {
+        return ClusterRole {
+            primary_node_id: None,
+            is_primary: true,
+            primary_url: None,
+        };
+    }
+    let my_id = state.ha.node_id();
+    let is_primary = primary_id == my_id;
+    let primary_url = if is_primary {
+        state.ha.status().self_url
+    } else {
+        // Find the primary in the roster by its stable node id.
+        state.ha.peers().into_iter().find_map(|peer| {
+            (peer.peer_node_id.as_deref() == Some(primary_id.as_str())).then_some(peer.url)
+        })
+    };
+    ClusterRole {
+        primary_node_id: Some(primary_id),
+        is_primary,
+        primary_url,
+    }
+}
+
 async fn ha_status(State(state): State<AppState>) -> Json<ha::HaStatus> {
-    Json(state.ha.status())
+    let mut status = state.ha.status();
+    let role = cluster_role(&state);
+    status.primary_node_id = role.primary_node_id;
+    status.is_primary = role.is_primary;
+    status.primary_url = role.primary_url;
+    Json(status)
+}
+
+/// The filename of the safety backup written to a node's own data dir before an
+/// HA-triggered update (the local one-click flow lets the admin choose the path;
+/// a remote trigger has no one to ask, so it uses this fixed name).
+const HA_UPDATE_BACKUP_FILE: &str = "justdns-pre-update-backup.json";
+
+/// A node's own identity fields — the per-node settings that deliberately never
+/// sync (each node needs its own name, DoT/DoH hostname, certificate selection and
+/// block-page address). This is the unit the primary reads and sets to manage a
+/// node remotely. A PUT replaces all of them, so there is no "leave unchanged"
+/// ambiguity; a certificate id is empty when none is selected.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct NodeConfig {
+    instance_name: String,
+    hostname: String,
+    dot_cert_id: String,
+    doh_cert_id: String,
+    block_page_ipv4: String,
+    block_page_ipv6: String,
+}
+
+/// Read this node's identity fields from its live settings.
+fn read_node_config(state: &AppState) -> NodeConfig {
+    let settings = state.config.get();
+    NodeConfig {
+        instance_name: settings.instance_name,
+        hostname: settings.encrypted_dns.hostname,
+        dot_cert_id: settings.encrypted_dns.dot_cert_id.unwrap_or_default(),
+        doh_cert_id: settings.encrypted_dns.doh_cert_id.unwrap_or_default(),
+        block_page_ipv4: settings.block_page.server_ipv4,
+        block_page_ipv6: settings.block_page.server_ipv6,
+    }
+}
+
+/// Apply identity fields to this node's live settings, leaving everything else
+/// untouched. A blank instance name is ignored (a node always keeps a name); empty
+/// certificate ids clear the selection. The fields are validated first — a bad IP or
+/// an unknown certificate id is rejected with 400, so a typo on the primary can never
+/// push this node into an unservable DoT/DoH or block-page configuration.
+fn apply_node_config(state: &AppState, config: &NodeConfig) -> Result<(), (StatusCode, String)> {
+    let bad = |message: String| (StatusCode::BAD_REQUEST, message);
+    let non_empty = |value: &str| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    };
+
+    // Block-page addresses must parse as the matching IP version when set.
+    let parse_ip = |value: &str, field: &str, want_v4: bool| -> Result<(), (StatusCode, String)> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        match trimmed.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(_)) if want_v4 => Ok(()),
+            Ok(std::net::IpAddr::V6(_)) if !want_v4 => Ok(()),
+            _ => Err(bad(format!("{field} is not a valid IP address"))),
+        }
+    };
+    parse_ip(&config.block_page_ipv4, "block page IPv4 address", true)?;
+    parse_ip(&config.block_page_ipv6, "block page IPv6 address", false)?;
+
+    // Certificate selections must name a certificate that exists in the store.
+    let dot_cert_id = non_empty(&config.dot_cert_id);
+    let doh_cert_id = non_empty(&config.doh_cert_id);
+    if dot_cert_id.is_some() || doh_cert_id.is_some() {
+        let store = state.certs.clone().ok_or_else(|| {
+            bad("this node has no certificate store, so it cannot select a certificate".to_owned())
+        })?;
+        for (selected, field) in [(&dot_cert_id, "DoT"), (&doh_cert_id, "DoH")] {
+            if let Some(id) = selected {
+                if !store.exists(id) {
+                    return Err(bad(format!(
+                        "{field} certificate id is unknown on this node"
+                    )));
+                }
+            }
+        }
+    }
+
+    let mut settings = state.config.get();
+    if let Some(name) = non_empty(&config.instance_name) {
+        settings.instance_name = name;
+    }
+    settings.encrypted_dns.hostname = config.hostname.trim().to_owned();
+    settings.encrypted_dns.dot_cert_id = dot_cert_id;
+    settings.encrypted_dns.doh_cert_id = doh_cert_id;
+    settings.block_page.server_ipv4 = config.block_page_ipv4.trim().to_owned();
+    settings.block_page.server_ipv6 = config.block_page_ipv6.trim().to_owned();
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+/// Resolve a peer's base URL from the roster by its stable node id. `None` when no
+/// peer with that id is known (so the caller answers 404 rather than guessing).
+fn ha_peer_url(state: &AppState, node_id: &str) -> Option<String> {
+    state
+        .ha
+        .peers()
+        .into_iter()
+        .find_map(|peer| (peer.peer_node_id.as_deref() == Some(node_id)).then_some(peer.url))
+}
+
+/// Whether `node_id` names a node this cluster actually knows (this node or a
+/// roster peer). Used to refuse designating a primary that does not exist, which
+/// would otherwise turn *every* node into a read-only follower with no writable
+/// primary — a cluster-wide lockout.
+fn ha_known_node(state: &AppState, node_id: &str) -> bool {
+    node_id == state.ha.node_id() || ha_peer_url(state, node_id).is_some()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetPrimaryRequest {
+    /// The node id to make the primary. Empty clears the designation (every node
+    /// writable again).
+    #[serde(default)]
+    node_id: String,
+}
+
+/// Admin: designate the primary (managing) node — the one place config is edited —
+/// or take over as primary when the old one is gone. Empty clears it (every node
+/// writable again). Refuses an unknown node id so the cluster can never be locked
+/// into a primary that does not exist. Under `/api/ha`, so it stays reachable even
+/// on a read-only follower (that is how a follower takes over a dead primary).
+async fn ha_set_primary(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(request): Json<SetPrimaryRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let node_id = request.node_id.trim().to_owned();
+    if !node_id.is_empty() && !ha_known_node(&state, &node_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "that node is not part of this cluster".to_owned(),
+        ));
+    }
+    let mut settings = state.config.get();
+    settings.cluster.primary_node_id = node_id.clone();
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "ha.primary").target(&node_id),
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Admin (on the primary): read a node's identity fields so the UI can prefill its
+/// node card — the local node directly, or a peer over the key-authed channel.
+async fn ha_node_config_fetch(
+    State(state): State<AppState>,
+    Path(node_id): Path<String>,
+) -> Result<Json<NodeConfig>, (StatusCode, String)> {
+    if node_id == state.ha.node_id() {
+        return Ok(Json(read_node_config(&state)));
+    }
+    let url = ha_peer_url(&state, &node_id).ok_or((
+        StatusCode::NOT_FOUND,
+        "no such node in the roster".to_owned(),
+    ))?;
+    let value = state
+        .ha
+        .get_sealed_json(&url, "api/ha/node-config")
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error))?;
+    let config: NodeConfig = serde_json::from_value(value)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    Ok(Json(config))
+}
+
+/// Admin (on the primary): set a node's identity fields — applied locally, or
+/// pushed to a peer over the key-authed channel.
+async fn ha_node_config_put(
+    State(state): State<AppState>,
+    identity: Identity,
+    Path(node_id): Path<String>,
+    Json(config): Json<NodeConfig>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if !cluster_role(&state).is_primary {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only the primary node manages other nodes' configuration".to_owned(),
+        ));
+    }
+    if node_id == state.ha.node_id() {
+        apply_node_config(&state, &config)?;
+    } else {
+        let url = ha_peer_url(&state, &node_id).ok_or((
+            StatusCode::NOT_FOUND,
+            "no such node in the roster".to_owned(),
+        ))?;
+        let value = serde_json::to_value(&config)
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        state
+            .ha
+            .post_sealed_json(&url, "api/ha/node-config", &value)
+            .map_err(|error| (StatusCode::BAD_GATEWAY, error))?;
+    }
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "ha.node.config").target(&node_id),
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeUpdateRequest {
+    /// The backup password, used to encrypt the pre-update safety backup written on
+    /// the target node.
+    password: String,
+    /// The version every node in a cluster-wide update must move to, pinned by the
+    /// primary so a release appearing mid-run cannot split the cluster. Absent for a
+    /// plain single-node update, which then takes the node's own latest release.
+    #[serde(default)]
+    target_version: Option<String>,
+}
+
+/// Admin (on the primary): trigger a one-click update on a node — the local node
+/// directly, or a peer over the key-authed channel. The backup is written to the
+/// target node's own data dir under a fixed name.
+async fn ha_node_update(
+    State(state): State<AppState>,
+    identity: Identity,
+    Path(node_id): Path<String>,
+    Json(request): Json<NodeUpdateRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if !cluster_role(&state).is_primary {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only the primary node triggers updates on other nodes".to_owned(),
+        ));
+    }
+    if node_id == state.ha.node_id() {
+        let backup_path = state.update.data_dir().join(HA_UPDATE_BACKUP_FILE);
+        let target = perform_update(
+            &state,
+            &backup_path,
+            &request.password,
+            &identity.username,
+            request.target_version.as_deref(),
+        )?;
+        record(
+            &state,
+            AuditEntry::success(&identity.username, "update.start").target(&target),
+        );
+    } else {
+        let url = ha_peer_url(&state, &node_id).ok_or((
+            StatusCode::NOT_FOUND,
+            "no such node in the roster".to_owned(),
+        ))?;
+        state
+            .ha
+            .post_sealed_json(
+                &url,
+                "api/ha/update",
+                &serde_json::json!({ "password": request.password }),
+            )
+            .map_err(|error| (StatusCode::BAD_GATEWAY, error))?;
+        record(
+            &state,
+            AuditEntry::success(&identity.username, "ha.node.update").target(&node_id),
+        );
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Key-authed peer side: return this node's identity fields, sealed under the
+/// shared key, so the managing node can display them. (`GET /api/ha/node-config`.)
+async fn ha_node_config_local(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Err(deny) = ha_peer_authorize(&state, &headers) {
+        return deny.into_response();
+    }
+    ha_sealed(&state, &read_node_config(&state))
+}
+
+/// Key-authed peer side: apply identity fields pushed by the managing node to this
+/// node. The body is sealed under the shared key. (`POST /api/ha/node-config`.)
+async fn ha_node_config_apply(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let caller = match ha_peer_authorize(&state, &headers) {
+        Ok(caller) => caller,
+        Err(deny) => return deny.into_response(),
+    };
+    let Some(plaintext) = state.ha.open_from_peer(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "payload did not authenticate".to_owned(),
+        )
+            .into_response();
+    };
+    let config: NodeConfig = match serde_json::from_slice(&plaintext) {
+        Ok(config) => config,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
+    if let Err((status, message)) = apply_node_config(&state, &config) {
+        return (status, message).into_response();
+    }
+    record(
+        &state,
+        AuditEntry::success(format!("ha:{}", caller.node_id), "ha.node.config"),
+    );
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Key-authed peer side: trigger a one-click update on this node, asked by the
+/// managing node. The sealed body carries the backup password; the safety backup
+/// is written to this node's own data dir. (`POST /api/ha/update`.)
+async fn ha_remote_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let caller = match ha_peer_authorize(&state, &headers) {
+        Ok(caller) => caller,
+        Err(deny) => return deny.into_response(),
+    };
+    let Some(plaintext) = state.ha.open_from_peer(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "payload did not authenticate".to_owned(),
+        )
+            .into_response();
+    };
+    let request: NodeUpdateRequest = match serde_json::from_slice(&plaintext) {
+        Ok(request) => request,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
+    let backup_path = state.update.data_dir().join(HA_UPDATE_BACKUP_FILE);
+    let requested_by = format!("ha:{}", caller.node_id);
+    match perform_update(
+        &state,
+        &backup_path,
+        &request.password,
+        &requested_by,
+        request.target_version.as_deref(),
+    ) {
+        Ok(target) => {
+            record(
+                &state,
+                AuditEntry::success(&requested_by, "update.start").target(&target),
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err((code, message)) => (code, message).into_response(),
+    }
+}
+
+// --- Cluster-wide rolling update, driven from the primary node ---------------
+
+/// How long to wait for one follower to come back up on the target version before
+/// giving up and aborting the run — so a stuck node never leaves the cluster
+/// half-updated with the primary's own update still to come.
+const CLUSTER_UPDATE_NODE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// How often to re-check a restarting follower's running version.
+const CLUSTER_UPDATE_POLL: Duration = Duration::from_secs(5);
+
+/// Overall phase of a cluster-wide update.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum ClusterUpdatePhase {
+    /// No cluster update has run (or the state was reset by a restart).
+    #[default]
+    Idle,
+    /// Working through the followers, one at a time.
+    Running,
+    /// All followers are done; the primary is now updating itself last.
+    UpdatingPrimary,
+    /// Every node was updated (best-effort final state before the primary restarts).
+    Done,
+    /// A node failed or timed out; the run stopped with the primary left untouched.
+    Aborted,
+}
+
+/// Per-node phase within a cluster update.
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum NodeUpdatePhase {
+    /// Waiting its turn.
+    Pending,
+    /// The update has been triggered on it.
+    Updating,
+    /// Triggered; waiting for it to come back on the new version.
+    Restarting,
+    /// Back up and confirmed on the target version.
+    Healthy,
+    /// Already on the target version, so nothing was done.
+    Skipped,
+    /// Failed or timed out — the run aborted here.
+    Failed,
+}
+
+/// One node's row in the cluster-update progress, for the UI.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClusterUpdateNode {
+    node_id: String,
+    /// A human label for the UI: the node's URL (its stable, visible address).
+    label: String,
+    is_primary: bool,
+    phase: NodeUpdatePhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Live progress of a cluster-wide rolling update. Held behind a mutex in
+/// `AppState`; the orchestrator thread writes it, the status endpoint reads it.
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClusterUpdate {
+    phase: ClusterUpdatePhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    nodes: Vec<ClusterUpdateNode>,
+}
+
+impl ClusterUpdate {
+    fn is_active(&self) -> bool {
+        matches!(
+            self.phase,
+            ClusterUpdatePhase::Running | ClusterUpdatePhase::UpdatingPrimary
+        )
+    }
+}
+
+/// What to do with one follower at the start of a cluster update, decided from its
+/// current running version. A pure function, so the planning is unit-testable
+/// without real nodes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NodeUpdatePlan {
+    /// Already on the target — leave it be.
+    Skip,
+    /// Reachable and behind — update it.
+    Update,
+    /// Not answering right now — refuse to start a run we cannot finish.
+    Unreachable,
+}
+
+fn plan_follower(current: Option<&str>, target: &str) -> NodeUpdatePlan {
+    match current {
+        None => NodeUpdatePlan::Unreachable,
+        Some(version) if version == target => NodeUpdatePlan::Skip,
+        Some(_) => NodeUpdatePlan::Update,
+    }
+}
+
+/// A follower to work through, as resolved at start time.
+struct FollowerWork {
+    node_id: String,
+    url: String,
+    /// `false` when it is already on the target version (shown as Skipped).
+    update: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClusterUpdateStart {
+    password: String,
+}
+
+/// Admin, **primary only**: update the whole cluster in a rolling fashion — every
+/// follower one at a time, each confirmed back on the new version before the next,
+/// then the primary updates itself last. If any follower fails or does not return in
+/// time, the run aborts and the primary is left untouched, so at least the primary
+/// keeps serving. Spawns a background worker and returns at once; progress is polled
+/// from `GET /api/ha/cluster-update`.
+async fn cluster_update_start(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(body): Json<ClusterUpdateStart>,
+) -> Result<(StatusCode, Json<ClusterUpdate>), (StatusCode, String)> {
+    if !cluster_role(&state).is_primary {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "only the primary node can update the whole cluster".to_owned(),
+        ));
+    }
+    if body.password.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "a backup password is required".to_owned(),
+        ));
+    }
+    if !state.update.updater_present() {
+        return Err((
+            StatusCode::CONFLICT,
+            "the updater sidecar is not running on this node".to_owned(),
+        ));
+    }
+    let check = state.update.snapshot();
+    let target = match check
+        .update_available
+        .then(|| check.latest.clone())
+        .flatten()
+    {
+        Some(target) => target,
+        None => {
+            return Err((
+                StatusCode::CONFLICT,
+                "no newer release is available".to_owned(),
+            ));
+        }
+    };
+
+    // One run at a time.
+    if state
+        .cluster_update
+        .lock()
+        .expect("cluster update lock")
+        .is_active()
+    {
+        return Err((
+            StatusCode::CONFLICT,
+            "a cluster update is already running".to_owned(),
+        ));
+    }
+
+    // Pre-flight: classify each follower from its live version. Refuse to start if any
+    // is unreachable right now — better to touch nothing than to update some and get
+    // stuck before the primary.
+    let self_id = state.ha.node_id();
+    let mut followers: Vec<FollowerWork> = Vec::new();
+    let mut nodes: Vec<ClusterUpdateNode> = Vec::new();
+    for peer in state.ha.peers() {
+        let Some(node_id) = peer.peer_node_id.clone() else {
+            continue;
+        };
+        if node_id == self_id {
+            continue;
+        }
+        let current = state.ha.peer_hello_version(&peer.url);
+        match plan_follower(current.as_deref(), &target) {
+            NodeUpdatePlan::Unreachable => {
+                return Err((
+                    StatusCode::CONFLICT,
+                    format!(
+                        "node {} is not reachable right now; not starting a cluster update",
+                        peer.url
+                    ),
+                ));
+            }
+            NodeUpdatePlan::Skip => {
+                nodes.push(ClusterUpdateNode {
+                    node_id: node_id.clone(),
+                    label: peer.url.clone(),
+                    is_primary: false,
+                    phase: NodeUpdatePhase::Skipped,
+                    error: None,
+                });
+                followers.push(FollowerWork {
+                    node_id,
+                    url: peer.url,
+                    update: false,
+                });
+            }
+            NodeUpdatePlan::Update => {
+                nodes.push(ClusterUpdateNode {
+                    node_id: node_id.clone(),
+                    label: peer.url.clone(),
+                    is_primary: false,
+                    phase: NodeUpdatePhase::Pending,
+                    error: None,
+                });
+                followers.push(FollowerWork {
+                    node_id,
+                    url: peer.url,
+                    update: true,
+                });
+            }
+        }
+    }
+
+    // The primary itself, updated last.
+    let primary_label = cluster_role(&state)
+        .primary_url
+        .unwrap_or_else(|| "this node".to_owned());
+    nodes.push(ClusterUpdateNode {
+        node_id: self_id.clone(),
+        label: primary_label,
+        is_primary: true,
+        phase: NodeUpdatePhase::Pending,
+        error: None,
+    });
+
+    let initial = ClusterUpdate {
+        phase: ClusterUpdatePhase::Running,
+        target: Some(target.clone()),
+        started_at_ms: Some(now_ms()),
+        message: None,
+        nodes,
+    };
+    *state.cluster_update.lock().expect("cluster update lock") = initial.clone();
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "ha.cluster.update").target(&target),
+    );
+
+    // The HA and health calls are blocking (ureq), so the orchestrator runs on its
+    // own thread, like the sync loop and the update checker — never on the async
+    // runtime.
+    let worker_state = state.clone();
+    let password = body.password.clone();
+    std::thread::spawn(move || {
+        run_cluster_update(worker_state, password, target, followers);
+    });
+
+    Ok((StatusCode::ACCEPTED, Json(initial)))
+}
+
+/// The current cluster-update progress, for the UI to poll. Admin-only.
+async fn cluster_update_status(State(state): State<AppState>) -> Json<ClusterUpdate> {
+    Json(
+        state
+            .cluster_update
+            .lock()
+            .expect("cluster update lock")
+            .clone(),
+    )
+}
+
+/// Set one node's phase (and optional error) in the live progress.
+fn set_cluster_node_phase(
+    state: &AppState,
+    node_id: &str,
+    phase: NodeUpdatePhase,
+    error: Option<&str>,
+) {
+    let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+    if let Some(node) = cluster
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_id == node_id)
+    {
+        node.phase = phase;
+        node.error = error.map(ToOwned::to_owned);
+    }
+}
+
+/// Mark a node as failed and stop the whole run (the primary is left untouched).
+fn abort_cluster_update(state: &AppState, node_id: &str, message: &str) {
+    {
+        let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+        if let Some(node) = cluster
+            .nodes
+            .iter_mut()
+            .find(|node| node.node_id == node_id)
+        {
+            node.phase = NodeUpdatePhase::Failed;
+            node.error = Some(message.to_owned());
+        }
+        cluster.phase = ClusterUpdatePhase::Aborted;
+        cluster.message = Some(message.to_owned());
+    }
+    record(
+        state,
+        AuditEntry::failure("ha:cluster", "ha.cluster.update")
+            .target(node_id)
+            .detail(message),
+    );
+}
+
+/// The cluster-update worker (own thread). Updates each follower in turn, waits for
+/// it to come back on the target version, and only when all followers are healthy
+/// updates the primary itself. Any failure or timeout aborts with the primary left
+/// running.
+fn run_cluster_update(
+    state: AppState,
+    password: String,
+    target: String,
+    followers: Vec<FollowerWork>,
+) {
+    for follower in &followers {
+        if !follower.update {
+            continue; // already on target — stays Skipped
+        }
+        set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Updating, None);
+        // Trigger the follower's own update over the sealed channel, pinning the
+        // version so every node lands on the same release.
+        let body = serde_json::json!({ "password": password, "targetVersion": target });
+        if let Err(error) = state
+            .ha
+            .post_sealed_json(&follower.url, "api/ha/update", &body)
+        {
+            abort_cluster_update(
+                &state,
+                &follower.node_id,
+                &format!("could not start the update on this node: {error}"),
+            );
+            return;
+        }
+        set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Restarting, None);
+
+        // Wait until it is back and serving the target version. A failed hello (the
+        // container is down mid-recreate) just means "not yet".
+        let deadline = Instant::now() + CLUSTER_UPDATE_NODE_TIMEOUT;
+        loop {
+            std::thread::sleep(CLUSTER_UPDATE_POLL);
+            if state.ha.peer_hello_version(&follower.url).as_deref() == Some(target.as_str()) {
+                set_cluster_node_phase(&state, &follower.node_id, NodeUpdatePhase::Healthy, None);
+                break;
+            }
+            if Instant::now() >= deadline {
+                abort_cluster_update(
+                    &state,
+                    &follower.node_id,
+                    "the node did not come back on the new version in time",
+                );
+                return;
+            }
+        }
+    }
+
+    // All followers healthy (or already current) → update the primary itself, last.
+    {
+        let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+        cluster.phase = ClusterUpdatePhase::UpdatingPrimary;
+    }
+    let self_id = state.ha.node_id();
+    set_cluster_node_phase(&state, &self_id, NodeUpdatePhase::Updating, None);
+    let backup_path = std::path::PathBuf::from(state.update.default_backup_path());
+    match perform_update(&state, &backup_path, &password, "ha:cluster", Some(&target)) {
+        Ok(version) => {
+            record(
+                &state,
+                AuditEntry::success("ha:cluster", "update.start").target(&version),
+            );
+            // The sidecar recreates this container shortly; this final state is
+            // best-effort and is lost when the primary restarts onto the new version.
+            let mut cluster = state.cluster_update.lock().expect("cluster update lock");
+            cluster.phase = ClusterUpdatePhase::Done;
+        }
+        Err((_, message)) => {
+            abort_cluster_update(
+                &state,
+                &self_id,
+                &format!("the primary's own update could not start: {message}"),
+            );
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -4061,39 +4937,55 @@ struct StartUpdate {
     password: String,
 }
 
-/// Start a one-click update: validate the backup path, write the safety backup to
-/// the persistent volume, then ask the sidecar to pull the latest release and
-/// recreate the JustDNS container. Refuses when there is nothing to update to or
-/// no sidecar is present (the UI then offers the guided command). Admin-only.
-async fn start_update(
-    State(state): State<AppState>,
-    identity: Identity,
-    Json(body): Json<StartUpdate>,
-) -> Result<Json<UpdateView>, (StatusCode, String)> {
+/// The shared core of every one-click update, whether triggered locally by an
+/// admin or remotely by the primary node over the HA channel. Validates the
+/// backup path, refuses when there is nothing to update to or no sidecar is
+/// present, writes the password-encrypted safety backup to the persistent volume,
+/// then asks the sidecar to pull the latest release. Returns the target version on
+/// success. `requested_by` is recorded by the sidecar and names who asked (an admin
+/// username, or `ha:<node>` for a remote trigger). Does **not** write an audit
+/// entry — the caller does, so the action is named in its own terms.
+fn perform_update(
+    state: &AppState,
+    backup_path: &std::path::Path,
+    password: &str,
+    requested_by: &str,
+    target_override: Option<&str>,
+) -> Result<String, (StatusCode, String)> {
     let checker = &state.update;
-    let check = checker.snapshot();
-    if !check.update_available {
-        return Err((
-            StatusCode::CONFLICT,
-            "no newer release is available".to_owned(),
-        ));
-    }
-    let Some(target) = check.latest.clone() else {
-        return Err((
-            StatusCode::CONFLICT,
-            "no newer release is available".to_owned(),
-        ));
+    // A cluster-wide update pins one target version for every node (passed in), so a
+    // release appearing mid-run cannot split the cluster across two versions. A plain
+    // single-node update takes the latest release the checker knows.
+    let target = match target_override {
+        Some(version) => version.to_owned(),
+        None => {
+            let check = checker.snapshot();
+            if !check.update_available {
+                return Err((
+                    StatusCode::CONFLICT,
+                    "no newer release is available".to_owned(),
+                ));
+            }
+            match check.latest.clone() {
+                Some(latest) => latest,
+                None => {
+                    return Err((
+                        StatusCode::CONFLICT,
+                        "no newer release is available".to_owned(),
+                    ));
+                }
+            }
+        }
     };
 
-    if body.password.is_empty() {
+    if password.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             "a backup password is required".to_owned(),
         ));
     }
 
-    let path = std::path::PathBuf::from(&body.backup_path);
-    if !checker.is_within_data(&path) {
+    if !checker.is_within_data(backup_path) {
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
@@ -4115,25 +5007,39 @@ async fn start_update(
     // The safety net on disk comes before anything is triggered. It is encrypted
     // with the admin's password, so the on-disk backup is not readable in the
     // clear even though it keeps the webhook credential.
-    let backup = build_backup(&state);
+    let backup = build_backup(state);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let sealed = justdns_secret::seal_backup(&body.password, &json);
-    if let Some(parent) = path.parent() {
+    let sealed = justdns_secret::seal_backup(password, &json);
+    if let Some(parent) = backup_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     }
-    std::fs::write(&path, &sealed)
+    std::fs::write(backup_path, &sealed)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     checker
-        .request_update(&target, &identity.username)
+        .request_update(&target, requested_by)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(target)
+}
+
+/// Start a one-click update: validate the backup path, write the safety backup to
+/// the persistent volume, then ask the sidecar to pull the latest release and
+/// recreate the JustDNS container. Refuses when there is nothing to update to or
+/// no sidecar is present (the UI then offers the guided command). Admin-only.
+async fn start_update(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(body): Json<StartUpdate>,
+) -> Result<Json<UpdateView>, (StatusCode, String)> {
+    let path = std::path::PathBuf::from(&body.backup_path);
+    let target = perform_update(&state, &path, &body.password, &identity.username, None)?;
     record(
         &state,
         AuditEntry::success(&identity.username, "update.start").target(&target),
     );
-    Ok(Json(update_view(checker)))
+    Ok(Json(update_view(&state.update)))
 }
 
 /// A lighter poll than `GET /api/update`: just the running version (so the UI can
@@ -5723,6 +6629,7 @@ mod tests {
             update: Arc::new(UpdateChecker::from_env("v0.0.0-test")),
             ha: Arc::new(ha::Ha::from_env("v0.0.0-test")),
             reports: test_reports(),
+            cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
         }
     }
 
@@ -6160,6 +7067,289 @@ mod tests {
             .unwrap();
         assert_eq!(spa.status(), StatusCode::OK);
         assert_hardening(spa.headers(), "static /");
+    }
+
+    /// Designate a primary that is not this node, so the node under test behaves as
+    /// a read-only follower.
+    fn make_follower(state: &AppState) {
+        let mut settings = state.config.get();
+        settings.cluster.primary_node_id = "some-other-node".to_owned();
+        state.config.set(settings).unwrap();
+    }
+
+    #[tokio::test]
+    async fn follower_blocks_writes_but_allows_reads_ha_and_account() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        make_follower(&state);
+        let app = router(state.clone());
+
+        // A config write is refused with a follower hint.
+        let res = send(
+            &app,
+            Request::put("/api/settings")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"ipv6":true}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(
+            body_of(res).await.contains("read-only follower"),
+            "follower hint missing"
+        );
+
+        // Reads still work — a follower is a full, viewable dashboard.
+        let res = send(
+            &app,
+            Request::get("/api/settings")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // The HA control plane stays writable (repair / take over a dead primary):
+        // taking over as primary from this follower is accepted, not gated. (This
+        // is also the failover path.)
+        let res = send(
+            &app,
+            Request::post("/api/ha/primary")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(format!(
+                    r#"{{"nodeId":"{}"}}"#,
+                    state.ha.node_id()
+                )))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[test]
+    fn plan_follower_classifies_by_version() {
+        assert_eq!(plan_follower(None, "v0.29.0"), NodeUpdatePlan::Unreachable);
+        assert_eq!(
+            plan_follower(Some("v0.29.0"), "v0.29.0"),
+            NodeUpdatePlan::Skip
+        );
+        assert_eq!(
+            plan_follower(Some("v0.28.0"), "v0.29.0"),
+            NodeUpdatePlan::Update
+        );
+    }
+
+    #[tokio::test]
+    async fn cluster_update_is_refused_on_a_follower() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        make_follower(&state);
+        let app = router(state.clone());
+
+        let res = send(
+            &app,
+            Request::post("/api/ha/cluster-update")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"password":"hunter2hunter2"}"#))
+                .unwrap(),
+        )
+        .await;
+        // A follower is not the primary, so it cannot drive a cluster-wide update.
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            state.cluster_update.lock().unwrap().phase,
+            ClusterUpdatePhase::Idle,
+            "no run should have been recorded"
+        );
+    }
+
+    #[tokio::test]
+    async fn cluster_update_conflicts_without_an_available_update() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        // This node is the primary by default (no primary id set). The test build has
+        // no updater sidecar and no newer release, so a cluster update cannot start —
+        // and nothing is triggered.
+        let app = router(state.clone());
+
+        let res = send(
+            &app,
+            Request::post("/api/ha/cluster-update")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"password":"hunter2hunter2"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            state.cluster_update.lock().unwrap().phase,
+            ClusterUpdatePhase::Idle
+        );
+    }
+
+    #[tokio::test]
+    async fn primary_node_can_write_and_status_reports_role() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        // Make *this* node the primary.
+        let mut settings = state.config.get();
+        settings.cluster.primary_node_id = state.ha.node_id();
+        state.config.set(settings).unwrap();
+        let app = router(state.clone());
+
+        // Status reflects the role.
+        let body = body_of(
+            send(
+                &app,
+                Request::get("/api/ha/status")
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await,
+        )
+        .await;
+        assert!(body.contains("\"isPrimary\":true"), "{body}");
+        assert!(
+            body.contains(&format!("\"primaryNodeId\":\"{}\"", state.ha.node_id())),
+            "{body}"
+        );
+
+        // The primary may write config.
+        let res = send(
+            &app,
+            Request::put("/api/settings")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"ipv6":true}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn set_primary_refuses_unknown_node() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        let app = router(state.clone());
+
+        // An unknown node id would lock the whole cluster read-only — refuse it.
+        let res = send(
+            &app,
+            Request::post("/api/ha/primary")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(r#"{"nodeId":"ghost-node"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // This node's own id is accepted.
+        let res = send(
+            &app,
+            Request::post("/api/ha/primary")
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(format!(
+                    r#"{{"nodeId":"{}"}}"#,
+                    state.ha.node_id()
+                )))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            state.config.get().cluster.primary_node_id,
+            state.ha.node_id()
+        );
+    }
+
+    #[tokio::test]
+    async fn node_config_round_trips_on_the_local_node() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        let node_id = state.ha.node_id();
+        let app = router(state.clone());
+
+        // Set this node's identity fields through the managing endpoint.
+        let res = send(
+            &app,
+            Request::put(format!("/api/ha/nodes/{node_id}/config"))
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(
+                    r#"{"instanceName":"Keller-Node","hostname":"dns2.example.org","dotCertId":"","dohCertId":"","blockPageIpv4":"10.0.0.9","blockPageIpv6":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        // The live settings now carry the node-local fields.
+        let settings = state.config.get();
+        assert_eq!(settings.instance_name, "Keller-Node");
+        assert_eq!(settings.encrypted_dns.hostname, "dns2.example.org");
+        assert_eq!(settings.block_page.server_ipv4, "10.0.0.9");
+
+        // And reading them back through the endpoint matches.
+        let body = body_of(
+            send(
+                &app,
+                Request::get(format!("/api/ha/nodes/{node_id}/config"))
+                    .header("cookie", &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await,
+        )
+        .await;
+        assert!(body.contains("\"hostname\":\"dns2.example.org\""), "{body}");
+        assert!(body.contains("\"blockPageIpv4\":\"10.0.0.9\""), "{body}");
+    }
+
+    #[tokio::test]
+    async fn node_config_rejects_an_invalid_block_page_ip() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        state.users.create_admin("admin", "hunter2hunter2").unwrap();
+        let cookie = cookie_for(&state, "admin");
+        let node_id = state.ha.node_id();
+        let app = router(state.clone());
+
+        let res = send(
+            &app,
+            Request::put(format!("/api/ha/nodes/{node_id}/config"))
+                .header("content-type", "application/json")
+                .header("cookie", &cookie)
+                .body(Body::from(
+                    r#"{"instanceName":"Keller-Node","hostname":"","dotCertId":"","dohCertId":"","blockPageIpv4":"not-an-ip","blockPageIpv6":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        // The bad push left the live settings untouched.
+        assert_ne!(state.config.get().instance_name, "Keller-Node");
     }
 
     /// A router whose `/metrics` endpoint is configured with `token` (or off when
