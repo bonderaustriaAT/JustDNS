@@ -552,29 +552,39 @@ function ClusterUpdatePanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Poll the progress so a running update (driven on the server) shows live, and so
-  // the last result is picked up when the page opens.
+  // One fetch when the panel opens, to pick up a run already in progress (or the last
+  // result).
   useEffect(() => {
-    let active = true;
     const controller = new AbortController();
-    async function poll() {
-      try {
-        const next = await api.haClusterUpdateStatus(controller.signal);
-        if (active) setState(next);
-      } catch {
-        // Transient (e.g. the primary restarting at the end) — keep the last state.
-      }
-    }
-    void poll();
-    const timer = setInterval(() => void poll(), 3_000);
-    return () => {
-      active = false;
-      controller.abort();
-      clearInterval(timer);
-    };
+    api
+      .haClusterUpdateStatus(controller.signal)
+      .then(setState)
+      .catch(() => {
+        // Transient — keep whatever we have.
+      });
+    return () => controller.abort();
   }, []);
 
   const running = state?.phase === "running" || state?.phase === "updatingPrimary";
+
+  // Poll only while a run is actually active, so an idle, done or aborted panel does
+  // not keep hitting the server. Starting a run flips `running`, which restarts this.
+  useEffect(() => {
+    if (!running) return;
+    const controller = new AbortController();
+    const timer = setInterval(() => {
+      api
+        .haClusterUpdateStatus(controller.signal)
+        .then(setState)
+        .catch(() => {
+          // Transient (e.g. the primary restarting at the end) — keep the last state.
+        });
+    }, 3_000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [running]);
 
   async function start() {
     if (password == null) return;
