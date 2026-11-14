@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Modal } from "../components/Modal";
+import { WriteGuard } from "../components/WriteGuard";
 import { ApiError, api, type CertListItem } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
@@ -297,6 +298,7 @@ export function Certificates() {
   const soonCutoff = Date.now() + SOON_DAYS * 24 * 60 * 60 * 1000;
 
   return (
+    <WriteGuard>
     <div className={styles.page}>
       <div className={styles.header}>
         <h1 className={styles.title}>{t("certs.title")}</h1>
@@ -425,5 +427,6 @@ export function Certificates() {
         />
       ) : null}
     </div>
+    </WriteGuard>
   );
 }

@@ -448,15 +448,38 @@
   margin-inline: auto;
 }
 
-/* A quiet notice at the top of an editor page the current role may only read. */
-.readOnlyBanner {
+/* A loud, full-width yellow notice across the very top of every page when the
+   current node or role may only read — most prominent for a follower node that
+   is managed from the primary. Spans the whole shell (sidebar + content) as the
+   first grid row; on phones the shell is a block, so it stacks above the bar. */
+.globalBanner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-4);
+  padding-block-start: calc(var(--space-2) + env(safe-area-inset-top));
+  /* Amber reads as the same warning yellow in both light and dark mode; the
+     dark-brown text and border are the amber ramp's deep stops for contrast. */
+  background: var(--amber);
+  color: #633806;
+  border-block-end: 1px solid #ba7517;
   font-size: var(--step--1);
-  color: var(--text-muted);
-  background: var(--field);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  margin-block-end: var(--space-5);
+  line-height: 1.4;
+}
+
+.globalBannerIcon {
+  inline-size: 18px;
+  block-size: 18px;
+  flex-shrink: 0;
+}
+
+.globalBannerLink {
+  color: #412402;
+  font-weight: 600;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
 }
 
 /* Quiet version line at the foot of every page. */
