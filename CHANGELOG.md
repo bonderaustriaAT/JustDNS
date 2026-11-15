@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.34.0] - 2026-11-15
+
+- Added: **A JustDNS DACH blocklist in the catalogue, with the "Recommended" badge.** The
+  Block/Allow catalogue now offers a JustDNS-maintained supplement for German-language
+  reach-measurement trackers (INFOnline/IVW, VG Wort METIS, ÖWA) that international lists cover
+  less well — a small, hand-verified delta meant to run alongside *Hagezi Normal*, not replace
+  it. Each domain is a pure measurement beacon with no page function, so false positives are
+  near zero and it carries the green **Recommended** badge in the privacy category. Its entries
+  are fetched from the public
+  [justdns-dach-blocklist](https://github.com/bonderaustriaAT/justdns-dach-blocklist) repository.
+
 ## [0.33.0] - 2026-11-15
 
 - Added: **A "Recommended" badge in the list catalogue.** The Block/Allow catalogue now marks

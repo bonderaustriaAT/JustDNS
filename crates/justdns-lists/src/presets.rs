@@ -3,11 +3,12 @@
 
 //! The curated catalogue of one-click community lists.
 //!
-//! These are Hagezi's DNS blocklists, the most widely used ready-made lists for
-//! AdGuard Home and Pi-hole. Each entry is described in plain language — what it
-//! blocks and, just as important, how likely it is to break something the user
-//! wants (its false-positive risk) — so enabling one is an informed choice, not
-//! a leap of faith.
+//! Most are Hagezi's DNS blocklists, the most widely used ready-made lists for
+//! AdGuard Home and Pi-hole, alongside the JustDNS-maintained DACH supplement for
+//! German-language reach-measurement trackers. Each entry is described in plain
+//! language — what it blocks and, just as important, how likely it is to break
+//! something the user wants (its false-positive risk) — so enabling one is an
+//! informed choice, not a leap of faith.
 //!
 //! The URLs point at the raw files on the Hagezi repository's `main` branch,
 //! using the `wildcard/…-onlydomains.txt` variants: plain one-domain-per-line
@@ -22,10 +23,11 @@ use serde::Serialize;
 
 use crate::ListKind;
 
-/// Raw base for the Hagezi `wildcard/` lists on the `main` branch; every preset
-/// URL is expected to live under this prefix.
+/// Prefix every catalogue URL must share: an https raw-GitHub file. The lists are
+/// fetched by key, not persisted, so the host set stays small and auditable — the
+/// Hagezi repository plus the JustDNS-maintained DACH list.
 #[cfg(test)]
-const HAGEZI: &str = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard";
+const TRUSTED_RAW: &str = "https://raw.githubusercontent.com/";
 
 /// One entry in the curated catalogue: a ready-made list the user can switch on
 /// with a single click, with enough description to judge it.
@@ -176,6 +178,20 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
         fp_level: 2,
     },
     Preset {
+        key: "justdns-dach",
+        category: "privacy",
+        recommended: true,
+        name: "JustDNS DACH-Ergänzung",
+        url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/dach-ads-trackers.txt",
+        kind: ListKind::Block,
+        description: "Die hauseigene DACH-Ergänzung: deutschsprachige Reichweitenmessung und \
+Tracking, die internationale Listen erfahrungsgemäß schwächer abdecken (INFOnline/IVW, VG Wort \
+METIS, ÖWA). Jede Domain einzeln geprüft — als Zusatz zu Hagezi Normal gedacht, nicht als Ersatz.",
+        false_positive: "Sehr gering. Bewusst nur reine Mess-Beacons ohne Seitenfunktion; im \
+Zweifel bleibt eine Domain draußen.",
+        fp_level: 1,
+    },
+    Preset {
         key: "hagezi-referral-allow",
         category: "allow",
         recommended: false,
@@ -196,7 +212,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keys_are_unique_and_urls_are_hagezi_https() {
+    fn keys_are_unique_and_urls_are_trusted_raw_https() {
         let mut keys = std::collections::HashSet::new();
         for preset in presets() {
             assert!(
@@ -205,8 +221,8 @@ mod tests {
                 preset.key
             );
             assert!(
-                preset.url.starts_with(HAGEZI),
-                "{} off-catalogue",
+                preset.url.starts_with(TRUSTED_RAW),
+                "{} is not a trusted raw-GitHub https URL",
                 preset.key
             );
             assert!(!preset.description.is_empty());
@@ -236,7 +252,9 @@ mod tests {
             .collect();
         assert_eq!(
             recommended,
-            ["hagezi-multi", "hagezi-tif"].into_iter().collect(),
+            ["hagezi-multi", "hagezi-tif", "justdns-dach"]
+                .into_iter()
+                .collect(),
             "the recommended-badge set changed; update this test deliberately",
         );
 

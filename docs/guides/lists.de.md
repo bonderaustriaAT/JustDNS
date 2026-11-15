@@ -39,8 +39,9 @@ Jeder Katalog-Eintrag zeigt ein **Fehlalarm-Risiko** (1 = vernachlässigbar … 
 damit du vor dem Einschalten einschätzen kannst, wie aggressiv er ist. Einige Einträge
 tragen zusätzlich ein **„Empfohlen"**-Badge — das sind die sinnvollen Standardwahlen,
 wenn du nicht jeden Eintrag einzeln abwägen willst (aktuell *Hagezi Normal* fürs Blocken
-von Werbung/Trackern und *Hagezi Threat Intelligence* für den Sicherheitsschutz). Du
-kannst auch einen eigenen Feed per URL hinzufügen.
+von Werbung/Trackern, *Hagezi Threat Intelligence* für den Sicherheitsschutz und die
+*JustDNS DACH-Ergänzung* für deutschsprachige Reichweitenmessung). Du kannst auch einen
+eigenen Feed per URL hinzufügen.
 
 Klick **Alle Listen aktualisieren**, um jetzt jeden Feed neu zu laden; sonst
 aktualisieren sie sich nach eigenem Zeitplan.
