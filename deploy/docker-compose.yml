@@ -90,6 +90,37 @@ services:
       # the new tag. Mount the directory that holds this file.
       - ./:/project
 
+  # --- Optional: DACH candidate harvester (read-only) ------------------------
+  # A companion that reads the query log over the API and writes ranked candidate
+  # reports for the DACH blocklist. It is OFF by default — uncomment this service
+  # (and the harvester-data volume below) to enable it. It blocks nothing and
+  # changes nothing; its only output is reports under /data/harvester/reports.
+  #
+  # Prerequisites you must set up yourself:
+  #   - A read-only Viewer service account on JustDNS, with MFA disabled (this
+  #     flow has no second step). Give it the Viewer role and nothing more.
+  #   - Put its credentials in .env: HARVEST_USER / HARVEST_PASSWORD.
+  # See crates/justdns-harvester/README.md for the selection test and all options.
+  #
+  # harvester:
+  #   image: ${JUSTDNS_HARVESTER_IMAGE:-ghcr.io/bonderaustriaat/justdns-harvester}:${JUSTDNS_HARVESTER_TAG:-latest}
+  #   container_name: justdns-harvester
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - justdns
+  #   environment:
+  #     # The instance to read from. Over the compose network the service name
+  #     # resolves; 8080 is the web/API port.
+  #     JUSTDNS_URL: http://justdns:8080
+  #     JUSTDNS_USER: ${HARVEST_USER:-}
+  #     JUSTDNS_PASSWORD: ${HARVEST_PASSWORD:-}
+  #     # Poll hourly; set HARVEST_ONCE=1 instead to run once and exit (cron style).
+  #     HARVEST_INTERVAL_SECS: "3600"
+  #   volumes:
+  #     # Its own volume, kept apart from justdns-data: it holds log-derived
+  #     # aggregates and the reports, not JustDNS's own state.
+  #     - harvester-data:/data
+
 volumes:
   # The name is pinned (no compose project prefix), so a fresh install creates
   # `justdns-data` and an existing `docker run` install (which used exactly this
@@ -102,3 +133,6 @@ volumes:
   # service from this compose file, keeping the volume) rather than regenerated.
   justdns-keys:
     name: justdns-keys
+  # Uncomment alongside the optional harvester service above.
+  # harvester-data:
+  #   name: justdns-harvester-data
