@@ -376,6 +376,10 @@ pub struct Settings {
     pub block_ads_trackers: bool,
     /// Redirect big search engines to their safe-search addresses.
     pub safe_search: bool,
+    /// Uncloak CNAME-cloaked trackers: inspect the CNAME targets in an upstream
+    /// answer and block the query when a target is on a block list, even if the
+    /// queried first-party name is not. Wired live. On by default.
+    pub uncloak_cname: bool,
     /// Block known phishing and malware domains.
     pub block_malware: bool,
     /// How the resolver chooses between upstreams.
@@ -463,6 +467,7 @@ impl Default for Settings {
         Self {
             block_ads_trackers: true,
             safe_search: false,
+            uncloak_cname: true,
             block_malware: true,
             upstream_mode: UpstreamMode::Racing,
             encrypt_upstream: true,
@@ -531,6 +536,9 @@ struct Inner {
     block_ads_trackers: Arc<AtomicBool>,
     block_malware: Arc<AtomicBool>,
     safe_search: Arc<AtomicBool>,
+    /// True when CNAME-cloaked trackers are uncloaked and blocked. The DNS
+    /// pipeline reads it per query, so the switch takes effect without a restart.
+    uncloak_cname: Arc<AtomicBool>,
     /// True when a blocked name is answered with the null IP, false for NXDOMAIN.
     /// The DNS pipeline reads it per query, so the mode flips without a restart.
     block_null_ip: Arc<AtomicBool>,
@@ -595,6 +603,7 @@ impl ConfigStore {
                 block_ads_trackers: Arc::new(AtomicBool::new(settings.block_ads_trackers)),
                 block_malware: Arc::new(AtomicBool::new(settings.block_malware)),
                 safe_search: Arc::new(AtomicBool::new(settings.safe_search)),
+                uncloak_cname: Arc::new(AtomicBool::new(settings.uncloak_cname)),
                 block_null_ip: Arc::new(AtomicBool::new(matches!(
                     settings.block_response,
                     BlockResponse::NullIp
@@ -655,6 +664,9 @@ impl ConfigStore {
         self.inner
             .safe_search
             .store(settings.safe_search, Ordering::Relaxed);
+        self.inner
+            .uncloak_cname
+            .store(settings.uncloak_cname, Ordering::Relaxed);
         self.inner.block_null_ip.store(
             matches!(settings.block_response, BlockResponse::NullIp),
             Ordering::Relaxed,
@@ -708,6 +720,12 @@ impl ConfigStore {
     /// The shared flag gating safe search (the DNS pipeline reads it per query).
     pub fn safe_search_flag(&self) -> Arc<AtomicBool> {
         self.inner.safe_search.clone()
+    }
+
+    /// The shared flag gating CNAME uncloaking (the DNS pipeline reads it per
+    /// query). When on, a blocked CNAME target makes the whole query blocked.
+    pub fn uncloak_cname_flag(&self) -> Arc<AtomicBool> {
+        self.inner.uncloak_cname.clone()
     }
 
     /// The shared flag for the block response: true answers a blocked name with

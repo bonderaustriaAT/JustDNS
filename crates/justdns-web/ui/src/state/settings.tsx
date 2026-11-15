@@ -48,6 +48,7 @@ export interface Settings extends ServerSettings {
 const SERVER_DEFAULTS: ServerSettings = {
   blockAdsTrackers: true,
   safeSearch: false,
+  uncloakCname: true,
   blockMalware: true,
   upstreamMode: "racing",
   encryptUpstream: true,
