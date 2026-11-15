@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.36.0] - 2026-11-15
+
+- Added: **Uncloak CNAME-cloaked trackers.** Some trackers hide as a CNAME on a seemingly
+  first-party subdomain (for example `metrics.shop.com` pointing at a tracker), so the queried
+  name is on no block list and slips through. JustDNS now checks the CNAME targets in an answer
+  against your block lists and blocks the query when a target is a known tracker, even if the
+  queried name itself is allowed. On by default; a new switch under Filtering turns it off. It
+  only inspects the records an answer already carries, so it adds no extra lookup.
+
 ## [0.35.0] - 2026-11-15
 
 - Added: **Test a block list against your own history before you turn it on.** Each catalogue
