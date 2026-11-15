@@ -10,24 +10,31 @@
 //! something the user wants (its false-positive risk) — so enabling one is an
 //! informed choice, not a leap of faith.
 //!
-//! The URLs point at the raw files on the Hagezi repository's `main` branch,
+//! Most URLs point at the raw files on the Hagezi repository's `main` branch,
 //! using the `wildcard/…-onlydomains.txt` variants: plain one-domain-per-line
 //! lists that JustDNS's parser reads directly, and the smallest form Hagezi
-//! ships (so the in-memory sets stay as lean as the list allows). jsDelivr is
-//! deliberately avoided — the whole Hagezi repository is far over jsDelivr's
-//! per-package size limit, so its CDN refuses these files. The URLs are
-//! compiled in, not persisted: a stored subscription only records the preset's
-//! key, so the catalogue can move without rewriting anyone's saved lists.
+//! ships (so the in-memory sets stay as lean as the list allows). The DACH
+//! supplement follows the same plain one-domain-per-line form from its own
+//! raw-GitHub file. jsDelivr is deliberately avoided — the whole Hagezi
+//! repository is far over jsDelivr's per-package size limit, so its CDN refuses
+//! these files. The URLs are compiled in, not persisted: a stored subscription
+//! only records the preset's key, so the catalogue can move without rewriting
+//! anyone's saved lists.
 
 use serde::Serialize;
 
 use crate::ListKind;
 
-/// Prefix every catalogue URL must share: an https raw-GitHub file. The lists are
-/// fetched by key, not persisted, so the host set stays small and auditable — the
-/// Hagezi repository plus the JustDNS-maintained DACH list.
+/// The exact raw-GitHub prefixes a catalogue URL may live under: the Hagezi
+/// `wildcard/` lists and the JustDNS-maintained DACH list. Pinning the full repo
+/// path (not just the host) keeps a mistyped repo or a stray personal fork out of
+/// the catalogue, which matters because these lists are fetched and applied on
+/// every instance. The URLs are fetched by key, not persisted.
 #[cfg(test)]
-const TRUSTED_RAW: &str = "https://raw.githubusercontent.com/";
+const TRUSTED_PREFIXES: &[&str] = &[
+    "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/",
+    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/",
+];
 
 /// One entry in the curated catalogue: a ready-made list the user can switch on
 /// with a single click, with enough description to judge it.
@@ -54,7 +61,9 @@ pub struct Preset {
     pub category: &'static str,
     /// Whether JustDNS marks this list as a recommended starting choice. The
     /// dashboard shows a badge on it so a new user can pick a sensible default
-    /// without weighing every entry. At most one per purpose should carry it.
+    /// without weighing every entry. A category carries one general default plus
+    /// at most one regional supplement (e.g. the DACH list alongside the general
+    /// ads pick), so no category shows more than two badges.
     pub recommended: bool,
 }
 
@@ -179,7 +188,7 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
     },
     Preset {
         key: "justdns-dach",
-        category: "privacy",
+        category: "ads",
         recommended: true,
         name: "JustDNS DACH-Ergänzung",
         url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/dach-ads-trackers.txt",
@@ -221,8 +230,10 @@ mod tests {
                 preset.key
             );
             assert!(
-                preset.url.starts_with(TRUSTED_RAW),
-                "{} is not a trusted raw-GitHub https URL",
+                TRUSTED_PREFIXES
+                    .iter()
+                    .any(|prefix| preset.url.starts_with(prefix)),
+                "{} is not under a trusted raw-GitHub prefix",
                 preset.key
             );
             assert!(!preset.description.is_empty());
@@ -258,15 +269,16 @@ mod tests {
             "the recommended-badge set changed; update this test deliberately",
         );
 
-        // The field's contract: at most one recommendation per purpose (category).
+        // The field's contract: one general default per category, plus at most
+        // one regional supplement — so no category carries more than two badges.
         let mut per_category: std::collections::HashMap<&str, usize> =
             std::collections::HashMap::new();
         for preset in presets().iter().filter(|preset| preset.recommended) {
             *per_category.entry(preset.category).or_default() += 1;
         }
         assert!(
-            per_category.values().all(|&count| count <= 1),
-            "more than one recommended preset in a category: {per_category:?}",
+            per_category.values().all(|&count| count <= 2),
+            "more than two recommended presets in a category: {per_category:?}",
         );
     }
 }
