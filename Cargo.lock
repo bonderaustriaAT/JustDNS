@@ -1559,6 +1559,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "justdns-harvester"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "tracing-subscriber",
+ "ureq 2.12.1",
+]
+
+[[package]]
 name = "justdns-lists"
 version = "0.1.0"
 dependencies = [
