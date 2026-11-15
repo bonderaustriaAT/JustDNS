@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.34.5] - 2026-11-15
+
+- Fixed: **Typing in a dialog no longer loses focus after each keystroke.** Dialogs such as
+  *Create user* and the certificate dialog reset focus on every character, so you could type only
+  one letter before the cursor jumped out of the field. The dialog's focus handling now runs once
+  when it opens instead of on every render, so a field stays focused while you type.
+
 ## [0.34.2] - 2026-11-15
 
 - Security: **The cluster peer API now rate-limits wrong sync keys.** The peer
