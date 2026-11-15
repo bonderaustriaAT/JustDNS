@@ -1421,6 +1421,8 @@ const de = {
   "ha.cluster.updateBody":
     "Jede Node sichert sich zuerst (mit diesem Passwort verschlüsselt) und zieht dann dieselbe Version. Du musst dich auf keiner Node einloggen.",
   "ha.cluster.updateFailed": "Cluster-Update konnte nicht gestartet werden.",
+  "ha.cluster.backupDownloadFailed":
+    "Die Wiederherstellungsdatei konnte nicht heruntergeladen werden – das Cluster-Update wurde nicht gestartet. Bitte das Backup-Passwort prüfen und erneut versuchen.",
   "ha.cluster.primaryTag": "Hauptnode",
   "ha.cluster.phase.idle": "Kein Cluster-Update aktiv.",
   "ha.cluster.phase.running": "Follower werden aktualisiert …",
@@ -2828,6 +2830,8 @@ const en: Catalog = {
   "ha.cluster.updateBody":
     "Each node backs itself up first (encrypted with this password), then pulls the same version. You do not need to log in to any node.",
   "ha.cluster.updateFailed": "Could not start the cluster update.",
+  "ha.cluster.backupDownloadFailed":
+    "The restore file could not be downloaded — the cluster update was not started. Check the backup password and try again.",
   "ha.cluster.primaryTag": "main node",
   "ha.cluster.phase.idle": "No cluster update running.",
   "ha.cluster.phase.running": "Updating the followers …",

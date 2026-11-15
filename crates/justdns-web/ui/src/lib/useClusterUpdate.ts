@@ -143,11 +143,15 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     setError(null);
     try {
       // Hand the admin a restore file first, then start the rolling update — the
-      // same safety net the single-node update gives. Each node also writes its
-      // own on-disk safety backup, so a failed download here is not fatal.
-      await downloadRestore(password).catch(() => {
-        /* Non-fatal: the per-node on-disk safety backups still cover a rollback. */
-      });
+      // same safety net the single-node update gives. This is the only download
+      // the cluster update triggers, so if it fails we stop here and say so
+      // rather than rolling the whole cluster without the promised backup.
+      try {
+        await downloadRestore(password);
+      } catch {
+        setError(t("ha.cluster.backupDownloadFailed"));
+        return false;
+      }
       setState(await api.haClusterUpdate(password));
       setPassword("");
       setConfirm("");
