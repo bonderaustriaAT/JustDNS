@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api, type ClusterNodePhase, type ClusterUpdatePhase, type ClusterUpdateState, type UpdateInfo } from "./api";
+import { downloadRestore } from "./downloadRestore";
 import { useI18n } from "./i18n";
 import type { MessageKey } from "./messages";
 
@@ -141,6 +142,12 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     setBusy(true);
     setError(null);
     try {
+      // Hand the admin a restore file first, then start the rolling update — the
+      // same safety net the single-node update gives. Each node also writes its
+      // own on-disk safety backup, so a failed download here is not fatal.
+      await downloadRestore(password).catch(() => {
+        /* Non-fatal: the per-node on-disk safety backups still cover a rollback. */
+      });
       setState(await api.haClusterUpdate(password));
       setPassword("");
       setConfirm("");

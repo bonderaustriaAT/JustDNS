@@ -8,6 +8,7 @@ import {
   CLUSTER_PHASE_KEY,
   useClusterUpdate,
 } from "../lib/useClusterUpdate";
+import { downloadRestore } from "../lib/downloadRestore";
 import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./UpdateCard.module.css";
 
@@ -20,21 +21,6 @@ type Flow =
   | { kind: "running"; from: string; to: string }
   | { kind: "done"; to: string }
   | { kind: "failed"; message: string };
-
-/** Trigger a browser download of the current configuration as an encrypted
- *  restore file, sealed with the password the admin typed. */
-async function downloadRestore(password: string): Promise<void> {
-  const blob = await api.downloadBackup(password);
-  const url = URL.createObjectURL(blob);
-  const stamp = new Date().toISOString().slice(0, 10);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `justdns-restore-${stamp}.jdbak`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
 
 /** The update section on the System page: it checks GitHub, shows a new release
  *  nicely, and runs a one-click update (backup → pull → recreate) via the updater

@@ -128,15 +128,19 @@ impl SessionStore {
 
     fn insert(&self, username: &str, state: SessionState, ttl: Duration) -> String {
         let token = random_token();
+        let now = Instant::now();
         let session = Session {
             username: username.to_owned(),
             state,
-            expires_at: Instant::now() + ttl,
+            expires_at: now + ttl,
         };
-        self.inner
-            .lock()
-            .expect("session lock poisoned")
-            .insert(token.clone(), session);
+        let mut sessions = self.inner.lock().expect("session lock poisoned");
+        // Sweep expired entries on the way in, so tokens that are never looked up
+        // again (the usual case — a browser just drops the cookie) cannot pile up
+        // for the life of the process; `username_for`/`lookup` only drop the one
+        // token they touch.
+        sessions.retain(|_, session| session.expires_at > now);
+        sessions.insert(token.clone(), session);
         token
     }
 }
