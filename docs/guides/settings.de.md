@@ -17,6 +17,13 @@ sie machst.
   ausschalten.
 - **Safe Search** — Google, YouTube, Bing und DuckDuckGo netzweit auf ihre
   gefilterten Endpunkte zwingen.
+- **CNAME-Cloaking entlarven** — eine Anfrage blocken, wenn der Name selbst erlaubt
+  ist, sein CNAME-Ziel aber ein bekannter Tracker. Manche Tracker verstecken sich auf
+  einer scheinbar erstpartei-eigenen Subdomain (zum Beispiel `metrics.shop.com`),
+  deren CNAME auf den Tracker zeigt – der abgefragte Name steht auf keiner Sperrliste
+  und rutscht durch; das schließt diese Lücke. Standardmäßig an. Es prüft nur die
+  Records, die eine Antwort ohnehin mitbringt, und verursacht so keine zusätzliche
+  Abfrage.
 - **Block-Antwort** — womit ein geblockter Name beantwortet wird:
   - **Null-IP** (`0.0.0.0` / `::`) — der Standard; das Gerät bekommt eine tote Adresse.
   - **NXDOMAIN** — dem Gerät wird gesagt, der Name existiere nicht.
