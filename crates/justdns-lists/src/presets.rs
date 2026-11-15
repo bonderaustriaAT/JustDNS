@@ -190,7 +190,7 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
         key: "justdns-dach",
         category: "ads",
         recommended: true,
-        name: "JustDNS DACH-Ergänzung",
+        name: "JustDNS DACH",
         url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/dach-ads-trackers.txt",
         kind: ListKind::Block,
         description: "Die hauseigene DACH-Ergänzung: deutschsprachige Reichweitenmessung und \

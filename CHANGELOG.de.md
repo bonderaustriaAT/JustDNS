@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.34.6] - 2026-11-15
+
+- Geändert: **Der Listen-Katalog führt jetzt mit den empfohlenen Listen, gold umrandet.**
+  Empfohlene Listen stehen oben im Katalog (die JustDNS-Liste zuerst) und tragen einen goldenen
+  Rand, damit die sinnvollen Startwahlen sofort ins Auge fallen. Die JustDNS-Ergänzung heißt jetzt
+  *JustDNS DACH* statt *JustDNS DACH-Ergänzung*.
+
 ## [0.34.5] - 2026-11-15
 
 - Behoben: **In Dialogen bleibt der Fokus beim Tippen jetzt im Feld.** Dialoge wie
