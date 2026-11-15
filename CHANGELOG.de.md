@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.33.0] - 2026-11-15
+
+- Neu: **Ein „Empfohlen"-Badge im Listen-Katalog.** Der Block/Allow-Katalog markiert jetzt die
+  sinnvollen Standardwahlen mit einem grünen **Empfohlen**-Badge, damit man ohne Abwägen jedes
+  Eintrags gegen sein Fehlalarm-Risiko schnell eine gute Startliste aktivieren kann. Vorerst
+  tragen es *Hagezi Normal* (Werbung und Tracker) und *Hagezi Threat Intelligence* (Sicherheit).
+
 ## [0.32.1] - 2026-11-14
 
 - Geändert: **Das Privatsphäre-Dashboard führt schneller zur Weltkarte.** Die Listen
