@@ -432,6 +432,19 @@
   background: var(--surface-sunken);
 }
 
+/* A positive pill marking a catalogue entry JustDNS recommends as a starting
+   choice; sits first in the card's tag row. */
+.recommendedTag {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+}
+
 .card {
   display: flex;
   flex-direction: column;
