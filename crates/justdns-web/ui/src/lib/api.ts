@@ -87,6 +87,9 @@ export interface CustomUpstream {
 export interface ServerSettings {
   blockAdsTrackers: boolean;
   safeSearch: boolean;
+  /** Uncloak CNAME-cloaked trackers: block when a CNAME target in the answer is
+   *  on a block list, even if the queried first-party name is not. */
+  uncloakCname: boolean;
   blockMalware: boolean;
   upstreamMode: UpstreamMode;
   encryptUpstream: boolean;
