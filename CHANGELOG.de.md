@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.34.2] - 2026-11-15
+
+- Sicherheit: **Die Cluster-Peer-API drosselt jetzt falsche Sync-Keys.** Der Peer-Snapshot –
+  der jeden Passwort-Hash und jedes TOTP-Secret enthält – war allein durch den geteilten
+  Sync-Key gesperrt, ohne Begrenzung beim Raten. Fehlgeschlagene Peer-Auth-Versuche werden jetzt
+  gedrosselt (ein gültiger Key wird immer zuerst geprüft, echte Nodes also nie blockiert), sodass
+  der Key nicht mehr in Linienrate gegen den Endpunkt brute-forcebar ist.
+
 ## [0.34.1] - 2026-11-15
 
 - Behoben: **Das rollende Cluster-Update lädt die Wiederherstellungsdatei jetzt zuverlässig
