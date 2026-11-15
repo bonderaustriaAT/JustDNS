@@ -461,6 +461,13 @@
   box-shadow: inset 3px 0 0 var(--signal);
 }
 
+/* A recommended list wears a gold outline so the curated picks stand out at a
+   glance. Placed after the active rule so the gold border wins when a card is
+   both recommended and active, while the active state keeps its inset bar. */
+.card[data-recommended] {
+  border-color: var(--amber);
+}
+
 .cardHead {
   display: flex;
   align-items: flex-start;
