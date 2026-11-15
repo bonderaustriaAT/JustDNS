@@ -10,7 +10,7 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
   reach-measurement trackers (INFOnline/IVW, VG Wort METIS, ÖWA) that international lists cover
   less well — a small, hand-verified delta meant to run alongside *Hagezi Normal*, not replace
   it. Each domain is a pure measurement beacon with no page function, so false positives are
-  near zero and it carries the green **Recommended** badge in the privacy category. Its entries
+  near zero and it carries the green **Recommended** badge in the ads & trackers category. Its entries
   are fetched from the public
   [justdns-dach-blocklist](https://github.com/bonderaustriaAT/justdns-dach-blocklist) repository.
 

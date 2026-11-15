@@ -11,7 +11,7 @@ Format Jahr-Monat-Tag.
   (INFOnline/IVW, VG Wort METIS, ÖWA), die internationale Listen schwächer abdecken — ein kleines,
   einzeln geprüftes Delta, gedacht als Zusatz zu *Hagezi Normal*, nicht als Ersatz. Jede Domain
   ist ein reines Mess-Beacon ohne Seitenfunktion, Fehlalarme also nahezu null, daher trägt sie den
-  grünen **Empfohlen**-Badge in der Kategorie Datenschutz. Die Einträge kommen aus dem öffentlichen
+  grünen **Empfohlen**-Badge in der Kategorie Werbung & Tracker. Die Einträge kommen aus dem öffentlichen
   Repository [justdns-dach-blocklist](https://github.com/bonderaustriaAT/justdns-dach-blocklist).
 
 ## [0.33.0] - 2026-11-15
