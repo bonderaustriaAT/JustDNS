@@ -14,8 +14,16 @@ export async function downloadRestore(password: string): Promise<void> {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `justdns-restore-${stamp}.jdbak`;
+  anchor.style.display = "none";
   document.body.appendChild(anchor);
   anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  // Clean up on a later task, never in the same tick as click(): the browser
+  // reads the object URL for the download asynchronously, so revoking it (or
+  // removing the anchor) synchronously can cancel the download before it starts
+  // and the file silently never arrives. This was the only download the rolling
+  // cluster update triggered, so there it looked like "no backup at all".
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 40_000);
 }

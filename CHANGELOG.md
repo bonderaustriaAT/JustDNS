@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.34.1] - 2026-11-15
+
+- Fixed: **The rolling cluster update now reliably downloads the restore file.** The
+  automatic backup download was cleaned up in the same instant it was triggered, which could
+  cancel it before the browser had begun saving — so a whole-cluster update often left the admin
+  without the restore file it promised. Cleanup is now deferred, and if the download genuinely
+  fails the update stops with a clear message instead of rolling the cluster without a backup.
+
 ## [0.34.0] - 2026-11-15
 
 - Added: **A JustDNS DACH blocklist in the catalogue, with the "Recommended" badge.** The
