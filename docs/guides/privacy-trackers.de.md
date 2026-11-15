@@ -51,6 +51,11 @@ du Listen bearbeiten darfst (Editor oder Admin), trägt jede Ansicht einen **Blo
   [Blockliste](lists.de.md) hinzu – nicht nur die bisher gesehenen – damit sie ab der
   nächsten Anfrage überall geblockt ist.
 - **Blocken** neben einer einzelnen Domain fügt nur diesen einen Namen hinzu.
+- **Für dieses Gerät** — öffne ein Gerät (tippe es in der Aufschlüsselung nach Geräten
+  an); jede Firmenzeile trägt dann diesen Knopf. Er blockt die Firma nur für dieses
+  eine Gerät, indem er sie zur eigenen [Richtlinie](policies.de.md) des Geräts
+  hinzufügt — der Rest des Netzwerks bleibt unberührt. Der Knopf **Firma blocken** in
+  der Firmenansicht bleibt netzweit, so wählst du die Reichweite.
 
 Das Blocken ist idempotent: Noch einmal gedrückt wird nichts doppelt hinzugefügt, und das
 Ergebnis sagt dir, wie viele Einträge neu waren. Die Einträge landen in deiner eigenen

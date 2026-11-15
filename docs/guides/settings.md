@@ -15,6 +15,12 @@ applies to your whole network. (To make exceptions per device or group, see
 - **Malware & phishing** — turn the built-in malware block set on or off.
 - **Safe Search** — force Google, YouTube, Bing and DuckDuckGo to their filtered
   endpoints, network-wide.
+- **Uncloak CNAME tracking** — block a query when the name itself is allowed but its
+  CNAME target is a known tracker. Some trackers hide on a first-party-looking
+  subdomain (for example `metrics.shop.com`) whose CNAME points at the tracker, so
+  the queried name is on no block list and slips through; this closes that gap. On by
+  default. It only inspects the records an answer already carries, so it adds no extra
+  lookup.
 - **Block response** — what a blocked name answers with:
   - **Null IP** (`0.0.0.0` / `::`) — the default; the device gets a dead address.
   - **NXDOMAIN** — the device is told the name does not exist.

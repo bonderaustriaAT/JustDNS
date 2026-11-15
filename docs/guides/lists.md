@@ -45,6 +45,13 @@ German-language reach-measurement trackers). You can also add your own feed by U
 Click **Refresh all lists** to re-download every feed now; otherwise they refresh on
 their own schedule.
 
+**Test before you commit.** Each catalogue preset and every URL block feed carries a
+**Test** button that measures the list against your own [query log](query-log.md)
+over the last day or week, without turning anything on. It shows how many queries the
+list would newly block, broken down by device and by domain, and flags any names you
+explicitly allow that it would catch — so you see the effect and the collateral
+before committing. Allow feeds have no Test button, since allowing nothing blocks.
+
 ## The built-in categories
 
 Two block sets ship inside JustDNS and are controlled by simple switches under
