@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.34.2] - 2026-11-15
+
+- Security: **The cluster peer API now rate-limits wrong sync keys.** The peer
+  snapshot — which carries every password hash and TOTP secret — was gated only by the shared
+  sync key, with no limit on guessing it. Failed peer-auth attempts are now throttled (a valid
+  key is always checked first, so real nodes are never blocked), so the key can no longer be
+  brute-forced against the endpoint at line rate.
+
 ## [0.34.1] - 2026-11-15
 
 - Fixed: **The rolling cluster update now reliably downloads the restore file.** The

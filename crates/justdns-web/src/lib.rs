@@ -112,6 +112,12 @@ const LOGIN_WINDOW: Duration = Duration::from_secs(300);
 /// is not checked here.
 const MIN_SYNC_KEY_LEN: usize = 16;
 
+/// The single bucket key for the peer-auth failure throttle. The peer API has no
+/// per-user identity before the token is verified, so wrong-token attempts share
+/// one global budget — only failures count, so a valid peer (checked first) never
+/// shares it.
+const HA_PEER_THROTTLE_KEY: &str = "ha-peer";
+
 /// A soft, in-memory rate limiter for the login and second-factor endpoints,
 /// keyed by username. It slows an online guess of a password, TOTP or recovery
 /// code; it is not persisted, so a restart clears it (acceptable for a LAN box).
@@ -197,6 +203,10 @@ struct AppState {
     /// Soft rate limiter for the login and second-factor endpoints, so a stolen
     /// password cannot be paired with a brute-forced TOTP or recovery code.
     throttle: LoginThrottle,
+    /// Soft rate limiter for failed peer-auth attempts, so the shared sync key —
+    /// which alone unlocks the credential-bearing peer snapshot — cannot be
+    /// brute-forced against the peer API at line rate.
+    peer_auth_throttle: LoginThrottle,
     /// The shared certificate store backing DoT/DoH and the block page. `None`
     /// when TLS could not be prepared at startup, in which case the `/api/certs`
     /// and `/api/tls` endpoints report it as unavailable rather than failing.
@@ -417,6 +427,7 @@ pub async fn serve(
         sessions,
         audit,
         throttle: LoginThrottle::new(),
+        peer_auth_throttle: LoginThrottle::new(),
         certs,
         cert_reload,
         dot_port,
@@ -3686,10 +3697,25 @@ fn ha_peer_authorize(state: &AppState, headers: &HeaderMap) -> Result<ha::PeerAu
         .get("x-ha-auth")
         .and_then(|value| value.to_str().ok())
         .unwrap_or("");
-    state
-        .ha
-        .verify_peer_auth(token)
-        .ok_or(StatusCode::UNAUTHORIZED)
+    // Verify first: a genuine peer holds the key and is never refused here, so the
+    // throttle below can only ever bite wrong-token attempts — real sync can never
+    // be locked out by an attacker flooding guesses.
+    match state.ha.verify_peer_auth(token) {
+        Some(caller) => {
+            state.peer_auth_throttle.clear(HA_PEER_THROTTLE_KEY);
+            Ok(caller)
+        }
+        None => {
+            // Once too many wrong guesses pile up in the window, refuse further ones
+            // so the shared key — which alone unlocks the credential-bearing snapshot
+            // — cannot be brute-forced against this endpoint at line rate.
+            if state.peer_auth_throttle.is_locked(HA_PEER_THROTTLE_KEY) {
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
+            state.peer_auth_throttle.note_failure(HA_PEER_THROTTLE_KEY);
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
 }
 
 /// Note the caller's authenticated identity (id + address), so a node that only ever
@@ -6994,6 +7020,7 @@ mod tests {
             sessions: SessionStore::new(justdns_auth::DEFAULT_SESSION_TTL),
             audit: test_audit(),
             throttle: LoginThrottle::new(),
+            peer_auth_throttle: LoginThrottle::new(),
             certs: None,
             cert_reload: None,
             dot_port: 853,
@@ -7857,6 +7884,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "off ⇒ 404");
+    }
+
+    #[tokio::test]
+    async fn peer_auth_throttles_repeated_wrong_keys() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let state = test_state(store);
+        // Open the peer API (enabled + key set) so a wrong token reaches the
+        // throttle instead of the closed-API 404.
+        state.ha.set_enabled(true);
+        state.ha.set_key(Some("a-sufficiently-long-sync-key".to_owned()));
+        let app = router(state);
+
+        // The first MAX_LOGIN_ATTEMPTS wrong tokens are rejected as 401; once the
+        // shared budget is spent, further wrong tokens get 429, so the key cannot
+        // be brute-forced against the peer API at line rate.
+        let mut saw_429 = false;
+        for _ in 0..(MAX_LOGIN_ATTEMPTS + 2) {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::get("/api/ha/hello")
+                        .header("x-ha-auth", "not-a-valid-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            if response.status() == StatusCode::TOO_MANY_REQUESTS {
+                saw_429 = true;
+            } else {
+                assert_eq!(
+                    response.status(),
+                    StatusCode::UNAUTHORIZED,
+                    "wrong key is unauthorized until the budget is spent",
+                );
+            }
+        }
+        assert!(saw_429, "a wrong-key flood is eventually throttled with 429");
     }
 
     #[tokio::test]
