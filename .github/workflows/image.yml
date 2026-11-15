@@ -83,3 +83,19 @@ jobs:
           push: ${{ github.ref_type == 'tag' }}
           cache-from: type=gha,scope=updater
           cache-to: type=gha,mode=max,scope=updater
+
+      - name: Build and push the harvester sidecar
+        # The read-only DACH-candidate harvester (crates/justdns-harvester). It is
+        # an optional companion, not part of the official install, so it is
+        # version-neutral (always :latest) and publishes under the same tag rule.
+        # The build context is the repo root because the Dockerfile compiles the
+        # crate against the workspace; the lean dependency set keeps the build
+        # quick, so a plain gha layer cache is enough (no registry buildcache).
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/justdns-harvester/Dockerfile
+          tags: ${{ env.IMAGE }}-harvester:latest
+          push: ${{ github.ref_type == 'tag' }}
+          cache-from: type=gha,scope=harvester
+          cache-to: type=gha,mode=max,scope=harvester
