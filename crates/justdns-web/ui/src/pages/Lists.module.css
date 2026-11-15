@@ -688,3 +688,202 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Dry-run ("Testen") button and result dialog. */
+.cardFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-start: auto;
+}
+
+.simButton {
+  flex: none;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.simButton:hover {
+  border-color: var(--signal);
+  color: var(--signal-strong);
+}
+
+.sim {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.simLead {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.simWindow {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--field);
+  border-radius: var(--radius-sm);
+  align-self: flex-start;
+}
+
+.simWindowButton {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+}
+
+.simWindowButton[data-active] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.simInfo {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.simResult {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.simHeadline {
+  margin: 0;
+  font-size: var(--step-1);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.simMeta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+}
+
+.simBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.simSubtitle {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.simCollateral {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
+.simCollateral .simSubtitle {
+  color: var(--amber);
+}
+
+.simDomains {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.simDomains li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--step--1);
+}
+
+.simDomainName {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.simDomainCount {
+  flex: none;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.simBars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.simBar {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--step--1);
+}
+
+.simBarLabel {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.simBarTrack {
+  block-size: 0.5rem;
+  background: var(--field);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.simBarFill {
+  display: block;
+  block-size: 100%;
+  background: var(--signal);
+  border-radius: 999px;
+}
+
+.simBarValue {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 540px) {
+  .simBar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .simBarTrack {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
