@@ -646,6 +646,52 @@ export interface Preset {
   enabled: boolean;
 }
 
+/** One device's share of the queries a candidate list would newly block, in a
+ *  dry-run result. */
+export interface SimDevice {
+  /** The device's catalogue name, or undefined for an unnamed client. */
+  name?: string;
+  /** The raw client address, shown when there is no name. */
+  client: string;
+  /** Queries from this device the candidate would newly block. */
+  queries: number;
+}
+
+/** One domain a candidate list would newly block, with the rule that caught it. */
+export interface SimDomain {
+  /** The queried name, without its trailing dot. */
+  name: string;
+  /** How many times it was looked up in the window. */
+  count: number;
+  /** The stored rule that matches it — the name itself or a parent domain. */
+  rule: string;
+}
+
+/** The verdict of a list dry-run: what the candidate would have done to the
+ *  recorded window, had it been active, without changing anything. */
+export interface SimulateResult {
+  /** The window actually measured, in hours (24 or 168). */
+  windowHours: number;
+  /** Distinct domains on the candidate list. */
+  ruleCount: number;
+  /** Total queries seen in the window. */
+  scannedQueries: number;
+  /** Queries that got through and the candidate would newly block. */
+  wouldBlockQueries: number;
+  /** Distinct domains among those newly blocked. */
+  affectedDomains: number;
+  /** Distinct devices among those newly blocked. */
+  affectedDevices: number;
+  /** Whether the scan hit its cap, so the figures are a lower bound. */
+  truncated: boolean;
+  /** Per-device breakdown, busiest first. */
+  perDevice: SimDevice[];
+  /** The most-blocked domains, busiest first. */
+  topDomains: SimDomain[];
+  /** Newly-blocked domains that are on the user's own allow list. */
+  collateral: SimDomain[];
+}
+
 /** A reusable address object: a short name standing for one or more IP
  *  addresses. A rewrite can point at it instead of repeating the address, and
  *  changing the object updates every rewrite that references it. */
@@ -1383,6 +1429,11 @@ export const api = {
   setPreset: (key: string, on: boolean) =>
     sendJson<ListsView>("PUT", `/api/lists/presets/${encodeURIComponent(key)}`, { on }),
   refreshLists: () => sendJson<RefreshResponse>("POST", "/api/lists/refresh"),
+  /** Measure a catalogue preset or an existing subscription against the recorded
+   *  query log, without activating it. `kind` is "preset" or "subscription",
+   *  `key` the preset key or subscription id, `windowHours` 24 or 168. */
+  simulateList: (kind: "preset" | "subscription", key: string, windowHours: number) =>
+    sendJson<SimulateResult>("POST", "/api/lists/simulate", { kind, key, windowHours }),
   /** The blockable-services catalogue, each entry marked with its global state. */
   services: (signal?: AbortSignal) => getJson<Service[]>("/api/services", signal),
   /** Switch a service into or out of the global default (Admin only). Returns

@@ -56,6 +56,8 @@ pub enum ListError {
     UnknownSubscription(String),
     #[error("unknown preset '{0}'")]
     UnknownPreset(String),
+    #[error("could not fetch the list: {0}")]
+    Fetch(String),
 }
 
 /// A subscription to an external domain feed. Persisted, so the status fields
@@ -394,6 +396,50 @@ impl ListStore {
             own_block,
             block_feeds,
         }
+    }
+
+    /// Build the domain set a catalogue preset would contribute, **without**
+    /// switching it on, for the dry-run. Reads the cached feed when one is
+    /// already on disk (the preset is active, or was fetched before), so the
+    /// common case costs no network; otherwise it fetches the feed now. Returns
+    /// the set and its distinct-domain count. Blocking (it may do network I/O),
+    /// so an async caller wraps it in `spawn_blocking`.
+    pub fn candidate_preset(&self, key: &str) -> Result<(DomainSet, usize), ListError> {
+        let preset = preset(key).ok_or_else(|| ListError::UnknownPreset(key.to_owned()))?;
+        let cached = {
+            let lists = self.read();
+            lists
+                .subscriptions
+                .iter()
+                .find(|sub| sub.preset.as_deref() == Some(key))
+                .and_then(|sub| self.read_cache(&sub.id))
+        };
+        let text = match cached {
+            Some(text) => text,
+            None => fetch(preset.url).map_err(ListError::Fetch)?,
+        };
+        Ok(build_candidate(&text))
+    }
+
+    /// Build the domain set an existing subscription (a preset or a hand-added
+    /// feed) would contribute, for the dry-run. Reads the cached feed when
+    /// present, else fetches it now. Returns the set and its distinct-domain
+    /// count. Blocking; wrap async callers in `spawn_blocking`.
+    pub fn candidate_subscription(&self, id: &str) -> Result<(DomainSet, usize), ListError> {
+        let (url, cached) = {
+            let lists = self.read();
+            let sub = lists
+                .subscriptions
+                .iter()
+                .find(|sub| sub.id == id)
+                .ok_or_else(|| ListError::UnknownSubscription(id.to_owned()))?;
+            (sub.url.clone(), self.read_cache(id))
+        };
+        let text = match cached {
+            Some(text) => text,
+            None => fetch(&url).map_err(ListError::Fetch)?,
+        };
+        Ok(build_candidate(&text))
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, UserLists> {
@@ -878,6 +924,14 @@ fn clean_note(note: Option<&str>) -> Option<String> {
         .map(|note| note.chars().take(MAX_NOTE_LEN).collect())
 }
 
+/// Build a matcher from feed text for the dry-run, paired with its distinct
+/// domain count (the rule total the dashboard shows).
+fn build_candidate(text: &str) -> (DomainSet, usize) {
+    let set = DomainSet::from_rules(text);
+    let count = set.len();
+    (set, count)
+}
+
 /// Count how many lines of `text` parse into a usable rule, without building a
 /// set — cheap enough to run on the largest feeds.
 fn count_rules(text: &str) -> usize {
@@ -1214,6 +1268,36 @@ mod tests {
         assert!(matches!(
             store.set_preset("nope", true),
             Err(ListError::UnknownPreset(_))
+        ));
+    }
+
+    #[test]
+    fn candidate_subscription_reads_the_cache_without_activating() {
+        let (_dir, store, blocker) = store();
+        let id = store
+            .add_subscription("Dry", "https://example.invalid/list.txt", ListKind::Block)
+            .unwrap();
+        store
+            .write_cache(&id, "ads.drytest\nmore.drytest\n")
+            .unwrap();
+
+        let (set, count) = store.candidate_subscription(&id).unwrap();
+        assert_eq!(count, 2, "distinct domains from the cached feed");
+        assert!(set.blocks("ads.drytest"));
+        assert!(set.blocks("sub.more.drytest"), "covers sub-domains");
+        // The feed is disabled, so it must not have touched the live blocker.
+        assert!(
+            !blocker.blocks("ads.drytest"),
+            "dry-run never activates the feed"
+        );
+    }
+
+    #[test]
+    fn candidate_subscription_rejects_an_unknown_id() {
+        let (_dir, store, _blocker) = store();
+        assert!(matches!(
+            store.candidate_subscription("nope"),
+            Err(ListError::UnknownSubscription(_))
         ));
     }
 
