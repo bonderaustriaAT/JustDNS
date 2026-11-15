@@ -27,6 +27,14 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreTo = useRef<HTMLElement | null>(null);
 
+  // Read the latest onClose through a ref so the focus effect below can depend on
+  // `open` alone. Callers pass an inline arrow (new identity every render); if it
+  // were a dependency, each keystroke would re-run the effect — restoring focus to
+  // the trigger on cleanup and then back to the first field — which yanked focus
+  // out of the input after every character.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     restoreTo.current = document.activeElement as HTMLElement | null;
@@ -35,7 +43,7 @@ export function Modal({
 
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !node) return;
@@ -61,7 +69,7 @@ export function Modal({
       document.body.style.overflow = "";
       restoreTo.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

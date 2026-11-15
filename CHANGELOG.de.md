@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.34.5] - 2026-11-15
+
+- Behoben: **In Dialogen bleibt der Fokus beim Tippen jetzt im Feld.** Dialoge wie
+  *Benutzer anlegen* und der Zertifikate-Dialog setzten den Fokus nach jedem Zeichen zurück,
+  sodass man nur einen Buchstaben tippen konnte, bevor der Cursor aus dem Feld sprang. Die
+  Fokus-Logik des Dialogs läuft jetzt einmal beim Öffnen statt bei jedem Render, ein Feld bleibt
+  also beim Tippen fokussiert.
+
 ## [0.34.2] - 2026-11-15
 
 - Sicherheit: **Die Cluster-Peer-API drosselt jetzt falsche Sync-Keys.** Der Peer-Snapshot –
