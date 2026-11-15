@@ -50,6 +50,11 @@ each view carries a **Block** button:
   [block list](lists.md) — not only the ones seen so far — so it is blocked everywhere
   from the next query on.
 - **Block** next to a single domain adds just that one name.
+- **For this device** — open a device (tap it in the by-device breakdown) and each
+  company row carries this button. It blocks the company for that one device only, by
+  adding it to the device's own [policy](policies.md), so the rest of the network is
+  untouched. The company view's **Block company** button stays network-wide, so you
+  choose the scope.
 
 Blocking is idempotent: press it again and nothing is added twice, and the result tells
 you how many entries were new. The entries land in your own block list (tagged with the

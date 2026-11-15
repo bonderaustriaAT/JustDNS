@@ -46,6 +46,15 @@ eigenen Feed per URL hinzufügen.
 Klick **Alle Listen aktualisieren**, um jetzt jeden Feed neu zu laden; sonst
 aktualisieren sie sich nach eigenem Zeitplan.
 
+**Erst testen, dann übernehmen.** Jeder Katalog-Eintrag und jedes per URL abonnierte
+Block-Feed trägt einen **Testen**-Knopf, der die Liste gegen dein eigenes
+[Protokoll](query-log.de.md) der letzten 24 Stunden oder Woche misst, ohne etwas
+einzuschalten. Er zeigt, wie viele Anfragen die Liste zusätzlich blocken würde —
+aufgeschlüsselt nach Gerät und nach Domain — und markiert Namen, die du ausdrücklich
+erlaubst und die sie trotzdem erwischen würde, damit du Wirkung und Kollateralschaden
+vor dem Übernehmen siehst. Erlauben-Feeds haben keinen Testen-Knopf, denn eine
+Freigabe blockt nichts.
+
 ## Die eingebauten Kategorien
 
 Zwei Sperrmengen stecken fest in JustDNS und werden über einfache Schalter unter
