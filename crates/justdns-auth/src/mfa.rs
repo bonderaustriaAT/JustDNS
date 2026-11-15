@@ -91,12 +91,26 @@ fn one_recovery_code() -> String {
         if i == RECOVERY_CODE_LEN / 2 {
             out.push('-');
         }
-        let mut byte = [0u8; 1];
-        OsRng.fill_bytes(&mut byte);
-        let idx = (byte[0] as usize) % RECOVERY_ALPHABET.len();
-        out.push(RECOVERY_ALPHABET[idx] as char);
+        out.push(RECOVERY_ALPHABET[uniform_index(RECOVERY_ALPHABET.len())] as char);
     }
     out
+}
+
+/// A uniformly distributed index in `0..len` from OS randomness. Rejection
+/// sampling drops the top of the byte range that would otherwise fold unevenly
+/// onto `len` (`256 % len` values), so every alphabet character is equally
+/// likely — a plain `byte % len` would bias the first `256 % len` characters.
+fn uniform_index(len: usize) -> usize {
+    debug_assert!((1..=256).contains(&len));
+    let limit = (256 / len) * len; // largest multiple of len that fits in a u8 range
+    loop {
+        let mut byte = [0u8; 1];
+        OsRng.fill_bytes(&mut byte);
+        let value = byte[0] as usize;
+        if value < limit {
+            return value % len;
+        }
+    }
 }
 
 /// Normalise a recovery code the user typed (case, spaces, dashes) before
@@ -139,6 +153,14 @@ mod tests {
         assert_eq!(norm.len(), RECOVERY_CODE_COUNT, "codes are unique");
         assert_eq!(normalise_recovery("abcde-fghij"), "ABCDEFGHIJ");
         assert_eq!(normalise_recovery("ABCDE FGHIJ"), "ABCDEFGHIJ");
+    }
+
+    #[test]
+    fn uniform_index_stays_in_range() {
+        for _ in 0..1000 {
+            let idx = uniform_index(RECOVERY_ALPHABET.len());
+            assert!(idx < RECOVERY_ALPHABET.len());
+        }
     }
 
     #[test]

@@ -99,7 +99,16 @@ fn guard_target(url: &str) -> Result<(), String> {
 fn is_disallowed_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast(),
-        IpAddr::V6(v6) => v6.is_unspecified() || (v6.segments()[0] & 0xffc0) == 0xfe80,
+        IpAddr::V6(v6) => {
+            // A dual-stack resolver (or a crafted literal) can present the metadata
+            // endpoint as an IPv4-mapped address — `::ffff:169.254.169.254`. Unwrap
+            // it and apply the IPv4 rules, so the link-local/metadata block cannot be
+            // slipped past by dressing it up as IPv6.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_disallowed_ip(IpAddr::V4(v4));
+            }
+            v6.is_unspecified() || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
     }
 }
 
@@ -590,6 +599,9 @@ mod tests {
         assert!(guard_target("http://169.254.169.254/latest/meta-data").is_err());
         assert!(guard_target("http://[fe80::1]/x").is_err());
         assert!(guard_target("http://0.0.0.0/x").is_err());
+        // The metadata endpoint dressed up as an IPv4-mapped IPv6 literal is still
+        // refused (would otherwise slip past the IPv6 branch).
+        assert!(guard_target("http://[::ffff:169.254.169.254]/latest").is_err());
         // A self-hosted ntfy/Gotify on the LAN or loopback is allowed.
         assert!(guard_target("http://192.168.20.9:8080/justdns").is_ok());
         assert!(guard_target("http://10.1.2.3/hook").is_ok());

@@ -864,8 +864,8 @@ async fn require_auth(
         return StatusCode::FORBIDDEN.into_response();
     }
 
-    // Read-only follower gate: when this node is a read-only follower of a live
-    // primary, refuse writes so the cluster is managed from one place. Two
+    // Read-only follower gate: when this node is a read-only follower of the
+    // designated primary, refuse writes so the cluster is managed from one place. Two
     // surfaces stay writable: the cluster control plane (`/api/ha`), so a follower
     // can still be repaired or take over a dead primary, and a user's own account
     // (`/api/account`), so anyone can still manage their own login while debugging.
@@ -3860,7 +3860,8 @@ struct ClusterRole {
     /// The designated primary's node id, or `None` when no primary is set.
     primary_node_id: Option<String>,
     /// `true` when this node may be written to: it is the primary, or no primary
-    /// is designated at all. `false` only on a follower of a live primary.
+    /// is designated at all. `false` only on a follower of the designated primary
+    /// (the role follows the synced designation, not a liveness check).
     is_primary: bool,
     /// Where to manage the cluster — the primary's reachable URL, if known.
     primary_url: Option<String>,
