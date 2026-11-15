@@ -62,6 +62,9 @@ export interface ClusterUpdate {
   /** The last start/error message, if any. */
   error: string | null;
   clearError: () => void;
+  /** A non-fatal notice: the restore file could not be downloaded, but the update
+   *  still ran (each node writes its own on-disk safety backup). Null otherwise. */
+  downloadWarning: string | null;
   /** Start the rolling cluster update with the typed password. No-op (returns
    *  `false`) unless `valid`; returns `true` once the start call succeeds. */
   start: () => Promise<boolean>;
@@ -80,6 +83,7 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadWarning, setDownloadWarning] = useState<string | null>(null);
 
   // One fetch to pick up a run already in progress (or the last result) — only
   // once the caller says this is a cluster, so a standalone node stays quiet.
@@ -141,13 +145,18 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     if (password === "" || password !== confirm) return false;
     setBusy(true);
     setError(null);
+    setDownloadWarning(null);
     try {
       // Hand the admin a restore file first, then start the rolling update — the
-      // same safety net the single-node update gives. Each node also writes its
-      // own on-disk safety backup, so a failed download here is not fatal.
-      await downloadRestore(password).catch(() => {
-        /* Non-fatal: the per-node on-disk safety backups still cover a rollback. */
-      });
+      // same safety net the single-node update gives. If that download fails we
+      // surface it plainly but still roll on: each node writes its own on-disk
+      // safety backup, so a flaky browser download must not block a (possibly
+      // urgent) cluster update.
+      try {
+        await downloadRestore(password);
+      } catch {
+        setDownloadWarning(t("ha.cluster.backupDownloadFailed"));
+      }
       setState(await api.haClusterUpdate(password));
       setPassword("");
       setConfirm("");
@@ -175,6 +184,7 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     busy,
     error,
     clearError,
+    downloadWarning,
     start,
   };
 }

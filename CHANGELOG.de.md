@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.34.1] - 2026-11-15
+
+- Behoben: **Das rollende Cluster-Update lädt die Wiederherstellungsdatei jetzt zuverlässig
+  herunter.** Der automatische Backup-Download wurde im selben Moment aufgeräumt, in dem er
+  ausgelöst wurde – das konnte ihn abbrechen, bevor der Browser mit dem Speichern begann. Ein
+  Update des ganzen Clusters ließ den Admin so oft ohne die versprochene Datei zurück. Das
+  Aufräumen passiert jetzt verzögert, und ein wirklich fehlgeschlagener Download wird klar
+  angezeigt statt still verschluckt – das Update läuft weiter, da jede Node ihr eigenes
+  On-Disk-Safety-Backup schreibt, der Rollback bleibt also abgesichert.
+
 ## [0.34.0] - 2026-11-15
 
 - Neu: **Eine JustDNS-DACH-Blockliste im Katalog, mit „Empfohlen"-Badge.** Der Block/Allow-Katalog
