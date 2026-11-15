@@ -623,6 +623,7 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/lists/presets/{key}", put(set_preset))
         .route("/api/lists/refresh", post(refresh_lists))
+        .route("/api/lists/simulate", post(simulate_list))
         .route("/api/services", get(get_services))
         .route("/api/services/{id}", put(set_service))
         .route(
@@ -1669,9 +1670,271 @@ fn list_error(error: ListError) -> (StatusCode, String) {
     let status = match &error {
         ListError::InvalidDomain(_) | ListError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
         ListError::UnknownSubscription(_) | ListError::UnknownPreset(_) => StatusCode::NOT_FOUND,
+        ListError::Fetch(_) => StatusCode::BAD_GATEWAY,
         ListError::Io { .. } | ListError::Parse { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, error.to_string())
+}
+
+/// How many `(client, name)` rows the dry-run pulls from the query log. Ordered
+/// by frequency, so the cap keeps the busy names that dominate the verdict; a
+/// scan that hits it is reported as truncated.
+const SIMULATE_SCAN_LIMIT: usize = 50_000;
+/// How many devices and domains the dry-run returns, busiest first.
+const SIMULATE_TOP_DEVICES: usize = 12;
+const SIMULATE_TOP_DOMAINS: usize = 15;
+
+/// Which catalogue preset or existing subscription to measure, and over how long.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SimulateBody {
+    /// `"preset"` (match `key` against the catalogue) or `"subscription"` (match
+    /// `key` against a subscription id).
+    kind: String,
+    /// The preset key or the subscription id.
+    key: String,
+    /// Window to measure over, in hours. Anything but a week (168) is read as a
+    /// day, so the UI's two choices are the only ones that reach the scan.
+    #[serde(default)]
+    window_hours: u32,
+}
+
+/// One device's share of the queries the candidate list would newly block.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimDevice {
+    /// The device's catalogue name, or `None` for an unnamed client.
+    name: Option<String>,
+    /// The raw client address, so the UI can show it when there is no name.
+    client: String,
+    /// Queries from this device the candidate would newly block.
+    queries: u64,
+}
+
+/// One domain the candidate list would newly block, with the rule that caught it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimDomain {
+    /// The queried name, without its trailing dot.
+    name: String,
+    /// How many times it was looked up in the window (and would be blocked).
+    count: u64,
+    /// The stored rule that matches it — the name itself or the parent domain.
+    rule: String,
+}
+
+/// The dry-run's verdict: what the candidate list would have done to the
+/// recorded window, had it been active, without changing anything.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SimulateResponse {
+    /// The window actually measured (24 or 168), echoed back.
+    window_hours: u32,
+    /// Distinct domains on the candidate list.
+    rule_count: usize,
+    /// Total queries seen in the window (every source).
+    scanned_queries: u64,
+    /// Queries that got through today and the candidate would newly block.
+    would_block_queries: u64,
+    /// Distinct domains among those newly blocked.
+    affected_domains: usize,
+    /// Distinct devices among those newly blocked.
+    affected_devices: usize,
+    /// Whether the scan hit its row cap, so the figures are a lower bound.
+    truncated: bool,
+    /// Per-device breakdown of the newly-blocked queries, busiest first.
+    per_device: Vec<SimDevice>,
+    /// The most-blocked domains, busiest first.
+    top_domains: Vec<SimDomain>,
+    /// Newly-blocked domains that are on the user's own allow list — the
+    /// collateral the dry-run exists to surface, since an allow entry means the
+    /// user wanted these answered.
+    collateral: Vec<SimDomain>,
+}
+
+fn simulate_error(error: ListError) -> (StatusCode, String) {
+    let status = match &error {
+        ListError::UnknownPreset(_) | ListError::UnknownSubscription(_) => StatusCode::NOT_FOUND,
+        ListError::Fetch(_) => StatusCode::BAD_GATEWAY,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (status, error.to_string())
+}
+
+/// Measure a catalogue preset or an existing subscription against the recorded
+/// query log, without activating it: how many queries it would newly block, by
+/// device and domain, and which explicitly-allowed names it would catch. Reads
+/// only; nothing is switched on.
+async fn simulate_list(
+    State(store): State<Store>,
+    State(lists): State<ListStore>,
+    State(clients): State<ClientStore>,
+    Json(body): Json<SimulateBody>,
+) -> Result<Json<SimulateResponse>, (StatusCode, String)> {
+    let window_hours: u32 = if body.window_hours == 168 { 168 } else { 24 };
+    let span_ms = i64::from(window_hours) * 3_600_000;
+    let to_ms = now_ms() as i64;
+    let from_ms = to_ms - span_ms;
+
+    // Build the candidate matcher off-thread: it may read a cached feed or, for a
+    // preset not yet switched on, fetch it. An unknown target or a failed fetch
+    // maps to a 404/502 the UI can show.
+    let kind = body.kind.clone();
+    let key = body.key.clone();
+    let lists_for_set = lists.clone();
+    let built = tokio::task::spawn_blocking(move || match kind.as_str() {
+        "subscription" => lists_for_set.candidate_subscription(&key),
+        _ => lists_for_set.candidate_preset(&key),
+    })
+    .await;
+    let (candidate, rule_count) = match built {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => return Err(simulate_error(error)),
+        Err(error) => {
+            warn!(%error, "dry-run candidate task panicked");
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the list could not be prepared".to_owned(),
+            ));
+        }
+    };
+
+    // The user's own allow set, so we can flag collateral (names they chose to
+    // allow that the candidate would nonetheless block).
+    let lists_for_allow = lists.clone();
+    let allow = tokio::task::spawn_blocking(move || lists_for_allow.resolved().allow)
+        .await
+        .unwrap_or_default();
+
+    // The recorded window as per-client, per-name counts. A blocking DuckDB read.
+    let store_for_scan = store.clone();
+    let rows = match tokio::task::spawn_blocking(move || {
+        store_for_scan.tracker_scan(from_ms, to_ms, SIMULATE_SCAN_LIMIT)
+    })
+    .await
+    {
+        Ok(Ok(rows)) => rows,
+        Ok(Err(error)) => {
+            warn!(%error, "dry-run log scan failed");
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the query log could not be read".to_owned(),
+            ));
+        }
+        Err(error) => {
+            warn!(%error, "dry-run log scan task panicked");
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the query log could not be read".to_owned(),
+            ));
+        }
+    };
+    let truncated = rows.len() >= SIMULATE_SCAN_LIMIT;
+    let resolver = ClientResolver::new(clients.view());
+    Ok(Json(aggregate_simulation(
+        &rows,
+        &candidate,
+        &allow,
+        &resolver,
+        window_hours,
+        rule_count,
+        truncated,
+    )))
+}
+
+/// The dry-run's pure core: fold the recorded rows against the candidate list
+/// and the allow set into the verdict. Split out from the handler so it can be
+/// tested without a live store. A row already blocked today is skipped (it is no
+/// change); a row the candidate matches is counted as newly blocked, rolled up
+/// per device and per domain, and, when the user explicitly allows that name,
+/// also recorded as collateral.
+fn aggregate_simulation(
+    rows: &[justdns_store::TrackerScanRow],
+    candidate: &justdns_filter::DomainSet,
+    allow: &justdns_filter::DomainSet,
+    resolver: &ClientResolver,
+    window_hours: u32,
+    rule_count: usize,
+    truncated: bool,
+) -> SimulateResponse {
+    let mut scanned_queries = 0u64;
+    let mut would_block_queries = 0u64;
+    // client -> (device name, newly-blocked query count)
+    let mut per_device: std::collections::HashMap<String, (Option<String>, u64)> =
+        std::collections::HashMap::new();
+    // display name -> (rule, count)
+    let mut per_domain: std::collections::HashMap<String, (String, u64)> =
+        std::collections::HashMap::new();
+    let mut collateral: std::collections::HashMap<String, (String, u64)> =
+        std::collections::HashMap::new();
+
+    for row in rows {
+        scanned_queries += row.count;
+        if row.blocked {
+            continue;
+        }
+        let Some(rule) = candidate.matching(&row.name) else {
+            continue;
+        };
+        would_block_queries += row.count;
+
+        let name = row
+            .client
+            .parse::<std::net::IpAddr>()
+            .ok()
+            .and_then(|ip| resolver.name_for(ip).map(str::to_owned));
+        per_device.entry(row.client.clone()).or_insert((name, 0)).1 += row.count;
+
+        let display = row.name.trim_end_matches('.').to_ascii_lowercase();
+        per_domain
+            .entry(display.clone())
+            .or_insert((rule.clone(), 0))
+            .1 += row.count;
+        if allow.blocks(&row.name) {
+            collateral.entry(display).or_insert((rule, 0)).1 += row.count;
+        }
+    }
+
+    let affected_domains = per_domain.len();
+    let affected_devices = per_device.len();
+
+    let mut per_device: Vec<SimDevice> = per_device
+        .into_iter()
+        .map(|(client, (name, queries))| SimDevice {
+            name,
+            client,
+            queries,
+        })
+        .collect();
+    per_device.sort_by(|a, b| {
+        b.queries
+            .cmp(&a.queries)
+            .then_with(|| a.client.cmp(&b.client))
+    });
+    per_device.truncate(SIMULATE_TOP_DEVICES);
+
+    let to_domains = |map: std::collections::HashMap<String, (String, u64)>| {
+        let mut domains: Vec<SimDomain> = map
+            .into_iter()
+            .map(|(name, (rule, count))| SimDomain { name, count, rule })
+            .collect();
+        domains.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        domains.truncate(SIMULATE_TOP_DOMAINS);
+        domains
+    };
+
+    SimulateResponse {
+        window_hours,
+        rule_count,
+        scanned_queries,
+        would_block_queries,
+        affected_domains,
+        affected_devices,
+        truncated,
+        per_device,
+        top_domains: to_domains(per_domain),
+        collateral: to_domains(collateral),
+    }
 }
 
 /// Everything the dashboard's "Listen" view needs: the user's own allow and
@@ -7004,6 +7267,80 @@ mod tests {
         AuditStore::load(path).unwrap()
     }
 
+    #[test]
+    fn aggregate_simulation_counts_newly_blocked_and_collateral() {
+        use justdns_filter::DomainSet;
+        use justdns_store::TrackerScanRow;
+
+        let candidate = DomainSet::from_rules("ads.test\ntracker.test\n");
+        // The user explicitly allows tracker.test, so a candidate hit there is
+        // collateral, not a clean win.
+        let allow = DomainSet::from_rules("tracker.test\n");
+        let resolver = ClientResolver::new(test_clients().view());
+
+        let rows = vec![
+            TrackerScanRow {
+                client: "10.0.0.1".into(),
+                name: "ads.test.".into(),
+                blocked: false,
+                count: 5,
+            },
+            // A sub-domain of a candidate rule, on another device.
+            TrackerScanRow {
+                client: "10.0.0.2".into(),
+                name: "sub.ads.test.".into(),
+                blocked: false,
+                count: 2,
+            },
+            // Already blocked today: no change, must be skipped.
+            TrackerScanRow {
+                client: "10.0.0.1".into(),
+                name: "ads.test.".into(),
+                blocked: true,
+                count: 9,
+            },
+            // An allowed name the candidate would block: collateral.
+            TrackerScanRow {
+                client: "10.0.0.1".into(),
+                name: "tracker.test.".into(),
+                blocked: false,
+                count: 3,
+            },
+            // Not on the candidate: ignored.
+            TrackerScanRow {
+                client: "10.0.0.3".into(),
+                name: "example.com.".into(),
+                blocked: false,
+                count: 4,
+            },
+        ];
+
+        let out = aggregate_simulation(&rows, &candidate, &allow, &resolver, 24, 2, false);
+        assert_eq!(
+            out.scanned_queries, 23,
+            "every row counts toward the scan total"
+        );
+        assert_eq!(
+            out.would_block_queries, 10,
+            "5 + 2 + 3 newly blocked; the already-blocked row is skipped"
+        );
+        assert_eq!(out.affected_domains, 3);
+        assert_eq!(out.affected_devices, 2);
+        assert_eq!(out.top_domains[0].name, "ads.test");
+        assert_eq!(out.top_domains[0].count, 5);
+        assert_eq!(
+            out.top_domains[0].rule, "ads.test",
+            "a sub-domain is attributed to the parent rule"
+        );
+        assert_eq!(
+            out.collateral.len(),
+            1,
+            "only the allowed name is collateral"
+        );
+        assert_eq!(out.collateral[0].name, "tracker.test");
+        assert_eq!(out.collateral[0].count, 3);
+    }
+
     fn test_state(store: Store) -> AppState {
         let blocker = test_blocker();
         AppState {
@@ -7893,7 +8230,9 @@ mod tests {
         // Open the peer API (enabled + key set) so a wrong token reaches the
         // throttle instead of the closed-API 404.
         state.ha.set_enabled(true);
-        state.ha.set_key(Some("a-sufficiently-long-sync-key".to_owned()));
+        state
+            .ha
+            .set_key(Some("a-sufficiently-long-sync-key".to_owned()));
         let app = router(state);
 
         // The first MAX_LOGIN_ATTEMPTS wrong tokens are rejected as 401; once the
@@ -7921,7 +8260,10 @@ mod tests {
                 );
             }
         }
-        assert!(saw_429, "a wrong-key flood is eventually throttled with 429");
+        assert!(
+            saw_429,
+            "a wrong-key flood is eventually throttled with 429"
+        );
     }
 
     #[tokio::test]
