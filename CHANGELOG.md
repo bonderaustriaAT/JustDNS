@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.33.0] - 2026-11-15
+
+- Added: **A "Recommended" badge in the list catalogue.** The Block/Allow catalogue now marks
+  the sensible default picks with a green **Recommended** badge, so a new user can switch on a
+  good starting list without weighing every entry against its false-positive risk. For now
+  *Hagezi Normal* (ads and trackers) and *Hagezi Threat Intelligence* (security) carry it.
+
 ## [0.32.1] - 2026-11-14
 
 - Changed: **The Privacy dashboard reaches the world map faster.** The "most-contacted

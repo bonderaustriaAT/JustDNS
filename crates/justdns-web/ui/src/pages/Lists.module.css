@@ -422,14 +422,28 @@
   gap: var(--space-1);
 }
 
-.categoryTag {
+/* The three card-tag pills share one shape; each rule below only sets colour. */
+.categoryTag,
+.recommendedTag,
+.kind {
   align-self: flex-start;
   font-size: 0.7rem;
   letter-spacing: 0.02em;
   padding: 2px var(--space-2);
   border-radius: 999px;
+}
+
+.categoryTag {
   color: var(--text-muted);
   background: var(--surface-sunken);
+}
+
+/* A positive pill marking a catalogue entry JustDNS recommends as a starting
+   choice; sits first in the card's tag row. */
+.recommendedTag {
+  font-weight: 600;
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
 }
 
 .card {
@@ -465,11 +479,6 @@
 }
 
 .kind {
-  align-self: flex-start;
-  font-size: 0.7rem;
-  letter-spacing: 0.02em;
-  padding: 2px var(--space-2);
-  border-radius: 999px;
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }

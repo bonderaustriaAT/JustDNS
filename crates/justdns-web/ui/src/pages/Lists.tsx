@@ -271,6 +271,11 @@ function PresetCard({
         <div className={styles.cardTitleWrap}>
           <h3 className={styles.cardTitle}>{preset.name}</h3>
           <div className={styles.cardTags}>
+            {preset.recommended && (
+              <span className={styles.recommendedTag} title={t("lists.recommendedHint")}>
+                {t("lists.recommended")}
+              </span>
+            )}
             <span className={styles.kind} data-kind={preset.kind}>
               {preset.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
             </span>
