@@ -69,8 +69,8 @@ pub fn preset(key: &str) -> Option<&'static Preset> {
 static PRESETS: &[Preset] = &[
     Preset {
         key: "hagezi-light",
-        recommended: false,
         category: "ads",
+        recommended: false,
         name: "Hagezi Light",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
         kind: ListKind::Block,
@@ -83,8 +83,8 @@ nie etwas Gewünschtes verloren.",
     },
     Preset {
         key: "hagezi-multi",
-        recommended: true,
         category: "ads",
+        recommended: true,
         name: "Hagezi Normal",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
         kind: ListKind::Block,
@@ -96,8 +96,8 @@ Website zum Laden braucht — im Zweifel die Domain auf die eigene Allowlist set
     },
     Preset {
         key: "hagezi-pro",
-        recommended: false,
         category: "ads",
+        recommended: false,
         name: "Hagezi Pro",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
         kind: ListKind::Block,
@@ -109,8 +109,8 @@ beeinträchtigt; rechne damit, hin und wieder etwas freizugeben.",
     },
     Preset {
         key: "hagezi-pro-plus",
-        recommended: false,
         category: "ads",
+        recommended: false,
         name: "Hagezi Pro++",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus-onlydomains.txt",
         kind: ListKind::Block,
@@ -123,8 +123,8 @@ können ausfallen. Nur mit Bereitschaft zur Pflege der Allowlist einsetzen.",
     },
     Preset {
         key: "hagezi-ultimate",
-        recommended: false,
         category: "ads",
+        recommended: false,
         name: "Hagezi Ultimate",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/ultimate-onlydomains.txt",
         kind: ListKind::Block,
@@ -136,8 +136,8 @@ Allowlist. Nicht für ein Netz empfohlen, in dem andere mitnutzen.",
     },
     Preset {
         key: "hagezi-tif",
-        recommended: true,
         category: "security",
+        recommended: true,
         name: "Hagezi Threat Intelligence",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt",
         kind: ListKind::Block,
@@ -150,8 +150,8 @@ zu einer Werbeliste aktivieren.",
     },
     Preset {
         key: "hagezi-doh-vpn",
-        recommended: false,
         category: "bypass",
+        recommended: false,
         name: "Hagezi DoH/VPN-Bypass",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/doh-vpn-proxy-bypass-onlydomains.txt",
         kind: ListKind::Block,
@@ -164,8 +164,8 @@ dessen Domain freigeben — sonst funktioniert es nicht mehr.",
     },
     Preset {
         key: "hagezi-native-apple",
-        recommended: false,
         category: "privacy",
+        recommended: false,
         name: "Hagezi Apple-Telemetrie",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/native.apple-onlydomains.txt",
         kind: ListKind::Block,
@@ -177,8 +177,8 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
     },
     Preset {
         key: "hagezi-referral-allow",
-        recommended: false,
         category: "allow",
+        recommended: false,
         name: "Hagezi Referral-Freigabe",
         url: "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/whitelist-referral-onlydomains.txt",
         kind: ListKind::Allow,
@@ -225,5 +225,30 @@ mod tests {
     fn lookup_by_key() {
         assert!(preset("hagezi-tif").is_some());
         assert!(preset("nope").is_none());
+    }
+
+    #[test]
+    fn recommended_badge_is_the_curated_default_set() {
+        let recommended: std::collections::HashSet<&str> = presets()
+            .iter()
+            .filter(|preset| preset.recommended)
+            .map(|preset| preset.key)
+            .collect();
+        assert_eq!(
+            recommended,
+            ["hagezi-multi", "hagezi-tif"].into_iter().collect(),
+            "the recommended-badge set changed; update this test deliberately",
+        );
+
+        // The field's contract: at most one recommendation per purpose (category).
+        let mut per_category: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for preset in presets().iter().filter(|preset| preset.recommended) {
+            *per_category.entry(preset.category).or_default() += 1;
+        }
+        assert!(
+            per_category.values().all(|&count| count <= 1),
+            "more than one recommended preset in a category: {per_category:?}",
+        );
     }
 }
