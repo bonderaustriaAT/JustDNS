@@ -21,7 +21,7 @@ box.
 > details can still change between versions.
 
 <p align="center">
-  <img src="docs/assets/dashboard.jpg" alt="The JustDNS dashboard: live counters, a query-rate graph and 24-hour stats" width="820">
+  <img src="docs/assets/dashboard.gif" alt="The JustDNS dashboard: live counters ticking up, a query-rate graph and 24-hour stats" width="820">
 </p>
 
 ## Highlights
@@ -30,6 +30,11 @@ box.
   [Hagezi](https://github.com/hagezi/dns-blocklists) lists. Switch the built-in
   categories on or off, add your own allow/block entries or list subscriptions any
   time, and give any **device or group** its own rules on top.
+- **Runs as a cluster, not a single point of failure.** Mesh **up to four equal
+  nodes** that stay in sync — change anything on any node and it flows to the rest.
+  Take one down to reboot or update and the network never notices, and a **rolling
+  cluster update** moves every node to a new version one at a time, with no DNS
+  outage. Off by default; turn it on when you want it.
 - **Private by default.** Ships with privacy-friendly EU resolvers (DNS4EU,
   Quad9) over **DNS-over-TLS**, raced for speed. Swap in your own resolvers —
   plaintext, DoT or DoH — or pick a **Privacy / Balanced / Speed** profile.
@@ -44,6 +49,10 @@ box.
 - **Per-device & per-group policies.** Give a single device or a whole group its
   own block lists and allow/block rules. Rules stack — global default → group →
   device — so you only set what differs.
+- **Hardened for real use.** DNSSEC validation, user accounts with **roles and
+  TOTP two-factor**, and every secret (password hashes, TOTP keys, recovery codes)
+  **encrypted at rest**. A named TLS certificate store serves the dashboard, the
+  block page and encrypted DNS.
 - **Guided setup.** A first-run wizard walks you through the admin account,
   resolvers and log retention. Interface in **German and English**.
 
@@ -65,6 +74,29 @@ box.
     </td>
   </tr>
 </table>
+
+## How it compares
+
+JustDNS plays in the same space as Pi-hole and AdGuard Home. Here is where it
+differs — honestly, parity included:
+
+| | **JustDNS** | Pi-hole | AdGuard Home |
+|---|---|---|---|
+| Core | Rust, single binary | C + PHP/web | Go |
+| Native multi-node HA | ✅ mesh, up to 4 equal nodes | ⚠️ third-party (gravity-sync, keepalived) | — |
+| Rolling update, no DNS outage | ✅ | — | — |
+| Encrypted upstream by default | ✅ DoT out of the box | ⚠️ add-on (cloudflared/unbound) | ✅ supported |
+| DNSSEC validation | ✅ | ✅ | ✅ |
+| Per-device & per-group policies | ✅ | ⚠️ client groups | ✅ clients |
+| Users, roles & TOTP 2FA | ✅ | — single password | — single login |
+| Secrets encrypted at rest | ✅ | — | — |
+| One-click in-app update | ✅ | ⚠️ CLI | ✅ |
+| German UI + full handbook | ✅ | ⚠️ partial | ⚠️ partial |
+
+Pi-hole and AdGuard Home are excellent, far more battle-tested projects — if you
+want the biggest community and the longest track record, use them. Reach for
+JustDNS when you want **more than one node without a DNS outage**, real accounts
+and 2FA, encryption and EU resolvers by default, and a fully German interface.
 
 ## Quick start (Docker)
 
@@ -158,6 +190,15 @@ JustDNS? Start with [first-run setup](docs/guides/setup.md), then
   ([Deutsch](ROADMAP.de.md)).
 - What's new in each version: [CHANGELOG.md](CHANGELOG.md)
   ([Deutsch](CHANGELOG.de.md)).
+
+## Help wanted
+
+JustDNS is a young project and we'd genuinely love a hand. Whether it's fixing a
+bug, building a feature, sharpening the docs or adding a translation —
+contributions are very welcome. Browse the
+[open issues](https://github.com/bonderaustriaAT/JustDNS/issues), open a new one
+to float an idea, or read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. Not a
+coder? A star, a bug report or plain feedback helps just as much. 😉
 
 ## License
 

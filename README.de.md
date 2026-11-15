@@ -21,7 +21,7 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
 > Einstellungen und Details können sich zwischen Versionen noch ändern.
 
 <p align="center">
-  <img src="docs/assets/dashboard.jpg" alt="Das JustDNS-Dashboard: Live-Zähler, ein Anfrageraten-Diagramm und 24-Stunden-Statistik" width="820">
+  <img src="docs/assets/dashboard.gif" alt="Das JustDNS-Dashboard: hochtickende Live-Zähler, ein Anfrageraten-Diagramm und 24-Stunden-Statistik" width="820">
 </p>
 
 ## Highlights
@@ -31,6 +31,12 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
   eingebauten Kategorien an oder aus, ergänze jederzeit eigene Allow-/Block-
   Einträge oder Listen-Abos und gib jedem **Gerät oder jeder Gruppe** eigene
   Regeln obendrauf.
+- **Läuft als Cluster statt als Single Point of Failure.** Vernetze **bis zu vier
+  gleichberechtigte Knoten** im Mesh, die synchron bleiben — was du auf einem
+  Knoten änderst, fließt zu allen anderen. Nimm einen zum Neustarten oder Updaten
+  vom Netz, ohne dass es jemand merkt, und ein **rollendes Cluster-Update** hebt
+  jeden Knoten einzeln auf eine neue Version — ohne DNS-Ausfall. Standardmäßig aus;
+  schalte es ein, wenn du es brauchst.
 - **Privat von Anfang an.** Standardmäßig datenschutzfreundliche EU-Resolver
   (DNS4EU, Quad9) über **DNS-over-TLS**, um die Wette abgefragt. Nutze eigene
   Resolver — Klartext, DoT oder DoH — oder wähle ein Profil **Privatsphäre /
@@ -47,6 +53,11 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
 - **Richtlinien pro Gerät & Gruppe.** Gib einem einzelnen Gerät oder einer ganzen
   Gruppe eigene Sperrlisten und Erlauben/Sperren-Regeln. Die Regeln stapeln sich —
   globale Vorgabe → Gruppe → Gerät — du stellst also nur ein, was abweicht.
+- **Gehärtet für den echten Betrieb.** DNSSEC-Validierung, Benutzerkonten mit
+  **Rollen und TOTP-Zwei-Faktor** und jedes Geheimnis (Passwort-Hashes,
+  TOTP-Schlüssel, Wiederherstellungscodes) **verschlüsselt gespeichert**. Ein
+  benannter TLS-Zertifikatsspeicher bedient Dashboard, Sperrseite und
+  verschlüsseltes DNS.
 - **Geführte Einrichtung.** Ein Assistent beim ersten Start führt durch
   Administratorkonto, Resolver und Aufbewahrung. Oberfläche auf **Deutsch und
   Englisch**.
@@ -69,6 +80,30 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
     </td>
   </tr>
 </table>
+
+## Im Vergleich
+
+JustDNS spielt in derselben Liga wie Pi-hole und AdGuard Home. Hier sind die
+Unterschiede — ehrlich, Gleichstand inklusive:
+
+| | **JustDNS** | Pi-hole | AdGuard Home |
+|---|---|---|---|
+| Kern | Rust, ein Binary | C + PHP/Web | Go |
+| Natives Mehrknoten-HA | ✅ Mesh, bis zu 4 gleichberechtigt | ⚠️ über Dritte (gravity-sync, keepalived) | — |
+| Rollendes Update ohne DNS-Ausfall | ✅ | — | — |
+| Verschlüsselter Upstream per Vorgabe | ✅ DoT von Haus aus | ⚠️ Zusatz (cloudflared/unbound) | ✅ unterstützt |
+| DNSSEC-Validierung | ✅ | ✅ | ✅ |
+| Richtlinien pro Gerät & Gruppe | ✅ | ⚠️ Client-Gruppen | ✅ Clients |
+| Benutzer, Rollen & TOTP-2FA | ✅ | — ein Passwort | — ein Login |
+| Geheimnisse verschlüsselt gespeichert | ✅ | — | — |
+| One-Click-Update in der App | ✅ | ⚠️ CLI | ✅ |
+| Deutsche UI + komplettes Handbuch | ✅ | ⚠️ teilweise | ⚠️ teilweise |
+
+Pi-hole und AdGuard Home sind hervorragende, weit erprobtere Projekte — wenn du
+die größte Community und die längste Historie willst, nimm sie. Greif zu JustDNS,
+wenn du **mehr als einen Knoten ohne DNS-Ausfall** willst, echte Konten und 2FA,
+Verschlüsselung und EU-Resolver als Vorgabe und eine durchgängig deutsche
+Oberfläche.
 
 ## Schnellstart (Docker)
 
@@ -164,6 +199,15 @@ Neu bei JustDNS? Starte mit der [Ersteinrichtung](docs/guides/setup.de.md), dann
   ([English](ROADMAP.md)).
 - Was in jeder Version neu ist: [CHANGELOG.de.md](CHANGELOG.de.md)
   ([English](CHANGELOG.md)).
+
+## Mitstreiter gesucht
+
+JustDNS ist ein junges Projekt und wir freuen uns ehrlich über jede Hilfe. Ob
+Bugfix, neues Feature, bessere Doku oder eine Übersetzung — Beiträge sind herzlich
+willkommen. Wirf einen Blick in die
+[offenen Issues](https://github.com/bonderaustriaAT/JustDNS/issues), öffne ein
+neues für eine Idee, oder lies [CONTRIBUTING.md](CONTRIBUTING.md) für den Einstieg.
+Kein Coder? Ein Stern, ein Fehlerbericht oder schlichtes Feedback hilft genauso. 😉
 
 ## Lizenz
 
