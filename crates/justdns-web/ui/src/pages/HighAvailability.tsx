@@ -579,6 +579,11 @@ function ClusterUpdatePanel() {
 
       {upToDate && <p className={styles.summarySub}>{t("update.upToDate")}</p>}
       {cu.error && <p className={styles.fieldError}>{cu.error}</p>}
+      {cu.downloadWarning && (
+        <p className={styles.summarySub} role="status">
+          {cu.downloadWarning}
+        </p>
+      )}
 
       {state && state.phase !== "idle" && (
         <div className={styles.clusterUpdateState}>
@@ -637,6 +642,7 @@ function ClusterUpdatePanel() {
                   <span className={styles.fieldError}>{t("update.passwordMismatch")}</span>
                 )}
               </label>
+              {cu.error && <span className={styles.fieldError}>{cu.error}</span>}
             </>
           }
           confirmLabel={t("ha.cluster.updateButton")}

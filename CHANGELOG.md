@@ -8,8 +8,9 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 - Fixed: **The rolling cluster update now reliably downloads the restore file.** The
   automatic backup download was cleaned up in the same instant it was triggered, which could
   cancel it before the browser had begun saving — so a whole-cluster update often left the admin
-  without the restore file it promised. Cleanup is now deferred, and if the download genuinely
-  fails the update stops with a clear message instead of rolling the cluster without a backup.
+  without the restore file it promised. Cleanup is now deferred, and a genuinely failed download
+  is shown plainly instead of silently swallowed — the update still runs, since each node writes
+  its own on-disk safety backup, so a rollback stays protected.
 
 ## [0.34.0] - 2026-11-15
 

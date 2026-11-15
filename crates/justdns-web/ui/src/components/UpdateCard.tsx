@@ -346,6 +346,9 @@ export function UpdateCard() {
       {clusterMode && cluster.error ? (
         <p className={styles.note} role="alert">{cluster.error}</p>
       ) : null}
+      {clusterMode && cluster.downloadWarning ? (
+        <p className={styles.note} role="status">{cluster.downloadWarning}</p>
+      ) : null}
 
       {clusterMode && cluster.state && cluster.state.phase !== "idle" ? (
         <div className={styles.clusterProgress} role="status" aria-live="polite">
@@ -510,6 +513,9 @@ export function UpdateCard() {
                     : t("update.backupPasswordHint")}
                 </span>
               </label>
+              {cluster.error && (
+                <p className={styles.dialogError} role="alert">{cluster.error}</p>
+              )}
             </>
           }
           confirmLabel={t("update.updateCluster")}
