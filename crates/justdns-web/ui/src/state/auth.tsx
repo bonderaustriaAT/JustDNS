@@ -74,7 +74,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthenticated(state.authenticated);
         setUsername(state.username);
         setRole(state.role ?? null);
-        setIsPrimary(state.isPrimary ?? true);
+        // Fail closed: a payload without the flag is treated as a read-only
+        // follower, never silently writable. The server always sends it, so this
+        // only guards a malformed/old response.
+        setIsPrimary(state.isPrimary ?? false);
         setPrimaryUrl(state.primaryUrl ?? null);
       })
       .catch(() => {
@@ -106,7 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthenticated(state.authenticated);
     setUsername(state.username);
     setRole(state.role ?? null);
-    setIsPrimary(state.isPrimary ?? true);
+    // Fail closed, as in the initial load above.
+    setIsPrimary(state.isPrimary ?? false);
     setPrimaryUrl(state.primaryUrl ?? null);
   }, []);
 
