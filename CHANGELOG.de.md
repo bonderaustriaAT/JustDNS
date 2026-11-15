@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.34.0] - 2026-11-15
+
+- Neu: **Eine JustDNS-DACH-Blockliste im Katalog, mit „Empfohlen"-Badge.** Der Block/Allow-Katalog
+  bietet jetzt eine selbst gepflegte Ergänzung für deutschsprachige Reichweitenmessung
+  (INFOnline/IVW, VG Wort METIS, ÖWA), die internationale Listen schwächer abdecken — ein kleines,
+  einzeln geprüftes Delta, gedacht als Zusatz zu *Hagezi Normal*, nicht als Ersatz. Jede Domain
+  ist ein reines Mess-Beacon ohne Seitenfunktion, Fehlalarme also nahezu null, daher trägt sie den
+  grünen **Empfohlen**-Badge in der Kategorie Werbung & Tracker. Die Einträge kommen aus dem öffentlichen
+  Repository [justdns-dach-blocklist](https://github.com/bonderaustriaAT/justdns-dach-blocklist).
+
 ## [0.33.0] - 2026-11-15
 
 - Neu: **Ein „Empfohlen"-Badge im Listen-Katalog.** Der Block/Allow-Katalog markiert jetzt die
