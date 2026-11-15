@@ -38,8 +38,9 @@ set of ready-to-use feeds; switch one on and JustDNS fetches it.
 Each catalogue entry shows a **false-positive risk** (1 = negligible … 5 = high) so
 you can judge how aggressive it is before turning it on. Some entries also carry a
 **"Recommended"** badge — the sensible default picks when you would rather not weigh
-every entry (currently *Hagezi Normal* for blocking ads/trackers and *Hagezi Threat
-Intelligence* for security protection). You can also add your own feed by URL.
+every entry (currently *Hagezi Normal* for blocking ads/trackers, *Hagezi Threat
+Intelligence* for security protection, and the *JustDNS DACH supplement* for
+German-language reach-measurement trackers). You can also add your own feed by URL.
 
 Click **Refresh all lists** to re-download every feed now; otherwise they refresh on
 their own schedule.
