@@ -10,8 +10,9 @@ Format Jahr-Monat-Tag.
   herunter.** Der automatische Backup-Download wurde im selben Moment aufgeräumt, in dem er
   ausgelöst wurde – das konnte ihn abbrechen, bevor der Browser mit dem Speichern begann. Ein
   Update des ganzen Clusters ließ den Admin so oft ohne die versprochene Datei zurück. Das
-  Aufräumen passiert jetzt verzögert, und schlägt der Download wirklich fehl, stoppt das Update
-  mit einer klaren Meldung, statt den Cluster ohne Backup zu aktualisieren.
+  Aufräumen passiert jetzt verzögert, und ein wirklich fehlgeschlagener Download wird klar
+  angezeigt statt still verschluckt – das Update läuft weiter, da jede Node ihr eigenes
+  On-Disk-Safety-Backup schreibt, der Rollback bleibt also abgesichert.
 
 ## [0.34.0] - 2026-11-15
 
