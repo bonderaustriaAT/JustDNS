@@ -42,6 +42,16 @@ function relativeTime(ms: number, t: T): string {
 /** The catalogue categories in the order the filter shows them. */
 const CATEGORY_ORDER: Preset["category"][] = ["ads", "security", "privacy", "bypass", "allow"];
 
+/** Catalogue sort rank: the JustDNS list leads, then the other recommended
+ *  picks, then the long tail. Lower sorts first; equal ranks keep their original
+ *  order (Array.prototype.sort is stable), so within each band the curated
+ *  gentle-to-aggressive order is preserved. */
+function presetRank(preset: Preset): number {
+  if (preset.key === "justdns-dach") return 0;
+  if (preset.recommended) return 1;
+  return 2;
+}
+
 /** A five-pip meter for a list's false-positive risk: how much legitimate
  *  traffic it might catch by mistake. The subject here is risk, so it reads as
  *  a scale, not a badge. */
@@ -266,7 +276,11 @@ function PresetCard({
 }) {
   const { t, lang } = useI18n();
   return (
-    <article className={styles.card} data-active={preset.active || undefined}>
+    <article
+      className={styles.card}
+      data-active={preset.active || undefined}
+      data-recommended={preset.recommended || undefined}
+    >
       <header className={styles.cardHead}>
         <div className={styles.cardTitleWrap}>
           <h3 className={styles.cardTitle}>{preset.name}</h3>
@@ -410,10 +424,13 @@ export function Lists({ section }: { section: ListsSection }) {
       count: categoryCounts[category],
     })),
   ];
+  // Recommended lists lead the catalogue, the JustDNS list always first, so a new
+  // user meets the sensible picks (and our own) before the long tail.
+  const orderedPresets = [...view.presets].sort((a, b) => presetRank(a) - presetRank(b));
   const visiblePresets =
     presetFilter === "all"
-      ? view.presets
-      : view.presets.filter((preset) => preset.category === presetFilter);
+      ? orderedPresets
+      : orderedPresets.filter((preset) => preset.category === presetFilter);
 
   return (
     <div className={styles.page}>

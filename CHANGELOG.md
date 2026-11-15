@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.34.6] - 2026-11-15
+
+- Changed: **The list catalogue now leads with the recommended picks, gold-outlined.**
+  Recommended lists sort to the top of the catalogue (the JustDNS list first) and wear a gold
+  border, so the sensible starting choices stand out at a glance. The JustDNS supplement is
+  renamed from *JustDNS DACH-Ergänzung* to *JustDNS DACH*.
+
 ## [0.34.5] - 2026-11-15
 
 - Fixed: **Typing in a dialog no longer loses focus after each keystroke.** Dialogs such as
