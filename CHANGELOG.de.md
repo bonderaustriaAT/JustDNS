@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.36.0] - 2026-11-15
+
+- Neu: **CNAME-getarnte Tracker entlarven.** Manche Tracker verstecken sich als CNAME auf einer
+  scheinbar eigenen Subdomain (z. B. `metrics.shop.de`, das auf einen Tracker verweist), sodass
+  der angefragte Name auf keiner Liste steht und durchrutscht. JustDNS prüft jetzt die CNAME-Ziele
+  in der Antwort gegen deine Sperrlisten und blockt die Anfrage, wenn ein Ziel ein bekannter
+  Tracker ist, auch wenn der angefragte Name selbst erlaubt wäre. Standardmäßig an; ein neuer
+  Schalter unter Filterung schaltet es aus. Es prüft nur die Records, die eine Antwort ohnehin
+  mitbringt, kostet also keine zusätzliche Auflösung.
+
 ## [0.35.0] - 2026-11-15
 
 - Neu: **Eine Sperrliste gegen den eigenen Verlauf testen, bevor man sie einschaltet.** Jedes

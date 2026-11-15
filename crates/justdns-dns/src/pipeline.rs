@@ -48,6 +48,11 @@ pub struct PipelineOptions {
     /// Whether to force the big search engines to their safe-search endpoints.
     /// A shared flag so the config store can flip it live, like `ipv6_enabled`.
     pub safe_search: Arc<AtomicBool>,
+    /// Whether to uncloak CNAME-cloaked trackers: inspect the CNAME targets in an
+    /// answer and block the query when a target is on a block list, even if the
+    /// queried first-party name is not. A shared flag so the config store flips it
+    /// live, like `safe_search`.
+    pub uncloak_cname: Arc<AtomicBool>,
     /// How a blocked name is answered: `true` hands back the null IP
     /// (`0.0.0.0` / `::`), `false` answers NXDOMAIN. A shared flag so the config
     /// store flips it live. Defaults to `false` here (NXDOMAIN); the product
@@ -90,6 +95,7 @@ impl PipelineOptions {
         Self {
             ipv6_enabled: Arc::new(AtomicBool::new(enabled)),
             safe_search: Arc::new(AtomicBool::new(false)),
+            uncloak_cname: Arc::new(AtomicBool::new(false)),
             block_null_ip: Arc::new(AtomicBool::new(false)),
             block_page: Arc::new(ArcSwapOption::empty()),
             dnssec_validate: Arc::new(AtomicBool::new(false)),
@@ -246,13 +252,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         // blocked host fails at once) or NXDOMAIN (the name simply does not exist).
         if let Some(engine) = &self.policy_engine {
             if engine.blocks(client, &query.name().to_string()) {
-                if let Some(target) = self.options.block_page.load_full() {
-                    self.answer_blocked_redirect(query, response, &target);
-                } else if self.options.block_null_ip.load(Ordering::Relaxed) {
-                    self.answer_blocked_null_ip(query, response);
-                } else {
-                    response.metadata.response_code = ResponseCode::NXDomain;
-                }
+                self.write_block_answer(query, response);
                 return Answered::local(AnswerSource::Blocked);
             }
         }
@@ -283,6 +283,11 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 needs_refresh,
             } = hit;
             apply_cached(response, cached);
+            // A cached answer can still be CNAME-cloaked: check its chain, so a
+            // tracker is blocked whether the answer is fresh or served from cache.
+            if let Some(blocked) = self.uncloak(query, response, client) {
+                return blocked;
+            }
             // The answer is already served; a near-expiry or stale entry is
             // renewed behind it so the next client keeps hitting a warm cache.
             if needs_refresh {
@@ -331,7 +336,53 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             }
         };
 
+        // Uncloak a CNAME-cloaked tracker: the real upstream answer is already
+        // cached above, so a later cache hit still runs this check, and lifting
+        // the block restores the real answer.
+        if let Some(blocked) = self.uncloak(query, response, client) {
+            return blocked;
+        }
+
         Answered::upstream(resolver, dnssec)
+    }
+
+    /// Write the configured block answer for `query` into `response`: the block
+    /// page redirect when it is on, else the null IP, else NXDOMAIN. The caller
+    /// clears any upstream records first.
+    fn write_block_answer(&self, query: &Query, response: &mut Message) {
+        if let Some(target) = self.options.block_page.load_full() {
+            self.answer_blocked_redirect(query, response, &target);
+        } else if self.options.block_null_ip.load(Ordering::Relaxed) {
+            self.answer_blocked_null_ip(query, response);
+        } else {
+            response.metadata.response_code = ResponseCode::NXDomain;
+        }
+    }
+
+    /// When uncloaking is on, inspect the CNAME targets in the assembled answer
+    /// and, if any is blocked under this client's policy, replace the whole answer
+    /// with a block answer. A CNAME-cloaked tracker hides behind a first-party
+    /// name that is itself on no list, so the block is only visible on the chain's
+    /// targets. Returns `Some(blocked)` when it acted, `None` to leave the answer
+    /// untouched. We never resolve further — only the records the upstream already
+    /// returned are inspected — so there is no extra lookup and no loop risk.
+    fn uncloak(&self, query: &Query, response: &mut Message, client: IpAddr) -> Option<Answered> {
+        if !self.options.uncloak_cname.load(Ordering::Relaxed) {
+            return None;
+        }
+        let engine = self.policy_engine.as_ref()?;
+        let cloaked = response.answers.iter().any(|record| match &record.data {
+            RData::CNAME(CNAME(target)) => engine.blocks(client, &target.to_string()),
+            _ => false,
+        });
+        if !cloaked {
+            return None;
+        }
+        // Drop the leaked records before writing the block answer.
+        response.answers.clear();
+        response.metadata.response_code = ResponseCode::NoError;
+        self.write_block_answer(query, response);
+        Some(Answered::local(AnswerSource::Blocked))
     }
 
     /// Refresh `key` from upstream in the background and store the fresh answer,
@@ -620,6 +671,12 @@ mod tests {
     enum Reply {
         A(Ipv4Addr),
         Aaaa(Ipv6Addr),
+        /// A CNAME from the queried name to `target`, plus an A record for
+        /// `target` — a CNAME chain, as a cloaked tracker returns one.
+        Cname {
+            target: &'static str,
+            ip: Ipv4Addr,
+        },
         Empty(ResponseCode),
         Fail,
     }
@@ -678,6 +735,16 @@ mod tests {
                 Reply::Aaaa(ip) => {
                     message.metadata.response_code = ResponseCode::NoError;
                     message.add_answer(Record::from_rdata(name, self.ttl, RData::AAAA(AAAA(*ip))));
+                }
+                Reply::Cname { target, ip } => {
+                    message.metadata.response_code = ResponseCode::NoError;
+                    let target_name = Name::from_ascii(target).unwrap();
+                    message.add_answer(Record::from_rdata(
+                        name,
+                        self.ttl,
+                        RData::CNAME(CNAME(target_name.clone())),
+                    ));
+                    message.add_answer(Record::from_rdata(target_name, self.ttl, RData::A(A(*ip))));
                 }
                 Reply::Empty(code) => {
                     message.metadata.response_code = *code;
@@ -1078,6 +1145,86 @@ mod tests {
         assert!(
             answer_addresses(&blocked).is_empty(),
             "A block with no block-page IPv4 is NODATA, never 0.0.0.0"
+        );
+    }
+
+    #[tokio::test]
+    async fn uncloaks_a_cname_cloaked_tracker() {
+        // shop.example is on no list, but it is a CNAME to tracker.ads.example,
+        // which the policy blocks. With uncloaking on, the whole query is blocked.
+        let options = PipelineOptions {
+            uncloak_cname: Arc::new(AtomicBool::new(true)),
+            ..PipelineOptions::default()
+        };
+        let (pipe, _calls) = pipeline(
+            Reply::Cname {
+                target: "tracker.ads.example.",
+                ip: Ipv4Addr::new(93, 184, 216, 34),
+            },
+            options,
+        );
+        let pipe = pipe.with_policy_engine(block_ads_engine());
+
+        let blocked = pipe
+            .handle(&request("shop.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(blocked.response_code, ResponseCode::NXDomain);
+        assert!(
+            blocked.answers.is_empty(),
+            "the cloaked answer and its leaked records are withheld"
+        );
+    }
+
+    #[tokio::test]
+    async fn uncloak_off_lets_the_cloaked_answer_through() {
+        // Same cloaked answer, but uncloaking off (the default): it is served.
+        let (pipe, _calls) = pipeline(
+            Reply::Cname {
+                target: "tracker.ads.example.",
+                ip: Ipv4Addr::new(93, 184, 216, 34),
+            },
+            PipelineOptions::default(),
+        );
+        let pipe = pipe.with_policy_engine(block_ads_engine());
+
+        let answered = pipe
+            .handle(&request("shop.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(answered.response_code, ResponseCode::NoError);
+        assert!(
+            !answered.answers.is_empty(),
+            "with uncloaking off the cloaked answer passes through"
+        );
+    }
+
+    #[tokio::test]
+    async fn uncloak_blocks_a_cached_cloaked_answer() {
+        // The real answer is cached on the first (forwarded) query, but the
+        // uncloak check runs on every serve, so the cache hit is blocked too.
+        let options = PipelineOptions {
+            uncloak_cname: Arc::new(AtomicBool::new(true)),
+            ..PipelineOptions::default()
+        };
+        let (pipe, calls) = pipeline(
+            Reply::Cname {
+                target: "tracker.ads.example.",
+                ip: Ipv4Addr::new(93, 184, 216, 34),
+            },
+            options,
+        );
+        let pipe = pipe.with_policy_engine(block_ads_engine());
+        let req = request("shop.example.", RecordType::A);
+
+        let first = pipe.handle(&req, CLIENT).await;
+        assert_eq!(first.response_code, ResponseCode::NXDomain);
+
+        let second = pipe.handle(&req, CLIENT).await;
+        assert_eq!(second.response_code, ResponseCode::NXDomain);
+        assert!(second.answers.is_empty());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "the second serve is from cache, not a second upstream call"
         );
     }
 

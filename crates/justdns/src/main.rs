@@ -370,6 +370,7 @@ async fn main() -> ExitCode {
         PipelineOptions {
             ipv6_enabled: config_store.ipv6_flag(),
             safe_search: config_store.safe_search_flag(),
+            uncloak_cname: config_store.uncloak_cname_flag(),
             block_null_ip: config_store.block_null_ip_flag(),
             block_page: block_page_target.clone(),
             dnssec_validate: dnssec_validate.clone(),

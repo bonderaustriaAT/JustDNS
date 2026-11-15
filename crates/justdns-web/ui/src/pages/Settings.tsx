@@ -1647,6 +1647,18 @@ export function Settings() {
                   />
                 }
               />
+              <Row
+                label={t("settings.uncloakLabel")}
+                description={t("settings.uncloakDesc")}
+                details={t("settings.uncloakDetails")}
+                control={
+                  <Toggle
+                    label={t("settings.uncloakLabel")}
+                    checked={settings.uncloakCname}
+                    onChange={(v) => update("uncloakCname", v)}
+                  />
+                }
+              />
               <BlockResponseControl />
             </Category>
           )}
