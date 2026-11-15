@@ -36,8 +36,11 @@ aktuell hält — zum Beispiel die kuratierten
 Reihe fertiger Feeds; schalte einen an und JustDNS holt ihn.
 
 Jeder Katalog-Eintrag zeigt ein **Fehlalarm-Risiko** (1 = vernachlässigbar … 5 = hoch),
-damit du vor dem Einschalten einschätzen kannst, wie aggressiv er ist. Du kannst auch
-einen eigenen Feed per URL hinzufügen.
+damit du vor dem Einschalten einschätzen kannst, wie aggressiv er ist. Einige Einträge
+tragen zusätzlich ein **„Empfohlen"**-Badge — das sind die sinnvollen Standardwahlen,
+wenn du nicht jeden Eintrag einzeln abwägen willst (aktuell *Hagezi Normal* fürs Blocken
+von Werbung/Trackern und *Hagezi Threat Intelligence* für den Sicherheitsschutz). Du
+kannst auch einen eigenen Feed per URL hinzufügen.
 
 Klick **Alle Listen aktualisieren**, um jetzt jeden Feed neu zu laden; sonst
 aktualisieren sie sich nach eigenem Zeitplan.

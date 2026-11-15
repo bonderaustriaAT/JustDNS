@@ -639,6 +639,9 @@ export interface Preset {
   fpLevel: number;
   /** Coarse grouping for the catalogue filter. */
   category: "ads" | "security" | "privacy" | "bypass" | "allow";
+  /** Whether JustDNS marks this as a recommended starting choice (badge in the
+   *  catalogue). Optional on the wire: an older server omits it. */
+  recommended?: boolean;
   active: boolean;
   enabled: boolean;
 }
