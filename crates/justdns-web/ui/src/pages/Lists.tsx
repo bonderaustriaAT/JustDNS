@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { NavLink } from "react-router-dom";
 
 import { InfoHint } from "../components/InfoHint";
+import { Modal } from "../components/Modal";
 import { Toggle } from "../components/Toggle";
 import {
   ApiError,
@@ -10,6 +11,7 @@ import {
   type ListKind,
   type ListsView,
   type Preset,
+  type SimulateResult,
   type Subscription,
 } from "../lib/api";
 import { useI18n, type Lang } from "../lib/i18n";
@@ -268,11 +270,13 @@ function PresetCard({
   sub,
   pending,
   onToggle,
+  onSimulate,
 }: {
   preset: Preset;
   sub?: Subscription;
   pending: boolean;
   onToggle: (on: boolean) => void;
+  onSimulate: () => void;
 }) {
   const { t, lang } = useI18n();
   return (
@@ -313,9 +317,23 @@ function PresetCard({
         <p className={styles.riskText}>{preset.falsePositive}</p>
       </div>
 
-      {preset.active && sub ? (
-        <p className={styles.status}>{feedStatusText(sub, t, lang)}</p>
-      ) : null}
+      <div className={styles.cardFoot}>
+        {preset.active && sub ? (
+          <p className={styles.status}>{feedStatusText(sub, t, lang)}</p>
+        ) : (
+          <span />
+        )}
+        {preset.kind === "block" && (
+          <button
+            type="button"
+            className={styles.simButton}
+            onClick={onSimulate}
+            title={t("lists.simulateHint")}
+          >
+            {t("lists.simulate")}
+          </button>
+        )}
+      </div>
     </article>
   );
 }
@@ -332,6 +350,12 @@ export function Lists({ section }: { section: ListsSection }) {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [presetFilter, setPresetFilter] = useState<string>("all");
+  // The list currently open in the dry-run dialog, or null when it is closed.
+  const [simTarget, setSimTarget] = useState<{
+    kind: "preset" | "subscription";
+    key: string;
+    name: string;
+  } | null>(null);
 
   // Hand-added subscription form.
   const [feedName, setFeedName] = useState("");
@@ -537,6 +561,9 @@ export function Lists({ section }: { section: ListsSection }) {
               onToggle={(on) =>
                 run(`preset:${preset.key}`, () => api.setPreset(preset.key, on))
               }
+              onSimulate={() =>
+                setSimTarget({ kind: "preset", key: preset.key, name: preset.name })
+              }
             />
           ))}
         </div>
@@ -609,6 +636,18 @@ export function Lists({ section }: { section: ListsSection }) {
                       run(`feed:${feed.id}`, () => api.setSubscriptionEnabled(feed.id, on))
                     }
                   />
+                  {feed.kind === "block" && (
+                    <button
+                      type="button"
+                      className={styles.simButton}
+                      title={t("lists.simulateHint")}
+                      onClick={() =>
+                        setSimTarget({ kind: "subscription", key: feed.id, name: feed.name })
+                      }
+                    >
+                      {t("lists.simulate")}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={styles.remove}
@@ -626,7 +665,170 @@ export function Lists({ section }: { section: ListsSection }) {
         )}
       </section>
       ) : null}
+
+      <SimulateModal target={simTarget} onClose={() => setSimTarget(null)} />
     </div>
+  );
+}
+
+/** The dry-run dialog: measures the chosen list against the recorded query log
+ *  over a day or a week and shows what it would newly block, by device and by
+ *  domain, plus any explicitly-allowed names it would catch. Runs when opened
+ *  and whenever the window changes; never activates the list. */
+function SimulateModal({
+  target,
+  onClose,
+}: {
+  target: { kind: "preset" | "subscription"; key: string; name: string } | null;
+  onClose: () => void;
+}) {
+  const { t, lang } = useI18n();
+  const locale = lang === "de" ? "de-DE" : "en-US";
+  const [windowHours, setWindowHours] = useState(24);
+  const [result, setResult] = useState<SimulateResult | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+
+  // Re-run when the target or the window changes. A stale request from a closed
+  // or switched dialog is dropped via the abort flag.
+  useEffect(() => {
+    if (!target) {
+      setResult(null);
+      setState("idle");
+      return;
+    }
+    let active = true;
+    setState("loading");
+    setResult(null);
+    api
+      .simulateList(target.kind, target.key, windowHours)
+      .then((data) => {
+        if (!active) return;
+        setResult(data);
+        setState("idle");
+      })
+      .catch(() => {
+        if (!active) return;
+        setState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [target, windowHours]);
+
+  if (!target) return null;
+
+  const fmt = (n: number) => n.toLocaleString(locale);
+
+  return (
+    <Modal open onClose={onClose} title={t("lists.simulateTitle", { name: target.name })}>
+      <div className={styles.sim}>
+        <p className={styles.simLead}>{t("lists.simulateLead")}</p>
+
+        <div className={styles.simWindow} role="tablist" aria-label={t("lists.simulateWindow")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={windowHours === 24}
+            className={styles.simWindowButton}
+            data-active={windowHours === 24 || undefined}
+            onClick={() => setWindowHours(24)}
+          >
+            {t("lists.simulateDay")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={windowHours === 168}
+            className={styles.simWindowButton}
+            data-active={windowHours === 168 || undefined}
+            onClick={() => setWindowHours(168)}
+          >
+            {t("lists.simulateWeek")}
+          </button>
+        </div>
+
+        {state === "loading" && <p className={styles.simInfo}>{t("lists.simulateRunning")}</p>}
+        {state === "error" && <p className={styles.statusError}>{t("lists.simulateFailed")}</p>}
+
+        {state === "idle" && result && (
+          result.scannedQueries === 0 ? (
+            <p className={styles.simInfo}>{t("lists.simulateNoData")}</p>
+          ) : (
+            <div className={styles.simResult}>
+              <p className={styles.simHeadline}>
+                {t("lists.simulateHeadline", {
+                  queries: fmt(result.wouldBlockQueries),
+                  domains: fmt(result.affectedDomains),
+                  devices: fmt(result.affectedDevices),
+                })}
+              </p>
+              <p className={styles.simMeta}>
+                {t("lists.simulateMeta", {
+                  rules: fmt(result.ruleCount),
+                  scanned: fmt(result.scannedQueries),
+                })}
+                {result.truncated ? ` ${t("lists.simulateTruncated")}` : ""}
+              </p>
+
+              {result.collateral.length > 0 && (
+                <div className={styles.simCollateral}>
+                  <h3 className={styles.simSubtitle}>{t("lists.simulateCollateral")}</h3>
+                  <ul className={styles.simDomains}>
+                    {result.collateral.map((d) => (
+                      <li key={d.name}>
+                        <span className={styles.simDomainName}>{d.name}</span>
+                        <span className={styles.simDomainCount}>{fmt(d.count)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {result.perDevice.length > 0 && (
+                <div className={styles.simBlock}>
+                  <h3 className={styles.simSubtitle}>{t("lists.simulatePerDevice")}</h3>
+                  <ul className={styles.simBars}>
+                    {result.perDevice.map((device) => (
+                      <li key={device.client} className={styles.simBar}>
+                        <span className={styles.simBarLabel}>{device.name ?? device.client}</span>
+                        <span className={styles.simBarTrack}>
+                          <span
+                            className={styles.simBarFill}
+                            style={{
+                              width: `${Math.max(
+                                4,
+                                Math.round(
+                                  (device.queries / result.perDevice[0].queries) * 100,
+                                ),
+                              )}%`,
+                            }}
+                          />
+                        </span>
+                        <span className={styles.simBarValue}>{fmt(device.queries)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {result.topDomains.length > 0 && (
+                <div className={styles.simBlock}>
+                  <h3 className={styles.simSubtitle}>{t("lists.simulateTopDomains")}</h3>
+                  <ul className={styles.simDomains}>
+                    {result.topDomains.map((d) => (
+                      <li key={d.name}>
+                        <span className={styles.simDomainName}>{d.name}</span>
+                        <span className={styles.simDomainCount}>{fmt(d.count)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )
+        )}
+      </div>
+    </Modal>
   );
 }
 

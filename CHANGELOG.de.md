@@ -4,6 +4,15 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.35.0] - 2026-11-15
+
+- Neu: **Eine Sperrliste gegen den eigenen Verlauf testen, bevor man sie einschaltet.** Jedes
+  Katalog-Preset und jede eigene Block-Liste per URL hat jetzt einen *Testen*-Knopf, der die Liste
+  gegen deinen aufgezeichneten Verlauf der letzten 24 Stunden oder 7 Tage rechnet, ohne etwas zu
+  aktivieren. Er zeigt, wie viele Anfragen die Liste zusätzlich blocken würde, aufgeschlüsselt nach
+  Gerät und Domain, und markiert ausdrücklich freigegebene Namen, die sie treffen würde. So siehst
+  du Wirkung und Kollateral, bevor du dich für eine Liste entscheidest.
+
 ## [0.34.6] - 2026-11-15
 
 - Geändert: **Der Listen-Katalog führt jetzt mit den empfohlenen Listen, gold umrandet.**

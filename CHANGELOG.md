@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.35.0] - 2026-11-15
+
+- Added: **Test a block list against your own history before you turn it on.** Each catalogue
+  preset and every URL block feed now has a *Test* button that measures the list against your
+  recorded query log over the last day or week, without activating anything. It shows how many
+  queries the list would newly block, broken down by device and by domain, and flags any names
+  you explicitly allow that it would catch, so you can see the effect and the collateral before
+  committing to a list.
+
 ## [0.34.6] - 2026-11-15
 
 - Changed: **The list catalogue now leads with the recommended picks, gold-outlined.**
