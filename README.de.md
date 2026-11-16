@@ -24,8 +24,22 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
   <img src="docs/assets/dashboard.gif" alt="Das JustDNS-Dashboard: hochtickende Live-Zähler, ein Anfrageraten-Diagramm und 24-Stunden-Statistik" width="820">
 </p>
 
+<p align="center">
+  <img src="docs/assets/privacy-dashboard.png" alt="Das Privacy-Dashboard: welche Firmen jedes Gerät kontaktiert, der geblockte Anteil und eine Aufschlüsselung pro Gerät" width="820">
+</p>
+
+<p align="center">
+  <img src="docs/assets/world-map.png" alt="Eine Offline-Weltkarte, die jedes Land danach einfärbt, wie viele Antworten dorthin auflösten, samt der Netze (ASN) dahinter" width="820">
+</p>
+
 ## Highlights
 
+- **Sieh, welche Firmen deine Geräte kontaktieren.** Ein Privacy-Dashboard ordnet
+  jede Anfrage der Firma dahinter zu (Werbung, Analyse, Social Media,
+  Fingerprinting), mit Aufschlüsselung pro Gerät und einer Weltkarte, wohin
+  Antworten auflösen. Ein Klick blockt eine Firma überall oder nur für ein
+  einzelnes Gerät. Dazu eine **DACH-Trackerliste** (INFOnline/IVW, ÖWA), die
+  internationale Listen kaum abdecken.
 - **Blockt Werbung, Tracker und Schadsoftware** von Haus aus, mit kuratierten
   [Hagezi](https://github.com/hagezi/dns-blocklists)-Listen. Schalte die
   eingebauten Kategorien an oder aus, ergänze jederzeit eigene Allow-/Block-
@@ -89,6 +103,7 @@ Unterschiede — ehrlich, Gleichstand inklusive:
 | | **JustDNS** | Pi-hole | AdGuard Home |
 |---|---|---|---|
 | Kern | Rust, ein Binary | C + PHP/Web | Go |
+| Firmen-Privacy-Dashboard | ✅ mit Weltkarte | — | — |
 | Natives Mehrknoten-HA | ✅ Mesh, bis zu 4 gleichberechtigt | ⚠️ über Dritte (gravity-sync, keepalived) | — |
 | Rollendes Update ohne DNS-Ausfall | ✅ | — | — |
 | Verschlüsselter Upstream per Vorgabe | ✅ DoT von Haus aus | ⚠️ Zusatz (cloudflared/unbound) | ✅ unterstützt |

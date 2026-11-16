@@ -1,6 +1,6 @@
 # JustDNS
 
-**Your whole network's DNS — filtered, encrypted and self-hosted.**
+**See which companies your devices phone home to, then block them. Self-hosted DNS, no cloud.**
 
 [![Release](https://img.shields.io/github/v/tag/bonderaustriaAT/JustDNS?label=release&sort=semver&color=2ea043)](https://github.com/bonderaustriaAT/JustDNS/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/bonderaustriaAT/JustDNS/image.yml?branch=main&label=build)](https://github.com/bonderaustriaAT/JustDNS/actions/workflows/image.yml)
@@ -10,12 +10,13 @@
 
 *Read this in German: [README.de.md](README.de.md).*
 
-JustDNS is a filtering DNS forwarder you run yourself. Point your router or your
-devices at it and every lookup passes through one place: ads, trackers and
-malware domains are blocked, your chosen resolvers answer the rest over an
-encrypted connection, and a clean web dashboard shows you exactly what is
-happening on your network — with no accounts, no cloud, and no data leaving your
-box.
+JustDNS is a filtering DNS resolver you run yourself. Point your router at it and
+every device's lookups pass through one place. What sets it apart: it does not
+just list the domains it blocked, it attributes them to the **companies behind the
+names** in plain language (this TV reached Google 240 times today), and shows on an
+offline world map where answers resolve. Ads, trackers and malware are blocked,
+your chosen resolvers answer the rest over an encrypted connection, and nothing
+leaves your box: no accounts, no cloud.
 
 > Status: actively developed, pre-1.0. It runs and is useful today; settings and
 > details can still change between versions.
@@ -24,8 +25,22 @@ box.
   <img src="docs/assets/dashboard.gif" alt="The JustDNS dashboard: live counters ticking up, a query-rate graph and 24-hour stats" width="820">
 </p>
 
+<p align="center">
+  <img src="docs/assets/privacy-dashboard.png" alt="The privacy dashboard: which companies each device contacts, the blocked share, and a per-device breakdown" width="820">
+</p>
+
+<p align="center">
+  <img src="docs/assets/world-map.png" alt="An offline world map shading each country by how many answers resolved into it, with the networks (ASNs) behind them" width="820">
+</p>
+
 ## Highlights
 
+- **See which companies your devices talk to.** A privacy dashboard attributes
+  every lookup to the company behind it (advertising, analytics, social,
+  fingerprinting), with a per-device breakdown and a world map of where answers
+  resolve. One click blocks a company everywhere, or for a single device. It also
+  ships a **DACH tracker list** (INFOnline/IVW, ÖWA) that international lists barely
+  cover.
 - **Blocks ads, trackers and malware** out of the box, using curated
   [Hagezi](https://github.com/hagezi/dns-blocklists) lists. Switch the built-in
   categories on or off, add your own allow/block entries or list subscriptions any
@@ -83,6 +98,7 @@ differs — honestly, parity included:
 | | **JustDNS** | Pi-hole | AdGuard Home |
 |---|---|---|---|
 | Core | Rust, single binary | C + PHP/web | Go |
+| Company-level privacy dashboard | ✅ with world map | — | — |
 | Native multi-node HA | ✅ mesh, up to 4 equal nodes | ⚠️ third-party (gravity-sync, keepalived) | — |
 | Rolling update, no DNS outage | ✅ | — | — |
 | Encrypted upstream by default | ✅ DoT out of the box | ⚠️ add-on (cloudflared/unbound) | ✅ supported |
