@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.38.0] - 2026-11-17
+
+- Geändert: **Die Seitenleiste ist gruppiert und leichter zu überblicken.** Das Menü ist jetzt in
+  vier beschriftete Abschnitte geteilt (Überblick, Schutz, Regeln, System), jeder mit einer ruhigen
+  Überschrift über seinen Seiten, und alle Einträge sind auf einen Blick sichtbar. Die beiden langen
+  Abschnitte klappen nicht mehr auf und zu, sodass jede Seite einen Klick entfernt bleibt und die
+  ganze Liste lesbar ist.
+- Geändert: **Das Untermenü Block/Allow ist aufgeräumter.** Seine beiden Unterseiten („Eigene Listen
+  per URL" und „Fertige Listen") haben nun eigene kleine Symbole und richten sich an einer
+  Führungslinie aus, sodass das Untermenü als klarer Zweig der Liste lesbar ist.
+
 ## [0.37.3] - 2026-11-17
 
 - Geändert: **Die Phishing-Markierung im Protokoll ist übersichtlicher.** Ein Treffer zeigt jetzt

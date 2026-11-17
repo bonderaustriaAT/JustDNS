@@ -49,6 +49,19 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M9 12l2 2 4-4" strokeLinecap="round" />
     </svg>
   ),
+  listUrl: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" strokeLinecap="round" />
+      <path d="M12 3.5c2.4 2.4 2.4 14.6 0 17M12 3.5c-2.4 2.4-2.4 14.6 0 17" strokeLinecap="round" />
+    </svg>
+  ),
+  listPresets: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <path d="M3.5 6l1 1 1.6-2M3.5 12l1 1 1.6-2M3.5 18l1 1 1.6-2" />
+    </svg>
+  ),
   phishing: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
@@ -140,22 +153,6 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M12 15v2.5" />
     </svg>
   ),
-  // Parent-group icons: horizontal sliders for "Rules", a cog for "System", kept
-  // distinct from the vertical-slider Settings child so the two never clash.
-  rules: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h16" />
-      <circle cx="9" cy="7" r="2.3" fill="var(--bg)" />
-      <circle cx="15" cy="12" r="2.3" fill="var(--bg)" />
-      <circle cx="8" cy="17" r="2.3" fill="var(--bg)" />
-    </svg>
-  ),
-  admin: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1" />
-    </svg>
-  ),
 };
 
 /** The destinations shown in the mobile tab bar: the most-used pages, for thumb
@@ -172,8 +169,8 @@ const TABS: { to: string; icon: string; labelKey: MessageKey; end?: boolean }[] 
 /** The sub-pages the "Block/Allow" area is split across. The user's own entries
  *  (manual allow/block plus URL subscriptions) live together on the first page. */
 const LIST_ITEMS = [
-  { to: "/listen/url", labelKey: "nav.listsUrl" as const },
-  { to: "/listen/fertige", labelKey: "nav.listsPresets" as const },
+  { to: "/listen/url", labelKey: "nav.listsUrl" as const, icon: "listUrl" },
+  { to: "/listen/fertige", labelKey: "nav.listsPresets" as const, icon: "listPresets" },
 ];
 
 /** A single sidebar link: icon plus label, active-aware. */
@@ -243,7 +240,8 @@ function ListsGroup() {
               to={item.to}
               className={({ isActive }) => (isActive ? styles.navSubActive : styles.navSub)}
             >
-              {t(item.labelKey)}
+              <span className={styles.navSubIcon}>{ICONS[item.icon]}</span>
+              <span className={styles.navText}>{t(item.labelKey)}</span>
             </NavLink>
           ))}
         </div>
@@ -252,45 +250,19 @@ function ListsGroup() {
   );
 }
 
-/** A collapsible sidebar section: an icon + label header that folds its child
- *  links in and out. It auto-opens while the active route is one of its children
- *  (so a deep link lands with the right section unfolded) and can still be folded
- *  by hand. Keeping the sections folded is what keeps the whole list short enough
- *  to fit without a scrollbar. */
-function NavGroup({
-  icon,
-  label,
-  active,
-  children,
-}: {
-  icon: string;
-  label: string;
-  active: boolean;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(active);
-
-  // Navigating into the section unfolds it; the user keeps manual control
-  // otherwise.
-  useEffect(() => {
-    if (active) setOpen(true);
-  }, [active]);
-
+/** A labelled sidebar section: a quiet group heading above its links, with every
+ *  item visible. Grouping the whole list (not just folding the long tail away)
+ *  is what keeps it scannable; the heading tells the user what each block is for. */
+function NavSection({ label, children }: { label: string; children: ReactNode }) {
+  // Tie the heading to its links so assistive tech announces the group, the way
+  // the old collapsible button used to convey it.
+  const headingId = `nav-section-${label.replace(/\s+/g, "-").toLowerCase()}`;
   return (
-    <div className={styles.navGroup}>
-      <button
-        type="button"
-        className={active ? styles.navItemActive : styles.navItem}
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <span className={styles.navIcon}>{ICONS[icon]}</span>
-        <span className={styles.navText}>{label}</span>
-        <span className={styles.caret} data-open={open || undefined} aria-hidden="true">
-          ›
-        </span>
-      </button>
-      {open && <div className={styles.groupItems}>{children}</div>}
+    <div className={styles.navSection} role="group" aria-labelledby={headingId}>
+      <div className={styles.sectionLabel} id={headingId}>
+        {label}
+      </div>
+      {children}
     </div>
   );
 }
@@ -447,22 +419,6 @@ export function Shell({ children }: { children: ReactNode }) {
   const follower = !isPrimary && !path.startsWith("/ha");
   const readOnly = follower || (needsEdit && !canEdit) || (needsAdmin && !isAdmin);
 
-  // Which collapsible section the current route belongs to, so it unfolds (and
-  // its header reads active) on a deep link or a reload.
-  const onRules = ["/geraete", "/listen", "/dienste", "/zeitplaene", "/rewrites"].some((p) =>
-    path.startsWith(p),
-  );
-  const onSystem = [
-    "/einstellungen",
-    "/zertifikate",
-    "/freigaben",
-    "/benutzer",
-    "/audit",
-    "/system",
-    "/berichte",
-    "/ha",
-  ].some((p) => path.startsWith(p));
-
   // Show the instance name next to the wordmark (and in the tab title) when the
   // user has set one that is not the default.
   const instance = settings.instanceName.trim();
@@ -531,25 +487,29 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
 
           <nav className={styles.groups} aria-label={t("nav.primary")}>
-            {/* The most-used pages sit at the top level; the rest fold into two
-                collapsible sections so the list stays short. */}
-            <div className={styles.navTop}>
+            {/* The whole list is grouped under quiet headings, every item visible.
+                Grouping (not folding) is what keeps it scannable; each heading
+                tells the user what the block below it is for. */}
+            <NavSection label={t("nav.sectionOverview")}>
               <NavRow to="/" end icon="overview" label={t("nav.overview")} />
               <NavRow to="/protokoll" icon="log" label={t("nav.log")} />
+            </NavSection>
+
+            <NavSection label={t("nav.sectionProtection")}>
               <NavRow to="/privatsphaere" icon="privacy" label={t("nav.privacy")} />
               <NavRow to="/dnssec" icon="dnssec" label={t("nav.dnssec")} />
               <NavRow to="/phishing" icon="phishing" label={t("nav.phishing")} />
-            </div>
+            </NavSection>
 
-            <NavGroup icon="rules" label={t("nav.sectionRules")} active={onRules}>
+            <NavSection label={t("nav.sectionRules")}>
               <NavRow to="/geraete" icon="devices" label={t("nav.devices")} />
               <ListsGroup />
               {isAdmin && <NavRow to="/dienste" icon="services" label={t("nav.services")} />}
               <NavRow to="/zeitplaene" icon="schedules" label={t("nav.schedules")} />
               <NavRow to="/rewrites" icon="rewrites" label={t("nav.rewrites")} />
-            </NavGroup>
+            </NavSection>
 
-            <NavGroup icon="admin" label={t("nav.sectionSystem")} active={onSystem}>
+            <NavSection label={t("nav.sectionSystem")}>
               <NavRow to="/einstellungen" icon="settings" label={t("nav.settings")} />
               {isAdmin && <NavRow to="/zertifikate" icon="certs" label={t("nav.certs")} />}
               {isAdmin && (
@@ -565,7 +525,7 @@ export function Shell({ children }: { children: ReactNode }) {
               {isAdmin && <NavRow to="/system" icon="system" label={t("nav.systemLogs")} />}
               {isAdmin && <NavRow to="/berichte" icon="reports" label={t("nav.reports")} />}
               {isAdmin && <NavRow to="/ha" icon="ha" label={t("nav.ha")} />}
-            </NavGroup>
+            </NavSection>
           </nav>
         </div>
       </aside>
