@@ -27,8 +27,10 @@ use serde::{Deserialize, Serialize};
 use crate::ListKind;
 use crate::presets::{Preset, preset, presets};
 
-/// How long a single feed download may take before it is abandoned.
-const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a single feed download may take before it is abandoned. Generous
+/// enough for a large feed (the NRD warn lists run to tens of MB) on a modest
+/// home connection, so a big list does not time out and silently stay empty.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 /// Hard cap on how much of a feed we read, so a runaway or hostile URL cannot
 /// exhaust memory.
 const MAX_LIST_BYTES: u64 = 64 * 1024 * 1024;
@@ -832,6 +834,64 @@ impl ListStore {
             .collect()
     }
 
+    /// Fetch one enabled subscription by id, cache it, record its status and
+    /// rebuild, then fire the change so the blocker and the phishing detector pick
+    /// it up. Used right after a feed is enabled so it takes effect at once instead
+    /// of waiting for the twelve-hour refresh. Blocking (network I/O), so an async
+    /// caller wraps it in `spawn_blocking`. Returns `None` if the id is unknown or
+    /// the feed is disabled.
+    pub fn refresh_subscription(&self, id: &str) -> Option<RefreshOutcome> {
+        let (url, previous) = {
+            let lists = self.read();
+            let sub = lists
+                .subscriptions
+                .iter()
+                .find(|sub| sub.id == id && sub.enabled)?;
+            (sub.url.clone(), sub.last_count)
+        };
+
+        let started = std::time::Instant::now();
+        let result = fetch(&url).and_then(|body| {
+            let count = count_rules(&body);
+            self.write_cache(id, &body).map(|()| count)
+        });
+        let took_ms = started.elapsed().as_millis() as u64;
+
+        let now = now_ms();
+        let mut lists = self.write();
+        if let Some(sub) = lists.subscriptions.iter_mut().find(|sub| sub.id == id) {
+            sub.last_fetched_ms = Some(now);
+            match &result {
+                Ok(count) => {
+                    sub.last_count = Some(*count);
+                    sub.last_error = None;
+                }
+                Err(error) => sub.last_error = Some(error.clone()),
+            }
+        }
+        let _ = self.persist(&lists);
+        self.rebuild(&lists);
+        drop(lists);
+        self.fire_on_change();
+
+        Some(match result {
+            Ok(count) => RefreshOutcome {
+                id: id.to_owned(),
+                count: Some(count),
+                previous,
+                duration_ms: Some(took_ms),
+                error: None,
+            },
+            Err(error) => RefreshOutcome {
+                id: id.to_owned(),
+                count: None,
+                previous,
+                duration_ms: Some(took_ms),
+                error: Some(error),
+            },
+        })
+    }
+
     /// Rebuild the allow set and the block sources and swap them into the
     /// blocker. The allow side stays merged, but the block side is kept as one
     /// named source per list — the user's manual list first, then each enabled
@@ -1063,6 +1123,19 @@ mod tests {
             blocker.blocks("doubleclick.net"),
             "removing it restores the block"
         );
+    }
+
+    #[test]
+    fn refresh_subscription_is_a_noop_for_unknown_or_disabled_feeds() {
+        let (_dir, store, _blocker) = store();
+        // Unknown id: nothing to fetch, returns before any network work.
+        assert!(store.refresh_subscription("preset-nope").is_none());
+        // A disabled feed is skipped the same way.
+        let id = store
+            .add_subscription("warn", "https://example.invalid/nrd.txt", ListKind::Warn)
+            .unwrap();
+        store.set_subscription_enabled(&id, false).unwrap();
+        assert!(store.refresh_subscription(&id).is_none());
     }
 
     #[test]
