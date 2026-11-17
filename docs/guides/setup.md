@@ -9,8 +9,8 @@ see it once — on a fresh install with no account yet.
 ## Before you start
 
 Have JustDNS reachable in a browser (the address of the machine or container it runs
-on). If you already have a [backup](backup.md) from another install, keep the `.json`
-file handy — the wizard can restore from it.
+on). If you already have a [backup](backup.md) from another install, keep the backup
+file (`.jdbak`) and its password handy — the wizard can restore from it.
 
 A language switcher sits at the top of the wizard, so you can run it in English or
 German.
@@ -47,9 +47,11 @@ You can change this later under [Settings](settings.md).
 
 ## If you chose "Restore from backup"
 
-**Step 3 — Upload the file.** Select your backup `.json`. JustDNS checks it's a real
-JustDNS backup and refuses anything else. On success, all your settings, lists,
-rewrites, devices and groups come back and you land on the dashboard.
+**Step 3 — Upload the file.** Select your backup file (`.jdbak`) and enter the password
+it was encrypted with. JustDNS checks it's a real JustDNS backup and refuses anything
+else; a wrong password is reported as such. On success, all your settings, lists,
+rewrites, devices and groups come back and you land on the dashboard. An older,
+unencrypted backup still restores too — leave the password empty for it.
 
 Note: a backup never carries a login, which is why you still create an admin account
 in step 2 even when restoring.

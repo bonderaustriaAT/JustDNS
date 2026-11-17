@@ -10,7 +10,8 @@ kannst. Du siehst ihn nur einmal — bei einer frischen Installation ohne Konto.
 
 Erreiche JustDNS im Browser (die Adresse der Maschine oder des Containers, auf dem es
 läuft). Hast du schon eine [Sicherung](backup.de.md) aus einer anderen Installation,
-halte die `.json`-Datei bereit — der Assistent kann daraus wiederherstellen.
+halte die Sicherungsdatei (`.jdbak`) und ihr Passwort bereit — der Assistent kann
+daraus wiederherstellen.
 
 Oben im Assistenten liegt ein Sprachumschalter, du kannst ihn also auf Deutsch oder
 Englisch durchlaufen.
@@ -48,10 +49,12 @@ Dashboard.
 
 ## Wenn du „Aus Sicherung wiederherstellen" gewählt hast
 
-**Schritt 3 — Datei hochladen.** Wähle deine Sicherungs-`.json`. JustDNS prüft, dass es
-eine echte JustDNS-Sicherung ist, und weist alles andere ab. Bei Erfolg kommen all
-deine Einstellungen, Listen, Rewrites, Geräte und Gruppen zurück und du landest auf dem
-Dashboard.
+**Schritt 3 — Datei hochladen.** Wähle deine Sicherungsdatei (`.jdbak`) und gib das
+Passwort ein, mit dem sie verschlüsselt wurde. JustDNS prüft, dass es eine echte
+JustDNS-Sicherung ist, und weist alles andere ab; ein falsches Passwort wird als solches
+gemeldet. Bei Erfolg kommen all deine Einstellungen, Listen, Rewrites, Geräte und Gruppen
+zurück und du landest auf dem Dashboard. Eine ältere, unverschlüsselte Sicherung lässt
+sich ebenfalls wiederherstellen — lass das Passwort dafür leer.
 
 Hinweis: Eine Sicherung trägt nie einen Login — deshalb legst du auch beim
 Wiederherstellen in Schritt 2 ein Admin-Konto an.

@@ -101,9 +101,11 @@ carries the on/off settings, the hostname and the selections, not the server's
 private identity); after restoring onto a fresh box, generate or re-upload the
 certificates on the Certificates page.
 
-**Installing the self-signed CA.**
+**Installing the self-signed CA.** Download it from the
+[Certificates page](certificates.md) first — the file is named after the certificate
+(for the default, `Standard-ca.pem`). Then:
 
-- **Windows:** double-click `justdns-ca.pem` → *Install Certificate* → *Local
+- **Windows:** double-click the file → *Install Certificate* → *Local
   Machine* → *Place all certificates in the following store* → **Trusted Root
   Certification Authorities**.
 - **macOS:** open it in **Keychain Access** (System keychain), then set it to
