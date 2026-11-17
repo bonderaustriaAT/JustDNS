@@ -174,6 +174,13 @@ wird beim Start über Umgebungsvariablen gesetzt:
 | `JUSTDNS_CACHE_CAPACITY` | `10000` | Maximale Anzahl zwischengespeicherter Antworten |
 | `JUSTDNS_UPSTREAMS` | *(EU-Standard)* | Kommagetrennte Klartext-Resolver (`ip` oder `ip:port`) statt der mitgelieferten — praktisch, um auf einen lokalen Resolver zu zeigen |
 
+Der DNS-Server bindet eine einzelne Adresse. Der Standard `0.0.0.0:53` ist die
+IPv4-Wildcard, lauscht also bereits auf allen IPv4-Interfaces gleichzeitig und
+braucht keine Interface-Einstellung. Um ihn auf ein Interface zu beschränken,
+setze `JUSTDNS_LISTEN` auf dessen IPv4-Adresse, etwa `192.168.1.5:53`. Es wird
+eine Bind-Adresse unterstützt, also entweder die Wildcard (alle Interfaces) oder
+eine bestimmte Adresse.
+
 Der dauerhafte Zustand liegt im Image standardmäßig unter `/data` (Datenbank,
 `config.json`, Konto und Listen). Einmal gesetzt, ist die Konfigurationsdatei die
 maßgebliche Quelle — die Umgebung befüllt nur den ersten Start.

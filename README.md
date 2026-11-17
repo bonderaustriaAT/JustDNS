@@ -167,6 +167,13 @@ startup through environment variables:
 | `JUSTDNS_CACHE_CAPACITY` | `10000` | Max cached responses |
 | `JUSTDNS_UPSTREAMS` | *(EU defaults)* | Comma-separated plain resolvers (`ip` or `ip:port`) to use instead of the shipped ones — handy to point at a local resolver |
 
+The DNS server binds a single address. The default `0.0.0.0:53` is the IPv4
+wildcard, so it already listens on every IPv4 interface at once and needs no
+per-interface setup. To restrict it to one interface, set `JUSTDNS_LISTEN` to
+that interface's IPv4 address, for example `192.168.1.5:53`. Only one bind
+address is supported, so it is either the wildcard (all interfaces) or one
+specific address.
+
 Persistent state defaults under `/data` in the image (database, `config.json`,
 account and lists). The config file is the source of truth once set — the
 environment only seeds the first run.
