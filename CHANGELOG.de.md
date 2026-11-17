@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.37.2] - 2026-11-17
+
+- Behoben: **Eine vom Client abgebrochene TCP-Verbindung wird nicht mehr als Fehler geloggt.** Wenn
+  ein Client eine DNS-über-TCP-Verbindung einfach schloss (Reset durch Gegenstelle), während
+  JustDNS auf die nächste Nachricht wartete, erschien eine irritierende `WARN` über eine mit Fehler
+  beendete Verbindung. Das gilt nun als der saubere Abschluss, der es ist, sodass normale
+  Client-Trennungen im Protokoll ruhig bleiben.
+
 ## [0.37.0] - 2026-11-17
 
 - Neu: **Phishing-Schutz gegen Nachahmer- und frische Domains.** Blocklisten greifen nur, wenn

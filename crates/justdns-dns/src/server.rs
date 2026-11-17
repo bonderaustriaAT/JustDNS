@@ -171,8 +171,20 @@ where
         let mut length = [0u8; 2];
         match stream.read_exact(&mut length).await {
             Ok(_) => {}
-            // A clean close between messages is the normal end of a connection.
-            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
+            // The normal end of a connection, waiting for the next message: a clean
+            // close is `UnexpectedEof`, but many clients just drop the idle socket
+            // with a TCP RST (`ConnectionReset`/`ConnectionAborted`) instead of a
+            // graceful shutdown. Neither is an error worth warning about.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::UnexpectedEof
+                        | ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionAborted
+                ) =>
+            {
+                return Ok(());
+            }
             Err(error) => return Err(error),
         }
 
@@ -309,6 +321,53 @@ mod tests {
         // Closing the client ends the connection cleanly.
         drop(client);
         handler.await.unwrap().expect("clean close");
+    }
+
+    /// A stream that fails every read with `ConnectionReset`, standing in for a
+    /// client that drops its idle TCP connection with a reset instead of a clean
+    /// shutdown. Writes are a sink so the handler never blocks on them.
+    struct ResetOnRead;
+
+    impl AsyncRead for ResetOnRead {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Err(io::Error::from(ErrorKind::ConnectionReset)))
+        }
+    }
+
+    impl AsyncWrite for ResetOnRead {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<io::Result<usize>> {
+            std::task::Poll::Ready(Ok(buf.len()))
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reset_while_waiting_for_the_next_message_is_a_clean_close() {
+        // A client that resets its idle connection ends it normally, not with an
+        // error the server should warn about.
+        let pipe = pipeline(1);
+        handle_stream(ResetOnRead, &pipe, CLIENT)
+            .await
+            .expect("a reset between messages is a clean close, not an error");
     }
 
     #[tokio::test]
