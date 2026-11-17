@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.37.1] - 2026-11-17
+
+- Fixed: **Newly-registered-domain (NRD) lists now start working right after you switch them on.**
+  Until now a freshly enabled NRD feed was only registered and did not download until the next
+  background refresh up to twelve hours later, so for a while suspicious fresh domains were neither
+  marked in the log nor reported. Enabling a feed (or preset) now fetches it immediately in the
+  background, and the download timeout was raised so the larger windows have time to finish.
+
 ## [0.37.0] - 2026-11-17
 
 - Added: **Phishing protection against lookalike and fresh domains.** Block lists only catch a name

@@ -2021,13 +2021,25 @@ struct SubscriptionBody {
     kind: ListKind,
 }
 
+/// Download a just-enabled feed in the background, so it takes effect at once
+/// instead of waiting for the twelve-hour scheduled refresh. Fire-and-forget: the
+/// handler returns immediately, and the blocker and phishing detector pick the
+/// feed up when the download lands.
+fn fetch_feed_in_background(lists: &ListStore, id: String) {
+    let lists = lists.clone();
+    tokio::task::spawn_blocking(move || {
+        let _ = lists.refresh_subscription(&id);
+    });
+}
+
 async fn add_subscription(
     State(lists): State<ListStore>,
     Json(body): Json<SubscriptionBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
-    lists
+    let id = lists
         .add_subscription(&body.name, &body.url, body.kind)
         .map_err(list_error)?;
+    fetch_feed_in_background(&lists, id);
     Ok(Json(lists.view()))
 }
 
@@ -2045,6 +2057,9 @@ async fn set_subscription_enabled(
     lists
         .set_subscription_enabled(&id, body.enabled)
         .map_err(list_error)?;
+    if body.enabled {
+        fetch_feed_in_background(&lists, id);
+    }
     Ok(Json(lists.view()))
 }
 
@@ -2068,6 +2083,9 @@ async fn set_preset(
     Json(body): Json<PresetBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
     lists.set_preset(&key, body.on).map_err(list_error)?;
+    if body.on {
+        fetch_feed_in_background(&lists, format!("preset-{key}"));
+    }
     Ok(Json(lists.view()))
 }
 
