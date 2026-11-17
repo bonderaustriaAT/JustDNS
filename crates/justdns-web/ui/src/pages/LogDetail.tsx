@@ -133,6 +133,27 @@ export function LogDetail({ row }: { row: LogRow }) {
         <Field label={t("logDetail.type")} value={row.type} hint={row.typeDesc} />
         <Field label={t("logDetail.response")} value={row.rcode} hint={row.rcodeDesc} />
         <Field label={t("logDetail.source")} value={row.sourceText} />
+        {row.phishing
+          ? (() => {
+              const kindLabel =
+                row.phishing.kind === "lookalike"
+                  ? t("phishing.kindLookalike")
+                  : row.phishing.kind === "punycode"
+                    ? t("phishing.kindPunycode")
+                    : t("phishing.kindNrd");
+              const verdict = row.phishing.blocked
+                ? t("phishing.badgeBlock")
+                : t("phishing.badgeWarn");
+              const kind = row.phishing.brand ? `${kindLabel} · ${row.phishing.brand}` : kindLabel;
+              return (
+                <Field
+                  label={t("phishing.colVerdict")}
+                  value={`${kind} — ${verdict}`}
+                  hint={t("phishing.title")}
+                />
+              );
+            })()
+          : null}
         <Field label={t("logDetail.answers")} value={String(row.answers)} />
         {row.addresses.length > 0 ? (
           <Field label={t("logDetail.resolvedTo")} value={row.addresses.join(", ")} />

@@ -209,6 +209,11 @@ Aktion braucht, im Geist der HA-Peer-Verschlüsselung.
   No-Sniff, strenge Referrer-Policy und abgeriegelte Permissions-Policy auf jeder Antwort —
   standardmäßig an, nichts einzurichten. CSRF ist bereits durch das `SameSite=Strict`-
   Sitzungs-Cookie abgedeckt. Siehe [den Leitfaden](docs/guides/browser-hardening.de.md).
+- [x] **Phishing-Schutz.** Eine berechnete Erkennungsschicht neben dem Blocker: Nachahmer-Domains
+  (verwechselbare Zeichen und Punycode) gegen eine Liste geschützter Marken sowie neu registrierte
+  Domains über ein Listen-Abo. Pro Kategorie wahlweise nur warnen (Antwort unverändert, Treffer im
+  Protokoll markiert) oder blockieren. Vollständig lokal; opt-in, standardmäßig aus. Siehe
+  [den Leitfaden](docs/guides/phishing.de.md).
 - [ ] **HTTPS fürs Dashboard ab Werk.** Das Dashboard standardmäßig über TLS ausliefern
   (mit einem Zertifikat aus dem Store) und dann HSTS ergänzen.
 - [ ] **Login-Härtung.** Brute-Force-Drosselung mit selbstheilender Sperre und gehärtete

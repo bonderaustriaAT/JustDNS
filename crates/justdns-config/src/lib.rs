@@ -288,6 +288,10 @@ pub struct Notifications {
     /// [`Settings::geo_watch`] and a scope's `watch_countries`/`watch_asns`). Off
     /// by default; purely a read-path marker, never a block.
     pub on_watched_geo: bool,
+    /// Alert when the phishing protection flags a query (a lookalike/homoglyph
+    /// domain or a newly registered one). Off by default; follows whatever
+    /// [`Settings::phishing`] decides, warn or block.
+    pub on_phishing: bool,
     /// How many days before a certificate's expiry to start warning.
     pub cert_expiry_days: u32,
     /// How many blocked lookups from one device within `spike_window_mins` count
@@ -309,6 +313,7 @@ impl Default for Notifications {
             on_cert_expiry: true,
             on_device_spike: false,
             on_watched_geo: false,
+            on_phishing: false,
             cert_expiry_days: 14,
             spike_blocked_threshold: 100,
             spike_window_mins: 10,
@@ -330,6 +335,96 @@ pub struct GeoWatch {
     pub countries: Vec<String>,
     /// Watched networks, by ASN number.
     pub asns: Vec<u32>,
+}
+
+/// Whether a phishing-protection hit only warns or actively blocks. Chosen
+/// per category (lookalike domains, newly registered domains) so the user can
+/// run one as a warning and the other as a block.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PhishingMode {
+    /// Let the query resolve, but mark the hit in the log (and optionally alert).
+    /// The default — a lookalike check has false positives, so warning is safer.
+    #[default]
+    Warn,
+    /// Refuse the query like a normal block, before any upstream lookup.
+    Block,
+}
+
+/// How fresh a domain must be to count as "newly registered" for the NRD warn
+/// list. Both windows are offered so the user can trade coverage against noise.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NrdWindow {
+    /// Only very fresh domains (registered within 14 days). Less noise.
+    Days14,
+    /// Domains registered within 30 days. The default — broader coverage.
+    #[default]
+    Days30,
+}
+
+/// When the opt-in online (RDAP) registration check fires. Only ever reached
+/// when [`Phishing::online_check`] is on; it is the single place a domain name
+/// leaves the box, to a public registry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OnlineTrigger {
+    /// Only when a domain looks unknown or suspicious (not on any list, or a
+    /// lookalike hit). The default — sparing, little metadata leaves the box.
+    #[default]
+    OnSuspicion,
+    /// Never automatically; the user triggers a check for one domain by hand.
+    Manual,
+    /// Every domain that is on no list. Broadest, but the most external lookups.
+    EveryUnknown,
+}
+
+/// Phishing protection: detect domains built to impersonate known brands
+/// (lookalike/homoglyph and Punycode) and warn about newly registered domains.
+/// Both run as a computed read-path marker by default (never changing the
+/// answer), or can be switched to blocking per category. Part of [`Settings`],
+/// so it syncs across an HA cluster as one unit. Off by default.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Phishing {
+    /// Run phishing protection at all. Off by default.
+    pub enabled: bool,
+    /// Whether a lookalike/homoglyph hit warns or blocks.
+    pub homoglyph_mode: PhishingMode,
+    /// Extra brands the user protects, by their canonical domain (e.g.
+    /// `meine-firma.at`). Added on top of the compiled-in catalogue.
+    pub brands: Vec<String>,
+    /// Compiled-in brands the user has switched off, by catalogue id, so a
+    /// shipped brand can be removed without losing it on the next update.
+    pub disabled_builtin_brands: Vec<String>,
+    /// Warn about (or block) newly registered domains.
+    pub nrd_enabled: bool,
+    /// Whether an NRD hit warns or blocks.
+    pub nrd_mode: PhishingMode,
+    /// How fresh a domain must be to count as newly registered.
+    pub nrd_window: NrdWindow,
+    /// Opt-in: look a domain's registration date up online (RDAP) when the local
+    /// lists do not know it. Off by default — the only path a domain name leaves
+    /// the box.
+    pub online_check: bool,
+    /// When the online check fires (only consulted when `online_check` is on).
+    pub online_trigger: OnlineTrigger,
+}
+
+impl Default for Phishing {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            homoglyph_mode: PhishingMode::Warn,
+            brands: Vec::new(),
+            disabled_builtin_brands: Vec::new(),
+            nrd_enabled: false,
+            nrd_mode: PhishingMode::Warn,
+            nrd_window: NrdWindow::Days30,
+            online_check: false,
+            online_trigger: OnlineTrigger::OnSuspicion,
+        }
+    }
 }
 
 /// When scheduled summary reports are generated. Both cadences are off by
@@ -460,6 +555,10 @@ pub struct Settings {
     /// marks a country or network.
     #[serde(default)]
     pub geo_watch: GeoWatch,
+    /// Phishing protection (lookalike/homoglyph and newly-registered-domain
+    /// detection). Off by default.
+    #[serde(default)]
+    pub phishing: Phishing,
 }
 
 impl Default for Settings {
@@ -491,6 +590,7 @@ impl Default for Settings {
             cluster: Cluster::default(),
             metrics_token: String::new(),
             geo_watch: GeoWatch::default(),
+            phishing: Phishing::default(),
         }
     }
 }
@@ -1148,6 +1248,7 @@ mod tests {
                 on_cert_expiry: true,
                 on_device_spike: true,
                 on_watched_geo: false,
+                on_phishing: false,
                 cert_expiry_days: 7,
                 spike_blocked_threshold: 250,
                 spike_window_mins: 5,
@@ -1290,10 +1391,12 @@ mod tests {
         assert!(Settings::default().geo_watch.asns.is_empty());
         assert!(!Settings::default().notifications.on_watched_geo);
 
-        let mut settings = Settings::default();
-        settings.geo_watch = GeoWatch {
-            countries: vec!["ru".to_owned(), "cn".to_owned()],
-            asns: vec![13335],
+        let mut settings = Settings {
+            geo_watch: GeoWatch {
+                countries: vec!["ru".to_owned(), "cn".to_owned()],
+                asns: vec![13335],
+            },
+            ..Default::default()
         };
         settings.notifications.on_watched_geo = true;
         let json = serde_json::to_string(&settings).unwrap();
@@ -1307,5 +1410,59 @@ mod tests {
         let legacy: Settings = serde_json::from_str(r#"{"instanceName":"Old"}"#).unwrap();
         assert!(legacy.geo_watch.countries.is_empty());
         assert!(!legacy.notifications.on_watched_geo);
+    }
+
+    #[test]
+    fn phishing_defaults_off_and_round_trips() {
+        let defaults = Settings::default().phishing;
+        assert!(!defaults.enabled);
+        assert!(!defaults.nrd_enabled);
+        assert!(!defaults.online_check, "online check is opt-in");
+        assert_eq!(defaults.homoglyph_mode, PhishingMode::Warn);
+        assert_eq!(defaults.nrd_mode, PhishingMode::Warn);
+        assert_eq!(defaults.nrd_window, NrdWindow::Days30);
+        assert_eq!(defaults.online_trigger, OnlineTrigger::OnSuspicion);
+        assert!(defaults.brands.is_empty() && defaults.disabled_builtin_brands.is_empty());
+        assert!(!Settings::default().notifications.on_phishing);
+
+        let mut settings = Settings {
+            phishing: Phishing {
+                enabled: true,
+                homoglyph_mode: PhishingMode::Block,
+                brands: vec!["meine-firma.at".to_owned()],
+                disabled_builtin_brands: vec!["netflix".to_owned()],
+                nrd_enabled: true,
+                nrd_mode: PhishingMode::Warn,
+                nrd_window: NrdWindow::Days14,
+                online_check: true,
+                online_trigger: OnlineTrigger::EveryUnknown,
+            },
+            ..Default::default()
+        };
+        settings.notifications.on_phishing = true;
+
+        let json = serde_json::to_string(&settings).unwrap();
+        // camelCase field, lowercase mode, kebab-case trigger on the wire.
+        assert!(json.contains("\"phishing\":{"), "{json}");
+        assert!(json.contains("\"homoglyphMode\":\"block\""), "{json}");
+        assert!(json.contains("\"nrdWindow\":\"days14\""), "{json}");
+        assert!(
+            json.contains("\"onlineTrigger\":\"every-unknown\""),
+            "{json}"
+        );
+        assert!(json.contains("\"onPhishing\":true"), "{json}");
+
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn older_config_without_phishing_loads_with_defaults() {
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        let phishing = store.get().phishing;
+        assert!(!phishing.enabled && !phishing.nrd_enabled && !phishing.online_check);
+        assert!(!store.get().notifications.on_phishing);
     }
 }

@@ -126,6 +126,82 @@ export interface ServerSettings {
   /// Globally watched countries and networks (Privacy "where do my devices phone
   /// home" map). Empty by default. Optional on the wire (an older server omits it).
   geoWatch?: GeoWatch;
+  /// Phishing protection (homoglyph/Punycode brand imitation + newly registered
+  /// domains). Off by default. Optional on the wire (an older server omits it).
+  phishing?: Phishing;
+}
+
+/** Warn only (mark the query) or block it outright, chosen per category. Matches
+ *  the Rust `PhishingMode`. */
+export type PhishingMode = "warn" | "block";
+
+/** How old a domain may be and still count as newly registered for the online
+ *  (RDAP) check. Matches the Rust `NrdWindow`. */
+export type NrdWindow = "days14" | "days30";
+
+/** When the opt-in online (RDAP) check fires. Matches the Rust `OnlineTrigger`. */
+export type OnlineTrigger = "on-suspicion" | "manual" | "every-unknown";
+
+/** Phishing-protection settings. Lookalike/Punycode detection against a shipped
+ *  brand catalogue (plus the user's own), and a newly-registered-domain warn set
+ *  from the warn feeds, each able to warn or block. Matches the Rust `Phishing`
+ *  (camelCase on the wire). */
+export interface Phishing {
+  /** Master switch: nothing is checked when off. */
+  enabled: boolean;
+  /** Warn or block on a lookalike/Punycode brand imitation. */
+  homoglyphMode: PhishingMode;
+  /** The user's own protected brands, by canonical domain (e.g. `meine-firma.at`). */
+  brands: string[];
+  /** Shipped brand ids the user switched off. */
+  disabledBuiltinBrands: string[];
+  /** Whether newly-registered-domain warning is on. */
+  nrdEnabled: boolean;
+  /** Warn or block on a newly-registered-domain hit. */
+  nrdMode: PhishingMode;
+  /** The age window for the online (RDAP) NRD check. */
+  nrdWindow: NrdWindow;
+  /** Whether the opt-in online (RDAP) age check is on. Off by default. */
+  onlineCheck: boolean;
+  /** When the online check fires (only consulted when `onlineCheck` is on). */
+  onlineTrigger: OnlineTrigger;
+}
+
+/** Default phishing settings, mirroring the Rust `Phishing::default`: everything
+ *  off, warn modes, 30-day window, on-suspicion trigger. Backfills an older
+ *  server that does not send the field. */
+export const DEFAULT_PHISHING: Phishing = {
+  enabled: false,
+  homoglyphMode: "warn",
+  brands: [],
+  disabledBuiltinBrands: [],
+  nrdEnabled: false,
+  nrdMode: "warn",
+  nrdWindow: "days30",
+  onlineCheck: false,
+  onlineTrigger: "on-suspicion",
+};
+
+/** One shipped phishing brand, grouped for the dashboard. From
+ *  `GET /api/phishing/brands`. */
+export interface PhishingBrand {
+  id: string;
+  name: string;
+  /** `tech-mail`, `banks-at` or `banks-de`. */
+  group: string;
+}
+
+/** The kind of phishing signal recorded on a query. Matches the Rust
+ *  `PhishingKind` (snake_case on the wire). */
+export type PhishingKind = "lookalike" | "punycode" | "nrd";
+
+/** The phishing verdict recorded on a query, when the detector fired: which
+ *  signal, whether it was blocked (vs only warned), and the imitated brand for a
+ *  lookalike/Punycode hit. Matches the Rust `PhishingFlag`. */
+export interface PhishingFlag {
+  kind: PhishingKind;
+  blocked: boolean;
+  brand?: string;
 }
 
 /** The globally watched countries and networks: answers that resolve into one are
@@ -485,6 +561,9 @@ export interface NotificationSettings {
   /// Alert when an answer resolves into a watched country or network. Off by
   /// default. Optional on the wire (an older server omits it).
   onWatchedGeo?: boolean;
+  /// Alert when the phishing detector warns or blocks a query. Off by default.
+  /// Optional on the wire (an older server omits it).
+  onPhishing?: boolean;
   certExpiryDays: number;
   spikeBlockedThreshold: number;
   spikeWindowMins: number;
@@ -503,6 +582,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   onCertExpiry: true,
   onDeviceSpike: false,
   onWatchedGeo: false,
+  onPhishing: false,
   certExpiryDays: 14,
   spikeBlockedThreshold: 100,
   spikeWindowMins: 10,
@@ -534,6 +614,8 @@ export interface QueryRow {
   device_name?: string;
   /** The DNSSEC verdict, present only when validation recorded one. */
   dnssec?: DnssecStatus;
+  /** The phishing verdict, present only when the detector fired on this query. */
+  phishing?: PhishingFlag;
   /** The node this row came from in a high-availability cluster: absent for this
    *  node's own queries, a peer's node id for one pulled over the mesh. */
   origin?: string;
@@ -614,7 +696,7 @@ export interface ClassifyResult {
 }
 
 /** Whether a list adds names to the allow set or the block set. */
-export type ListKind = "allow" | "block";
+export type ListKind = "allow" | "block" | "warn";
 
 /** A subscription to an external feed, with the status of its last fetch. */
 export interface Subscription {
@@ -641,7 +723,7 @@ export interface Preset {
   /** False-positive risk on a 1 (negligible) to 5 (high) scale. */
   fpLevel: number;
   /** Coarse grouping for the catalogue filter. */
-  category: "ads" | "security" | "privacy" | "bypass" | "allow";
+  category: "ads" | "security" | "privacy" | "bypass" | "nrd" | "allow";
   /** Whether JustDNS marks this as a recommended starting choice (badge in the
    *  catalogue). Optional on the wire: an older server omits it. */
   recommended?: boolean;
@@ -1374,6 +1456,10 @@ export const api = {
     if (status) params.set("status", status);
     return getJson<DnssecResponse>(`/api/dnssec?${params}`, signal);
   },
+  /** The shipped phishing brand catalogue, grouped-ready, so the Phishing page can
+   *  render the built-in brands and let the user switch individual ones off. */
+  phishingBrands: (signal?: AbortSignal) =>
+    getJson<PhishingBrand[]>("/api/phishing/brands", signal),
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/api/settings", signal),
   saveSettings: (settings: ServerSettings, signal?: AbortSignal) =>
     putJson<ServerSettings>("/api/settings", settings, signal),

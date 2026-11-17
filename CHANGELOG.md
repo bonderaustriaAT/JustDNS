@@ -3,6 +3,20 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.37.0] - 2026-11-17
+
+- Added: **Phishing protection against lookalike and fresh domains.** Block lists only catch a name
+  that is already on them, which barely helps against targeted phishing through freshly registered
+  lookalike domains. JustDNS now also checks queries by **computation**: for confusable characters
+  and Punycode against a list of protected brands (Tech & Mail, Banks AT and DE, plus your own) and,
+  through a list subscription, for **newly registered domains** (NRD). Per category you choose
+  between **warn only** (the answer is unchanged, the hit is just marked in the log and optionally
+  reported over a webhook) and **block**. Detection runs fully locally; the NRD feeds (source
+  HaGeZi, GPLv3) are clickable as individual time windows, from the smallest 7-day window up to 28
+  days. A new *Phishing protection* menu entry sits under DNSSEC, and hits show up as a badge in the
+  query log. Off by default, and changes take effect immediately with no restart. (An optional
+  online check of the registration date over RDAP is prepared but not yet exposed in the dashboard.)
+
 ## [0.36.0] - 2026-11-15
 
 - Added: **Uncloak CNAME-cloaked trackers.** Some trackers hide as a CNAME on a seemingly

@@ -736,6 +736,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 
@@ -886,6 +887,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 
@@ -1051,6 +1053,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 
@@ -1112,6 +1115,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: Some(resolver.to_owned()),
             dnssec: None,
+            phishing: None,
         }
     }
 

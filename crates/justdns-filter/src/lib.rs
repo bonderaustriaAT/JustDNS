@@ -13,10 +13,15 @@
 //! that fetches the large community feeds and merges them on top of these.
 
 mod domain;
+mod phishing;
 mod services;
 mod trackers;
 
 pub use domain::{DomainSet, parse_rule};
+pub use phishing::{
+    BRANDS, Brand, BrandGroup, PhishingConfig, PhishingDetector, PhishingHit, PhishingKind,
+    PhishingMode,
+};
 pub use services::{SERVICE_PREFIX, Service, service, services};
 pub use trackers::{
     CATEGORIES as TRACKER_CATEGORIES, Tracker, classify as classify_tracker,

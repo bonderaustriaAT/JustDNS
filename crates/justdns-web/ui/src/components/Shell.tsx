@@ -49,6 +49,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M9 12l2 2 4-4" strokeLinecap="round" />
     </svg>
   ),
+  phishing: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
+      <path d="M12 8v3.5" strokeLinecap="round" />
+      <path d="M12 14.5v.01" strokeLinecap="round" />
+    </svg>
+  ),
   privacy: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 3l7 3v5c0 4.2-2.8 7.4-7 9-4.2-1.6-7-4.8-7-9V6l7-3z" />
@@ -531,6 +538,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <NavRow to="/protokoll" icon="log" label={t("nav.log")} />
               <NavRow to="/privatsphaere" icon="privacy" label={t("nav.privacy")} />
               <NavRow to="/dnssec" icon="dnssec" label={t("nav.dnssec")} />
+              <NavRow to="/phishing" icon="phishing" label={t("nav.phishing")} />
             </div>
 
             <NavGroup icon="rules" label={t("nav.sectionRules")} active={onRules}>

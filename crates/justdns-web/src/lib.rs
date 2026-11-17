@@ -605,6 +605,7 @@ fn router(state: AppState) -> Router {
         .route("/api/privacy/block", post(privacy_block))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
+        .route("/api/phishing/brands", get(phishing_brands))
         .route("/api/settings", get(get_settings).put(put_settings))
         .route("/api/classify", get(classify))
         .route("/api/lists", get(get_lists))
@@ -2304,6 +2305,66 @@ fn service_catalog(config: &ConfigStore) -> Vec<ServiceRow> {
 /// The blockable-services catalogue with each service's global-default state.
 async fn get_services(State(config): State<ConfigStore>) -> Json<Vec<ServiceRow>> {
     Json(service_catalog(&config))
+}
+
+/// The most custom phishing brands one instance keeps. A generous ceiling that
+/// still bounds the detector rebuild, which folds every brand to a skeleton on
+/// each config change.
+const MAX_PHISHING_BRANDS: usize = 200;
+
+/// Clean the phishing settings a client sent before they are stored: the custom
+/// brands are trimmed, lower-cased, de-duplicated and capped, and the disabled
+/// built-in ids are kept only when they name a real catalogue brand. The UI
+/// already does this, so this guards a direct API client (or a synced peer) from
+/// storing blank, duplicate or unbounded lists the detector would rebuild over.
+fn sanitize_phishing(phishing: &mut justdns_config::Phishing) {
+    let mut seen = std::collections::HashSet::new();
+    phishing.brands = phishing
+        .brands
+        .iter()
+        .map(|brand| brand.trim().to_lowercase())
+        .filter(|brand| !brand.is_empty() && seen.insert(brand.clone()))
+        .take(MAX_PHISHING_BRANDS)
+        .collect();
+
+    let mut seen_ids = std::collections::HashSet::new();
+    phishing.disabled_builtin_brands = phishing
+        .disabled_builtin_brands
+        .iter()
+        .filter(|id| {
+            justdns_filter::BRANDS
+                .iter()
+                .any(|brand| brand.id == id.as_str())
+        })
+        .filter(|id| seen_ids.insert((*id).clone()))
+        .cloned()
+        .collect();
+}
+
+/// One shipped phishing brand, as the dashboard shows it: a stable id, a display
+/// name, and the group it is listed under (tech-mail, banks-at, banks-de).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrandRow {
+    id: String,
+    name: String,
+    group: String,
+}
+
+/// The compiled-in phishing brand catalogue, grouped-ready, so the dashboard can
+/// render the shipped brands and let the user switch individual ones off. Static
+/// read-only data: no settings, open to any viewer.
+async fn phishing_brands() -> Json<Vec<BrandRow>> {
+    Json(
+        justdns_filter::BRANDS
+            .iter()
+            .map(|brand| BrandRow {
+                id: brand.id.to_owned(),
+                name: brand.name.to_owned(),
+                group: brand.group.as_str().to_owned(),
+            })
+            .collect(),
+    )
 }
 
 /// Turn a service on or off in the global default.
@@ -5392,8 +5453,9 @@ fn redact_settings_secrets(settings: &mut Settings) {
 async fn put_settings(
     State(state): State<AppState>,
     identity: Identity,
-    Json(settings): Json<Settings>,
+    Json(mut settings): Json<Settings>,
 ) -> Result<Json<Settings>, (StatusCode, String)> {
+    sanitize_phishing(&mut settings.phishing);
     state
         .config
         .set(settings)
@@ -7419,6 +7481,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 

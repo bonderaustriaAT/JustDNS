@@ -29,7 +29,9 @@ use justdns_dns::router::{Router, SharedRouter};
 use justdns_dns::server::Server;
 use justdns_dns::tls::TlsManager;
 use justdns_dns::upstream::{Upstream, UpstreamConfig};
-use justdns_filter::{Blocker, PolicyEngine};
+use justdns_filter::{
+    Blocker, DomainSet, PhishingConfig, PhishingDetector, PhishingMode, PolicyEngine,
+};
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
 use justdns_schedule::ScheduleStore;
@@ -280,12 +282,19 @@ async fn main() -> ExitCode {
         &schedules,
         &config_store.get(),
     );
+    // The phishing detector the pipeline consults: brand lookalike/Punycode
+    // imitations plus the newly-registered-domain warn set from the warn feeds.
+    // Rebuilt live when the phishing settings or the warn feeds change, like the
+    // policy engine, so a dashboard edit takes effect on the next query.
+    let phishing_detector = Arc::new(PhishingDetector::new());
+    configure_phishing(&phishing_detector, &config_store.get(), &lists);
     {
         let engine = policy_engine.clone();
         let lists_handle = lists.clone();
         let clients_handle = clients.clone();
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
+        let detector = phishing_detector.clone();
         lists.on_change(move || {
             rebuild_policies(
                 &engine,
@@ -294,6 +303,9 @@ async fn main() -> ExitCode {
                 &schedules_handle,
                 &config_handle.get(),
             );
+            // The warn feeds live in the lists store, so a list change can change
+            // the detector's NRD set too.
+            configure_phishing(&detector, &config_handle.get(), &lists_handle);
         });
     }
     {
@@ -378,6 +390,7 @@ async fn main() -> ExitCode {
     )
     .with_observer(observer)
     .with_policy_engine(policy_engine.clone())
+    .with_phishing_detector(phishing_detector.clone())
     .with_rewriter(rewriter.clone());
     let server = Server::new(pipeline);
 
@@ -460,6 +473,7 @@ async fn main() -> ExitCode {
         let block_page = block_page.clone();
         let dnssec_validate = dnssec_validate.clone();
         let status = status.clone();
+        let detector = phishing_detector.clone();
         config_store.on_change(move |settings| {
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams, dnssec_validate.clone()));
@@ -471,6 +485,9 @@ async fn main() -> ExitCode {
                 &schedules_handle,
                 settings,
             );
+            // Rebuild the phishing detector from the new settings (brands, modes,
+            // NRD on/off) over the current warn set.
+            configure_phishing(&detector, settings, &lists_handle);
             // Start/stop the encrypted-DNS listeners and apply the selected
             // certificates to match the new settings.
             if let Some(supervisor) = &supervisor {
@@ -649,6 +666,32 @@ fn rebuild_policies(
     let tz = justdns_schedule::parse_tz(&settings.timezone);
     let active = justdns_schedule::active_now(&snapshot, tz);
     policy::rebuild(engine, lists, clients, settings, &active);
+}
+
+/// (Re)build the phishing detector from the current settings and the resolved
+/// newly-registered-domain warn set, so a change to either takes effect on the
+/// next query without a restart. The warn set is the union of the enabled warn
+/// feeds; it never enters the blocking policy.
+fn configure_phishing(detector: &PhishingDetector, settings: &Settings, lists: &ListStore) {
+    let nrd = lists.resolved().warn;
+    detector.configure(phishing_config(&settings.phishing, nrd));
+}
+
+/// Map the stored phishing settings plus the warn set into the detector's config.
+fn phishing_config(phishing: &justdns_config::Phishing, nrd: DomainSet) -> PhishingConfig {
+    let mode = |mode: justdns_config::PhishingMode| match mode {
+        justdns_config::PhishingMode::Warn => PhishingMode::Warn,
+        justdns_config::PhishingMode::Block => PhishingMode::Block,
+    };
+    PhishingConfig {
+        enabled: phishing.enabled,
+        homoglyph_mode: mode(phishing.homoglyph_mode),
+        nrd_enabled: phishing.nrd_enabled,
+        nrd_mode: mode(phishing.nrd_mode),
+        extra_brands: phishing.brands.clone(),
+        disabled_builtin: phishing.disabled_builtin_brands.clone(),
+        nrd,
+    }
 }
 
 /// Start the background task that re-evaluates the schedules each minute. When the

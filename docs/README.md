@@ -22,6 +22,7 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [Country & network of answers (GeoIP)](guides/geoip.md) | See the country and network (ASN) behind every answer, offline |
 | [World map & watched networks](guides/world-map.md) | A world map of where your devices phone home; watch a country or network to flag and alert on it |
 | [DNSSEC validation](guides/dnssec.md) | Check answer signatures and refuse tampered replies |
+| [Phishing protection](guides/phishing.md) | Catch lookalike domains (confusable characters, Punycode) and newly registered domains, and warn or block as you choose |
 | [Block & allow lists](guides/lists.md) | Block ads/malware, subscribe to feeds, allow or block single domains |
 | [Blocked services](guides/blocked-services.md) | Block whole services (TikTok, YouTube, …) with one switch, globally or per scope |
 | [Block page](guides/block-page.md) | Show a blocked device an explaining page over HTTP and HTTPS, instead of an empty error |

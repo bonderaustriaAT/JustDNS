@@ -356,6 +356,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 
