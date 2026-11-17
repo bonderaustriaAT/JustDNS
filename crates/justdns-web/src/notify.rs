@@ -51,8 +51,9 @@ const PHISHING_WINDOW_MS: i64 = 5 * 60 * 1_000;
 /// How many recent events a phishing pass reads at most, bounding the scan on a
 /// very busy instance.
 const PHISHING_SCAN_LIMIT: usize = 20_000;
-/// Per-(name, kind, mode) cooldown: a name that keeps getting looked up alerts at
-/// most once an hour rather than every pass.
+/// Per-(device, registrable domain, kind, mode) cooldown: one site a device keeps
+/// looking up alerts at most once an hour rather than every pass, so an open page
+/// does not spam the webhook.
 const PHISHING_COOLDOWN_MS: i64 = 60 * 60 * 1_000;
 
 /// Post `title`/`body` to the configured webhook, in the shape its format expects.
@@ -213,8 +214,8 @@ struct AlertState {
     /// `"<client>|<country?>|<asn?>"` → last watched-geo alert time (ms), for a
     /// per-device, per-network cooldown.
     watched_last_ms: HashMap<String, i64>,
-    /// `"<name>|<kind>|<mode>"` → last phishing alert time (ms), for a
-    /// per-name cooldown.
+    /// `"<root>|<kind>|<mode>|<client>"` → last phishing alert time (ms), for a
+    /// per-device, per-registrable-domain cooldown.
     phishing_last_ms: HashMap<String, i64>,
 }
 
@@ -561,29 +562,48 @@ impl AlertEvaluator {
             }
         };
 
+        // Resolve device names once so an alert can name the device, not only its
+        // address, matching how the query log labels it.
+        let resolver = ClientResolver::new(self.clients.view());
+
         for row in &rows {
             let Some(flag) = &row.event.phishing else {
                 continue;
             };
             let (kind_key, kind_text) = match flag.kind {
-                PhishingKind::Lookalike => ("lookalike", describe_brand("Lookalike", &flag.brand)),
-                PhishingKind::Punycode => ("punycode", describe_brand("Punycode", &flag.brand)),
-                PhishingKind::Nrd => ("nrd", "neu registrierte Domain".to_owned()),
+                PhishingKind::Lookalike => ("lookalike", describe_lookalike(&flag.brand)),
+                PhishingKind::Punycode => ("punycode", describe_punycode(&flag.brand)),
+                PhishingKind::Nrd => ("nrd", "neu registriert".to_owned()),
             };
             let mode_key = if flag.blocked { "block" } else { "warn" };
-            let dedup = format!("{}|{kind_key}|{mode_key}", row.event.name);
+            // De-dupe per (device, registrable domain, kind, mode): one open page
+            // re-resolving www./apex/cdn sub-hosts of the same site raises a single
+            // alert per device, not one per distinct sub-host.
+            let root = registrable_root(&row.event.name);
+            let dedup = format!("{root}|{kind_key}|{mode_key}|{}", row.event.client);
             if let Some(last) = state.phishing_last_ms.get(&dedup) {
                 if now - last < PHISHING_COOLDOWN_MS {
                     continue;
                 }
             }
             state.phishing_last_ms.insert(dedup, now);
-            let action = if flag.blocked { "blockiert" } else { "gewarnt" };
+            let device = resolver
+                .name_for(row.event.client)
+                .map(|name| format!("{name} ({})", row.event.client))
+                .unwrap_or_else(|| row.event.client.to_string());
+            let (title, tail) = if flag.blocked {
+                ("JustDNS: Phishing blockiert", "Antwort blockiert.")
+            } else {
+                (
+                    "JustDNS: Phishing-Warnung",
+                    "Nur markiert, nicht blockiert.",
+                )
+            };
             out.push((
-                "JustDNS: Phishing-Verdacht".to_owned(),
+                title.to_owned(),
                 format!(
-                    "{} ({kind_text}) wurde {action} (Gerät {}).",
-                    row.event.name, row.event.client
+                    "Verdächtige Domain {} ({kind_text}). Angefragt von {device}. {tail}",
+                    row.event.name
                 ),
             ));
         }
@@ -618,13 +638,53 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Describe a lookalike/Punycode hit for an alert body: the kind plus the imitated
-/// brand when one is known (e.g. `Lookalike von PayPal`).
-fn describe_brand(kind: &str, brand: &Option<String>) -> String {
+/// Describe a lookalike hit for an alert body: the imitated brand when known,
+/// otherwise a plain label.
+fn describe_lookalike(brand: &Option<String>) -> String {
     match brand {
-        Some(brand) => format!("{kind} von {brand}"),
-        None => kind.to_owned(),
+        Some(brand) => format!("sieht aus wie {brand}"),
+        None => "Nachahmer-Domain".to_owned(),
     }
+}
+
+/// Describe a Punycode hit for an alert body: the imitated brand when known,
+/// otherwise a plain label.
+fn describe_punycode(brand: &Option<String>) -> String {
+    match brand {
+        Some(brand) => format!("Punycode, sieht aus wie {brand}"),
+        None => "Punycode-Nachahmung".to_owned(),
+    }
+}
+
+/// Widespread two-label public suffixes, so a host under one keeps its own
+/// registrable label (e.g. `shop.co.uk` stays `shop.co.uk`, not `co.uk`). Not the
+/// full public-suffix list — just the common ones — which is enough to collapse
+/// the sub-hosts of one site for alert de-duplication.
+const MULTI_LABEL_SUFFIXES: &[&str] = &[
+    "co.uk", "org.uk", "me.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "org.nz",
+    "co.za", "co.jp", "or.jp", "ne.jp", "com.br", "com.tr", "co.in", "co.kr", "com.cn", "com.mx",
+    "com.ar", "com.sg", "com.hk",
+];
+
+/// The registrable domain of `host`: enough labels to identify one site, so that
+/// `www.0-100.ch`, `0-100.ch` and `cdn.0-100.ch` share one value and a page that
+/// re-resolves many sub-hosts raises a single alert. Uses a short list of common
+/// two-label public suffixes; otherwise the last two labels, which is correct for
+/// the single-label TLDs (`.ch`, `.de`, `.at`, …) this sees in practice.
+fn registrable_root(host: &str) -> String {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = host.split('.').filter(|label| !label.is_empty()).collect();
+    if labels.len() <= 2 {
+        return host;
+    }
+    let last_two = format!("{}.{}", labels[labels.len() - 2], labels[labels.len() - 1]);
+    let take = if MULTI_LABEL_SUFFIXES.contains(&last_two.as_str()) {
+        3
+    } else {
+        2
+    };
+    let start = labels.len().saturating_sub(take);
+    labels[start..].join(".")
 }
 
 /// A short English label for a resolved network, for the alert body — e.g.
@@ -657,6 +717,18 @@ mod tests {
             webhook_format: format,
             ..Notifications::default()
         }
+    }
+
+    #[test]
+    fn registrable_root_collapses_sub_hosts_to_one_site() {
+        assert_eq!(registrable_root("www.0-100.ch"), "0-100.ch");
+        assert_eq!(registrable_root("0-100.ch"), "0-100.ch");
+        assert_eq!(registrable_root("cdn.0-100.ch"), "0-100.ch");
+        assert_eq!(registrable_root("0-100.ch."), "0-100.ch");
+        assert_eq!(registrable_root("WWW.0-100.CH"), "0-100.ch");
+        // A two-label public suffix keeps the site's own label.
+        assert_eq!(registrable_root("shop.example.co.uk"), "example.co.uk");
+        assert_eq!(registrable_root("example.co.uk"), "example.co.uk");
     }
 
     #[test]
