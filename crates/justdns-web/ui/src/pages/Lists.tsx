@@ -434,14 +434,17 @@ export function Lists({ section }: { section: ListsSection }) {
 
   const feeds = view.subscriptions.filter((sub) => !sub.preset);
 
+  // The NRD warn feeds are managed on the Phishing-Schutz page, not here, so they
+  // never appear in the block/allow catalogue.
+  const catalogPresets = view.presets.filter((preset) => preset.kind !== "warn");
   // Build the filter chips from the categories actually present, each with its
   // count, so the bar mirrors the catalogue. "Alle" always leads.
-  const categoryCounts = view.presets.reduce<Record<string, number>>((acc, preset) => {
+  const categoryCounts = catalogPresets.reduce<Record<string, number>>((acc, preset) => {
     acc[preset.category] = (acc[preset.category] ?? 0) + 1;
     return acc;
   }, {});
   const filterChips = [
-    { key: "all", label: t("lists.filterAll"), count: view.presets.length },
+    { key: "all", label: t("lists.filterAll"), count: catalogPresets.length },
     ...CATEGORY_ORDER.filter((category) => categoryCounts[category]).map((category) => ({
       key: category,
       label: t(`category.${category}` as MessageKey),
@@ -450,7 +453,7 @@ export function Lists({ section }: { section: ListsSection }) {
   ];
   // Recommended lists lead the catalogue, the JustDNS list always first, so a new
   // user meets the sensible picks (and our own) before the long tail.
-  const orderedPresets = [...view.presets].sort((a, b) => presetRank(a) - presetRank(b));
+  const orderedPresets = [...catalogPresets].sort((a, b) => presetRank(a) - presetRank(b));
   const visiblePresets =
     presetFilter === "all"
       ? orderedPresets

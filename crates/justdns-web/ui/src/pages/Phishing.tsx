@@ -15,6 +15,7 @@ import {
 } from "../lib/api";
 import { displayName } from "../lib/dns";
 import { useI18n } from "../lib/i18n";
+import type { MessageKey } from "../lib/messages";
 import styles from "./Phishing.module.css";
 
 /** Debounce before persisting a settings edit, so dragging a toggle or typing a
@@ -379,8 +380,12 @@ export function Phishing() {
                         {nrdPresets.map((preset) => (
                           <li key={preset.key} className={styles.feed}>
                             <div className={styles.feedText}>
-                              <span className={styles.feedName}>{preset.name}</span>
-                              <span className={styles.feedDesc}>{preset.description}</span>
+                              <span className={styles.feedName}>
+                                {t(`phishing.feed.${preset.key}.name` as MessageKey)}
+                              </span>
+                              <span className={styles.feedDesc}>
+                                {t(`phishing.feed.${preset.key}.desc` as MessageKey)}
+                              </span>
                             </div>
                             <Toggle
                               checked={preset.active && preset.enabled}

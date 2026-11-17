@@ -12,6 +12,15 @@ Format Jahr-Monat-Tag.
   beendete Verbindung. Das gilt nun als der saubere Abschluss, der es ist, sodass normale
   Client-Trennungen im Protokoll ruhig bleiben.
 
+## [0.37.1] - 2026-11-17
+
+- Behoben: **Listen für neu registrierte Domains (NRD) wirken jetzt direkt nach dem Einschalten.**
+  Bisher wurde ein frisch aktivierter NRD-Feed nur registriert und erst beim nächsten
+  Hintergrund-Refresh bis zu zwölf Stunden später geladen — bis dahin wurden verdächtige frische
+  Domains weder im Protokoll markiert noch gemeldet. Das Einschalten eines Feeds (oder Presets)
+  lädt ihn nun sofort im Hintergrund, und das Download-Zeitlimit wurde erhöht, damit die größeren
+  Fenster genug Zeit zum Abschließen haben.
+
 ## [0.37.0] - 2026-11-17
 
 - Neu: **Phishing-Schutz gegen Nachahmer- und frische Domains.** Blocklisten greifen nur, wenn
