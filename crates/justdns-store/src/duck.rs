@@ -16,7 +16,7 @@ use duckdb::{Connection, ToSql, params, params_from_iter};
 
 use std::collections::HashMap;
 
-use crate::event::{DnssecStatus, QueryEvent, QuerySource};
+use crate::event::{DnssecStatus, PhishingFlag, QueryEvent, QuerySource};
 use crate::recorder::{HourBucket, LATENCY_BOUNDS_MS, Stats};
 
 /// One hour in milliseconds, used to bucket activity in SQL.
@@ -36,7 +36,8 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
     addresses     VARCHAR DEFAULT '',
     resolver      VARCHAR DEFAULT '',
     dnssec        VARCHAR DEFAULT '',
-    origin        VARCHAR DEFAULT ''
+    origin        VARCHAR DEFAULT '',
+    phishing      VARCHAR DEFAULT ''
 );";
 
 /// Schema upgrades for a log written by an older build, applied in order. Each
@@ -49,15 +50,18 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
 /// (the only kind before high-availability query-log sync), or a peer's node id
 /// for a row pulled from that peer over the mesh. It lets the history show each
 /// row's node and keeps the node-local views (rehydrated from `origin = ''`)
-/// apart from the unioned explorer.
+/// apart from the unioned explorer. `phishing` holds the phishing detector's
+/// verdict for a row — empty when it did not fire — so the history can show the
+/// warn/block marker the live view does.
 const MIGRATIONS: &str = "\
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS addresses VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS resolver VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS dnssec VARCHAR DEFAULT '';
-    ALTER TABLE queries ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT '';";
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT '';
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS phishing VARCHAR DEFAULT '';";
 
 const SELECT_COLUMNS: &str = "at_ms, client, name, record_type, response_code, source, \
-    duration_ms, answers, addresses, resolver, dnssec";
+    duration_ms, answers, addresses, resolver, dnssec, phishing";
 
 /// Errors from the DuckDB query log.
 #[derive(Debug, thiserror::Error)]
@@ -122,6 +126,11 @@ impl DuckStore {
             let addresses = join_addresses(&event.addresses);
             let resolver = event.resolver.as_deref().unwrap_or("");
             let dnssec = event.dnssec.map(DnssecStatus::label).unwrap_or("");
+            let phishing = event
+                .phishing
+                .as_ref()
+                .map(PhishingFlag::label)
+                .unwrap_or_default();
             appender.append_row(params![
                 event.at_ms,
                 client,
@@ -135,6 +144,7 @@ impl DuckStore {
                 resolver,
                 dnssec,
                 origin,
+                phishing,
             ])?;
         }
         if any {
@@ -499,8 +509,8 @@ impl DuckReader {
         let rows = stmt
             .query_map(params_from_iter(binds.iter()), |row| {
                 let event = row_to_event(row)?;
-                let origin: String = row.get::<_, Option<String>>(11)?.unwrap_or_default();
-                let rowid: i64 = row.get(12)?;
+                let origin: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+                let rowid: i64 = row.get(13)?;
                 Ok(HistoryRow {
                     event,
                     origin,
@@ -827,6 +837,10 @@ fn row_to_event(row: &duckdb::Row<'_>) -> duckdb::Result<QueryEvent> {
             .get::<_, Option<String>>(10)?
             .as_deref()
             .and_then(DnssecStatus::from_label),
+        phishing: row
+            .get::<_, Option<String>>(11)?
+            .as_deref()
+            .and_then(PhishingFlag::from_label),
     })
 }
 
@@ -869,6 +883,7 @@ mod tests {
             addresses: vec![IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34))],
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 
@@ -1002,6 +1017,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1046,6 +1062,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1097,6 +1114,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: resolver.map(str::to_owned),
             dnssec: None,
+            phishing: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1152,6 +1170,47 @@ mod tests {
         assert_eq!(recent[1].resolver.as_deref(), Some("dns.quad9.net"));
     }
 
+    #[test]
+    fn phishing_flag_round_trips_through_the_log() {
+        use crate::event::{PhishingFlag, PhishingKind};
+
+        let store = DuckStore::open_in_memory().unwrap();
+        let mut warned = event(1, QuerySource::Upstream, 0);
+        warned.phishing = Some(PhishingFlag {
+            kind: PhishingKind::Lookalike,
+            blocked: false,
+            brand: Some("PayPal".to_owned()),
+        });
+        let mut blocked = event(2, QuerySource::Blocked, 3);
+        blocked.phishing = Some(PhishingFlag {
+            kind: PhishingKind::Nrd,
+            blocked: true,
+            brand: None,
+        });
+        let clean = event(3, QuerySource::Cache, 0); // no phishing flag
+        store.insert_batch(&[warned, blocked, clean]).unwrap();
+
+        let recent = store.recent(10).unwrap();
+        // Newest first: the clean cache hit, then the NRD block, then the lookalike warn.
+        assert_eq!(recent[0].phishing, None);
+        assert_eq!(
+            recent[1].phishing,
+            Some(PhishingFlag {
+                kind: PhishingKind::Nrd,
+                blocked: true,
+                brand: None,
+            })
+        );
+        assert_eq!(
+            recent[2].phishing,
+            Some(PhishingFlag {
+                kind: PhishingKind::Lookalike,
+                blocked: false,
+                brand: Some("PayPal".to_owned()),
+            })
+        );
+    }
+
     /// A filter that reads everything, newest first, with a generous page size.
     fn all(limit: usize) -> QueryFilter {
         QueryFilter {
@@ -1190,6 +1249,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1247,6 +1307,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1300,6 +1361,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let noisy = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let quiet = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
@@ -1345,6 +1407,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: resolver.map(str::to_owned),
             dnssec: None,
+            phishing: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1424,6 +1487,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store

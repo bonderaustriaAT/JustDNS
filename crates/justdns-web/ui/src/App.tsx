@@ -13,6 +13,7 @@ import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
 import { Overview } from "./pages/Overview";
+import { Phishing } from "./pages/Phishing";
 import { Privacy } from "./pages/Privacy";
 import { Reports } from "./pages/Reports";
 import { Rewrites } from "./pages/Rewrites";
@@ -44,6 +45,7 @@ export function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/protokoll" element={<Logs />} />
           <Route path="/dnssec" element={<Dnssec />} />
+          <Route path="/phishing" element={<Phishing />} />
           <Route path="/geraete" element={<Clients />} />
           <Route path="/privatsphaere" element={<Privacy />} />
           <Route path="/listen" element={<Navigate to="/listen/url" replace />} />

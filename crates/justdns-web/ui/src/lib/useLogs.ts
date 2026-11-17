@@ -5,6 +5,7 @@ import {
   type GeoInfo,
   type HistoryCursor,
   type HistoryFilter,
+  type PhishingFlag,
   type QueryRow,
   type QuerySource,
 } from "./api";
@@ -88,6 +89,8 @@ export interface LogRow {
   /** The peer node this row was pulled from, in a cluster; absent for this
    *  node's own queries. */
   origin?: string;
+  /** The phishing verdict, present only when the detector fired on this query. */
+  phishing?: PhishingFlag;
 }
 
 function rcodeTone(responseCode: number, isBlocked: boolean): RcodeTone {
@@ -127,6 +130,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     watched: row.watched,
     durationMs: row.duration_ms,
     origin: row.origin,
+    phishing: row.phishing,
   };
 }
 

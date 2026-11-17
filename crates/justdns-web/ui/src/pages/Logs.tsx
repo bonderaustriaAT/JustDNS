@@ -549,6 +549,26 @@ function LogList({
                 <span className={styles.domain} title={row.name}>
                   {row.name}
                 </span>
+                {row.phishing &&
+                  (() => {
+                    const kindLabel =
+                      row.phishing.kind === "lookalike"
+                        ? t("phishing.kindLookalike")
+                        : row.phishing.kind === "punycode"
+                          ? t("phishing.kindPunycode")
+                          : t("phishing.kindNrd");
+                    return (
+                      <span
+                        className={styles.phishingBadge}
+                        data-mode={row.phishing.blocked ? "block" : "warn"}
+                        title={
+                          row.phishing.brand ? `${kindLabel} · ${row.phishing.brand}` : kindLabel
+                        }
+                      >
+                        {row.phishing.blocked ? t("phishing.badgeBlock") : t("phishing.badgeWarn")}
+                      </span>
+                    );
+                  })()}
                 {row.addresses.length > 0 ? (
                   <span className={styles.resolved} title={row.addresses.join(", ")}>
                     <span className={styles.resolvedArrow} aria-hidden="true">

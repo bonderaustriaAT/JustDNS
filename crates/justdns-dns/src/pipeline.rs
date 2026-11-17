@@ -18,7 +18,7 @@ use hickory_proto::op::DnsResponse;
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, CNAME};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
-use justdns_filter::PolicyEngine;
+use justdns_filter::{PhishingDetector, PhishingHit, PhishingMode, PolicyEngine};
 use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
@@ -152,6 +152,7 @@ pub struct Pipeline<R> {
     options: PipelineOptions,
     observer: Option<Arc<dyn QueryObserver>>,
     policy_engine: Option<Arc<PolicyEngine>>,
+    phishing: Option<Arc<PhishingDetector>>,
     rewriter: Option<Arc<Rewriter>>,
     /// Keys with a background refresh in flight, so however many clients hit a
     /// stale or near-expiry entry at once, only one of them forwards upstream.
@@ -166,6 +167,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             options,
             observer: None,
             policy_engine: None,
+            phishing: None,
             rewriter: None,
             refreshing: Arc::new(Mutex::new(HashSet::new())),
         }
@@ -185,6 +187,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
     #[must_use]
     pub fn with_policy_engine(mut self, engine: Arc<PolicyEngine>) -> Self {
         self.policy_engine = Some(engine);
+        self
+    }
+
+    /// Check each query's name with `detector` for a lookalike/Punycode brand
+    /// imitation or a newly registered domain. A warn-mode hit only marks the
+    /// query (the answer is unchanged); a block-mode hit refuses it before any
+    /// lookup, like the policy block. Without one, nothing is checked.
+    #[must_use]
+    pub fn with_phishing_detector(mut self, detector: Arc<PhishingDetector>) -> Self {
+        self.phishing = Some(detector);
         self
     }
 
@@ -214,12 +226,32 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         };
         response.add_query(query.clone());
 
-        let answered = self.answer(&query, &mut response, client).await;
+        let name = query.name().to_string();
+        // Compute the phishing verdict once, up front: it decides whether to block
+        // and is recorded on the query whatever the answer source. A warn-mode hit
+        // leaves the answer untouched; a block-mode hit refuses it in `answer`.
+        let phishing = self
+            .phishing
+            .as_ref()
+            .and_then(|detector| detector.check(&name));
+
+        let answered = self
+            .answer(&query, &mut response, client, phishing.as_ref())
+            .await;
+
+        // A user's own rewrite is trusted and exempt from the phishing block, so a
+        // rewritten name carries no phishing marker: without this, a block-mode hit
+        // would record a "blocked" verdict on a name the rewrite actually answered.
+        let phishing = if answered.source == AnswerSource::Rewrite {
+            None
+        } else {
+            phishing
+        };
 
         if let Some(observer) = &self.observer {
             observer.observe(QueryRecord {
                 client,
-                name: query.name().to_string(),
+                name,
                 record_type: u16::from(query.query_type()),
                 response_code: u16::from(response.response_code),
                 source: answered.source,
@@ -228,6 +260,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 addresses: answer_addresses(&response),
                 resolver: answered.resolver.as_deref().map(str::to_owned),
                 dnssec: answered.dnssec,
+                phishing,
             });
         }
 
@@ -236,9 +269,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
 
     /// Fill `response` with the answer to `query` for `client` and report where
     /// it came from. The client decides which filtering policy applies.
-    async fn answer(&self, query: &Query, response: &mut Message, client: IpAddr) -> Answered {
+    async fn answer(
+        &self,
+        query: &Query,
+        response: &mut Message,
+        client: IpAddr,
+        phishing: Option<&PhishingHit>,
+    ) -> Answered {
         // A local rewrite is answered first — before the block check and any
-        // lookup — and owns the name for every record type.
+        // lookup — and owns the name for every record type. A user's own rewrite
+        // is trusted, so it is exempt from the phishing block below.
         if let Some(rewriter) = &self.rewriter {
             if let Some(ips) = rewriter.lookup(&query.name().to_string()) {
                 self.answer_rewrite(query, response, &ips);
@@ -252,6 +292,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         // blocked host fails at once) or NXDOMAIN (the name simply does not exist).
         if let Some(engine) = &self.policy_engine {
             if engine.blocks(client, &query.name().to_string()) {
+                self.write_block_answer(query, response);
+                return Answered::local(AnswerSource::Blocked);
+            }
+        }
+
+        // A block-mode phishing hit refuses the name here, exactly like a policy
+        // block and with the same block answer. A warn-mode hit falls through: the
+        // answer is resolved normally and only the recorded marker reflects it.
+        if let Some(hit) = phishing {
+            if hit.mode == PhishingMode::Block {
                 self.write_block_answer(query, response);
                 return Answered::local(AnswerSource::Blocked);
             }
@@ -934,6 +984,141 @@ mod tests {
             .await;
 
         assert_eq!(observer.seen.lock().unwrap()[0].dnssec, None);
+    }
+
+    #[tokio::test]
+    async fn phishing_warn_resolves_and_is_recorded() {
+        use justdns_filter::{PhishingConfig, PhishingKind};
+
+        let detector = Arc::new(PhishingDetector::new());
+        detector.configure(PhishingConfig {
+            enabled: true,
+            homoglyph_mode: PhishingMode::Warn,
+            ..PhishingConfig::default()
+        });
+        let observer = Arc::new(Recording::default());
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_observer(observer.clone())
+            .with_phishing_detector(detector);
+
+        // paypa1.com imitates paypal.com (the digit 1 standing in for the letter l).
+        let response = pipe
+            .handle(&request("paypa1.com.", RecordType::A), CLIENT)
+            .await;
+
+        // Warn leaves the answer untouched: the name still resolves upstream.
+        assert_eq!(response.response_code, ResponseCode::NoError);
+        assert_eq!(response.answers.len(), 1);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "a warn hit still forwards upstream"
+        );
+
+        let seen = observer.seen.lock().unwrap();
+        let hit = seen[0].phishing.as_ref().expect("a warn hit is recorded");
+        assert_eq!(hit.mode, PhishingMode::Warn);
+        assert!(
+            matches!(&hit.kind, PhishingKind::Lookalike { brand } if brand == "PayPal"),
+            "{:?}",
+            hit.kind
+        );
+    }
+
+    #[tokio::test]
+    async fn phishing_block_refuses_before_lookup() {
+        use justdns_filter::{DomainSet, PhishingConfig, PhishingKind};
+
+        let detector = Arc::new(PhishingDetector::new());
+        detector.configure(PhishingConfig {
+            enabled: true,
+            nrd_enabled: true,
+            nrd_mode: PhishingMode::Block,
+            nrd: DomainSet::from_rules("brand-new.example\n"),
+            ..PhishingConfig::default()
+        });
+        let observer = Arc::new(Recording::default());
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_observer(observer.clone())
+            .with_phishing_detector(detector);
+
+        let response = pipe
+            .handle(&request("brand-new.example.", RecordType::A), CLIENT)
+            .await;
+
+        // Block mode refuses with NXDOMAIN (the default block answer) before any
+        // lookup, so the upstream is never consulted.
+        assert_eq!(response.response_code, ResponseCode::NXDomain);
+        assert!(response.answers.is_empty());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            0,
+            "a blocked name never reaches upstream"
+        );
+
+        let seen = observer.seen.lock().unwrap();
+        assert_eq!(seen[0].source, AnswerSource::Blocked);
+        let hit = seen[0].phishing.as_ref().expect("a block hit is recorded");
+        assert_eq!(hit.mode, PhishingMode::Block);
+        assert!(matches!(hit.kind, PhishingKind::Nrd), "{:?}", hit.kind);
+    }
+
+    #[tokio::test]
+    async fn rewrite_is_exempt_from_a_block_mode_phishing_hit() {
+        use justdns_filter::{DomainSet, PhishingConfig};
+        use justdns_rewrite::{Rewrite, Rewriter};
+
+        // The rewritten name is also on a block-mode NRD set: the user's own
+        // rewrite must win, and the query must carry no phishing marker.
+        let detector = Arc::new(PhishingDetector::new());
+        detector.configure(PhishingConfig {
+            enabled: true,
+            nrd_enabled: true,
+            nrd_mode: PhishingMode::Block,
+            nrd: DomainSet::from_rules("nas.home\n"),
+            ..PhishingConfig::default()
+        });
+        let rewriter = Arc::new(Rewriter::new());
+        rewriter.set(&[Rewrite {
+            name: "nas.home".to_owned(),
+            ips: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 20, 5))],
+            aliases: Vec::new(),
+            enabled: true,
+        }]);
+        let observer = Arc::new(Recording::default());
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let pipe = Pipeline::new(DnsCache::new(100), router, PipelineOptions::default())
+            .with_observer(observer.clone())
+            .with_phishing_detector(detector)
+            .with_rewriter(rewriter);
+
+        let response = pipe
+            .handle(&request("nas.home.", RecordType::A), CLIENT)
+            .await;
+
+        // Answered from the rewrite, never blocked and never forwarded.
+        assert_eq!(response.response_code, ResponseCode::NoError);
+        assert_eq!(
+            response.answers[0].data,
+            RData::A(A(Ipv4Addr::new(192, 168, 20, 5)))
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0, "rewrite must not forward");
+
+        let seen = observer.seen.lock().unwrap();
+        assert_eq!(seen[0].source, AnswerSource::Rewrite);
+        assert!(
+            seen[0].phishing.is_none(),
+            "a rewritten name carries no phishing marker, got {:?}",
+            seen[0].phishing
+        );
     }
 
     #[tokio::test]

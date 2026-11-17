@@ -11,7 +11,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use justdns_dns::observer::{
     AnswerSource, DnssecStatus as DnsDnssecStatus, QueryObserver, QueryRecord,
 };
-use justdns_store::{DnssecStatus, QueryEvent, QuerySource, Store};
+use justdns_filter::{PhishingHit, PhishingKind as FilterPhishingKind, PhishingMode};
+use justdns_store::{DnssecStatus, PhishingFlag, PhishingKind, QueryEvent, QuerySource, Store};
 
 pub struct StoreObserver {
     store: Store,
@@ -44,6 +45,7 @@ impl QueryObserver for StoreObserver {
             addresses: record.addresses,
             resolver: record.resolver,
             dnssec: record.dnssec.map(map_dnssec),
+            phishing: record.phishing.map(map_phishing),
         });
     }
 }
@@ -64,6 +66,22 @@ fn map_dnssec(status: DnsDnssecStatus) -> DnssecStatus {
         DnsDnssecStatus::Insecure => DnssecStatus::Insecure,
         DnsDnssecStatus::Bogus => DnssecStatus::Bogus,
         DnsDnssecStatus::Indeterminate => DnssecStatus::Indeterminate,
+    }
+}
+
+/// Turn the detector's hit into the stored flag: the brand it imitated (for a
+/// lookalike or Punycode hit) and whether the query was blocked or only warned.
+fn map_phishing(hit: PhishingHit) -> PhishingFlag {
+    let blocked = matches!(hit.mode, PhishingMode::Block);
+    let (kind, brand) = match hit.kind {
+        FilterPhishingKind::Lookalike { brand } => (PhishingKind::Lookalike, Some(brand)),
+        FilterPhishingKind::Punycode { brand } => (PhishingKind::Punycode, Some(brand)),
+        FilterPhishingKind::Nrd => (PhishingKind::Nrd, None),
+    };
+    PhishingFlag {
+        kind,
+        blocked,
+        brand,
     }
 }
 
@@ -94,6 +112,7 @@ mod tests {
             addresses: Vec::new(),
             resolver: None,
             dnssec: None,
+            phishing: None,
         }
     }
 

@@ -33,6 +33,7 @@ use crate::ListKind;
 #[cfg(test)]
 const TRUSTED_PREFIXES: &[&str] = &[
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/",
+    "https://raw.githubusercontent.com/hagezi/nrd/main/domains/",
     "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/",
 ];
 
@@ -201,6 +202,59 @@ Zweifel bleibt eine Domain draußen.",
         fp_level: 1,
     },
     Preset {
+        key: "nrd-7",
+        category: "nrd",
+        recommended: false,
+        name: "Neu registrierte Domains: letzte 7 Tage",
+        url: "https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd7.txt",
+        kind: ListKind::Warn,
+        description: "Domains, die in den letzten 7 Tagen neu registriert wurden (Quelle HaGeZi, \
+GPLv3). Frisch registrierte Namen sind das Werkzeug gezielter Phishing-Wellen. Diese Liste geht \
+nicht in die Sperre, sondern in den Phishing-Schutz: ob ein Treffer nur gewarnt oder geblockt \
+wird, entscheidest du dort. Kleinstes Fenster, rund 40 MB im Speicher.",
+        false_positive: "Hoch, wenn auf Blockieren gestellt: viele neue Domains sind harmlos. \
+Darum als Warnung gedacht; zum Blockieren nur mit Bedacht.",
+        fp_level: 4,
+    },
+    Preset {
+        key: "nrd-14",
+        category: "nrd",
+        recommended: false,
+        name: "Neu registrierte Domains: Tage 8 bis 14",
+        url: "https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd14-8.txt",
+        kind: ListKind::Warn,
+        description: "Ergänzt das 7-Tage-Fenster um die Tage 8 bis 14 (Quelle HaGeZi, GPLv3). \
+Zusammen mit der 7-Tage-Liste ergibt das die vollen letzten 14 Tage. Rund 46 MB zusätzlich im \
+Speicher.",
+        false_positive: "Hoch beim Blockieren, wie bei jeder NRD-Liste. Als Warnung unkritisch.",
+        fp_level: 4,
+    },
+    Preset {
+        key: "nrd-21",
+        category: "nrd",
+        recommended: false,
+        name: "Neu registrierte Domains: Tage 15 bis 21",
+        url: "https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd21-15.txt",
+        kind: ListKind::Warn,
+        description: "Erweitert das Fenster auf die Tage 15 bis 21 (Quelle HaGeZi, GPLv3). Für \
+breitere Abdeckung, wenn der Speicher reicht.",
+        false_positive: "Hoch beim Blockieren, wie bei jeder NRD-Liste. Als Warnung unkritisch.",
+        fp_level: 4,
+    },
+    Preset {
+        key: "nrd-28",
+        category: "nrd",
+        recommended: false,
+        name: "Neu registrierte Domains: Tage 22 bis 28",
+        url: "https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd28-22.txt",
+        kind: ListKind::Warn,
+        description: "Erweitert das Fenster auf die Tage 22 bis 28 (Quelle HaGeZi, GPLv3). \
+Zusammen mit den drei kürzeren Fenstern deckt das rund 28 Tage ab. Nur für Geräte mit \
+reichlich Arbeitsspeicher.",
+        false_positive: "Hoch beim Blockieren, wie bei jeder NRD-Liste. Als Warnung unkritisch.",
+        fp_level: 4,
+    },
+    Preset {
         key: "hagezi-referral-allow",
         category: "allow",
         recommended: false,
@@ -240,7 +294,7 @@ mod tests {
             assert!(!preset.false_positive.is_empty());
             assert!((1..=5).contains(&preset.fp_level));
             assert!(
-                ["ads", "security", "privacy", "bypass", "allow"].contains(&preset.category),
+                ["ads", "security", "privacy", "bypass", "nrd", "allow"].contains(&preset.category),
                 "{} has an unknown category {}",
                 preset.key,
                 preset.category

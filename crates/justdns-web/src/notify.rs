@@ -21,7 +21,7 @@ use justdns_clients::{ClientResolver, ClientStore, Group};
 use justdns_config::{ConfigStore, Notifications, WebhookFormat};
 use justdns_dns::cert_store::CertStore;
 use justdns_geoip::{GeoDb, GeoInfo};
-use justdns_store::{QueryFilter, Store};
+use justdns_store::{PhishingKind, QueryFilter, Store};
 use tracing::warn;
 
 use crate::geo_watch::{WatchSet, anything_watched, effective_watch};
@@ -43,6 +43,17 @@ const WATCHED_GEO_SCAN_LIMIT: usize = 20_000;
 /// Per-(device, watched network) cooldown: a still-ongoing contact alerts at most
 /// once an hour rather than every pass.
 const WATCHED_GEO_COOLDOWN_MS: i64 = 60 * 60 * 1_000;
+
+/// How far back a phishing-alert pass looks for freshly recorded hits. Short
+/// because a pass runs every minute; the cooldown below keeps a repeated hit on
+/// the same name from re-alerting.
+const PHISHING_WINDOW_MS: i64 = 5 * 60 * 1_000;
+/// How many recent events a phishing pass reads at most, bounding the scan on a
+/// very busy instance.
+const PHISHING_SCAN_LIMIT: usize = 20_000;
+/// Per-(name, kind, mode) cooldown: a name that keeps getting looked up alerts at
+/// most once an hour rather than every pass.
+const PHISHING_COOLDOWN_MS: i64 = 60 * 60 * 1_000;
 
 /// Post `title`/`body` to the configured webhook, in the shape its format expects.
 /// Returns a short error string on any failure (no URL, transport error, …).
@@ -202,6 +213,9 @@ struct AlertState {
     /// `"<client>|<country?>|<asn?>"` → last watched-geo alert time (ms), for a
     /// per-device, per-network cooldown.
     watched_last_ms: HashMap<String, i64>,
+    /// `"<name>|<kind>|<mode>"` → last phishing alert time (ms), for a
+    /// per-name cooldown.
+    phishing_last_ms: HashMap<String, i64>,
 }
 
 /// Watches the alert conditions and posts to the webhook. Reads the live config
@@ -276,6 +290,9 @@ impl AlertEvaluator {
         }
         if cfg.on_watched_geo {
             self.collect_watched_geo(now, &mut state, &mut out);
+        }
+        if cfg.on_phishing {
+            self.collect_phishing(now, &mut state, &mut out);
         }
         out
     }
@@ -512,6 +529,66 @@ impl AlertEvaluator {
         }
     }
 
+    /// Scan the recent query log for phishing hits the detector recorded and post
+    /// one alert per newly seen name, deduped per (name, kind, mode) on a cooldown.
+    /// Node-local only: it reads this node's own history, matching where the hits
+    /// were produced.
+    fn collect_phishing(&self, now: i64, state: &mut AlertState, out: &mut Vec<(String, String)>) {
+        // Drop cooldown entries that have aged out so the map stays bounded by the
+        // names hit within the last cooldown window.
+        state
+            .phishing_last_ms
+            .retain(|_, last| now - *last < PHISHING_COOLDOWN_MS);
+
+        let filter = QueryFilter {
+            before: None,
+            start_ms: Some(now - PHISHING_WINDOW_MS),
+            end_ms: Some(now),
+            sources: Vec::new(),
+            record_type: None,
+            response_code: None,
+            resolver: None,
+            origin: Some(String::new()),
+            clients: None,
+            needle: None,
+            limit: PHISHING_SCAN_LIMIT,
+        };
+        let rows = match self.store.history(&filter) {
+            Ok((rows, _)) => rows,
+            Err(error) => {
+                warn!(%error, "phishing scan query failed");
+                return;
+            }
+        };
+
+        for row in &rows {
+            let Some(flag) = &row.event.phishing else {
+                continue;
+            };
+            let (kind_key, kind_text) = match flag.kind {
+                PhishingKind::Lookalike => ("lookalike", describe_brand("Lookalike", &flag.brand)),
+                PhishingKind::Punycode => ("punycode", describe_brand("Punycode", &flag.brand)),
+                PhishingKind::Nrd => ("nrd", "neu registrierte Domain".to_owned()),
+            };
+            let mode_key = if flag.blocked { "block" } else { "warn" };
+            let dedup = format!("{}|{kind_key}|{mode_key}", row.event.name);
+            if let Some(last) = state.phishing_last_ms.get(&dedup) {
+                if now - last < PHISHING_COOLDOWN_MS {
+                    continue;
+                }
+            }
+            state.phishing_last_ms.insert(dedup, now);
+            let action = if flag.blocked { "blockiert" } else { "gewarnt" };
+            out.push((
+                "JustDNS: Phishing-Verdacht".to_owned(),
+                format!(
+                    "{} ({kind_text}) wurde {action} (Gerät {}).",
+                    row.event.name, row.event.client
+                ),
+            ));
+        }
+    }
+
     /// Whether this node is the one that should send cluster-wide alerts: true on
     /// a standalone node or HA-off, and otherwise only for the lowest node id
     /// among this node and its currently-reachable peers.
@@ -539,6 +616,15 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
+}
+
+/// Describe a lookalike/Punycode hit for an alert body: the kind plus the imitated
+/// brand when one is known (e.g. `Lookalike von PayPal`).
+fn describe_brand(kind: &str, brand: &Option<String>) -> String {
+    match brand {
+        Some(brand) => format!("{kind} von {brand}"),
+        None => kind.to_owned(),
+    }
 }
 
 /// A short English label for a resolved network, for the alert body — e.g.

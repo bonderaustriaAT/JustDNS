@@ -13,7 +13,7 @@ pub use duck::{
     Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, QueryFilter, StoreError,
     TrackerScanRow, natural_key,
 };
-pub use event::{DnssecStatus, QueryEvent, QuerySource};
+pub use event::{DnssecStatus, PhishingFlag, PhishingKind, QueryEvent, QuerySource};
 pub use recorder::{
     ActivityBucket, ClientActivity, ClientCount, DayStats, DomainCount, Recorder, ResolverStat,
     Stats,

@@ -23,7 +23,8 @@ pub use store::{
 
 use serde::{Deserialize, Serialize};
 
-/// Whether a list adds names to the allow set or the block set.
+/// Whether a list adds names to the allow set, the block set, or the phishing
+/// detector's warn set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ListKind {
@@ -31,4 +32,11 @@ pub enum ListKind {
     Allow,
     /// Names to block.
     Block,
+    /// Names the phishing detector treats as newly-registered-domain warnings.
+    /// A warn feed never enters the blocking policy: the binary hands its resolved
+    /// set to the [`PhishingDetector`], which warns or blocks per the user's
+    /// phishing settings, not per the list.
+    ///
+    /// [`PhishingDetector`]: justdns_filter::PhishingDetector
+    Warn,
 }

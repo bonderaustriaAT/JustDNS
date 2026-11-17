@@ -274,6 +274,9 @@ pub struct ResolvedLists {
     pub own_block: DomainSet,
     /// Every block feed subscription, resolved, with its global enabled flag.
     pub block_feeds: Vec<ListObject>,
+    /// The merged newly-registered-domain warn set: every enabled warn feed.
+    /// Handed to the phishing detector, never to the blocking policy.
+    pub warn: DomainSet,
 }
 
 /// A cheap, cloneable handle to the persistent lists.
@@ -365,6 +368,7 @@ impl ListStore {
         }
 
         let mut block_feeds = Vec::new();
+        let mut warn = DomainSet::new();
         for sub in &lists.subscriptions {
             match sub.kind {
                 // Allow feeds merge into the one allow set; they are global-only.
@@ -388,6 +392,16 @@ impl ListStore {
                         enabled: sub.enabled,
                     });
                 }
+                // Warn feeds (newly registered domains) merge into one global set
+                // that the binary hands to the phishing detector; they never enter
+                // the blocking policy, so they are not scoped per device.
+                ListKind::Warn => {
+                    if sub.enabled {
+                        if let Some(text) = self.read_cache(&sub.id) {
+                            warn.add_rules(&text);
+                        }
+                    }
+                }
             }
         }
 
@@ -395,6 +409,7 @@ impl ListStore {
             allow,
             own_block,
             block_feeds,
+            warn,
         }
     }
 
@@ -864,6 +879,9 @@ impl ListStore {
                         set,
                     });
                 }
+                // Warn (NRD) feeds never enter the blocker: they are consumed by
+                // the phishing detector via `resolved().warn`, not here.
+                ListKind::Warn => {}
             }
         }
 

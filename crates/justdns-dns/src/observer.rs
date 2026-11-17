@@ -8,6 +8,8 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
+use justdns_filter::PhishingHit;
+
 /// The DNSSEC validation verdict for a query's answer, as the four states of
 /// RFC 4035 §4.3. Recorded only when validation was on and the answer came from
 /// an upstream; a cache, local, blocked or rewritten answer carries none.
@@ -70,6 +72,10 @@ pub struct QueryRecord {
     /// from an upstream; `None` for a cache, local, blocked or rewritten answer,
     /// or when validation is off.
     pub dnssec: Option<DnssecStatus>,
+    /// The phishing detector's verdict for this query's name, when it fired;
+    /// `None` otherwise. A warn-mode hit leaves the answer unchanged and is only
+    /// recorded; a block-mode hit is recorded on the answer the block produced.
+    pub phishing: Option<PhishingHit>,
 }
 
 /// Something that records handled queries. Implementations must not block for

@@ -367,6 +367,28 @@
   white-space: nowrap;
 }
 
+/* Phishing verdict chip on a flagged query: amber for a warn, red for a block. */
+.phishingBadge {
+  font-size: var(--step--2);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  white-space: nowrap;
+  margin-inline-start: var(--space-1);
+}
+
+.phishingBadge[data-mode="warn"] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.phishingBadge[data-mode="block"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
 .time {
   font-family: var(--font-mono);
   font-size: var(--step--1);
