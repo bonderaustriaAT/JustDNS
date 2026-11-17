@@ -8,6 +8,11 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* Always reserve room for the vertical scrollbar, so a page that grows past
+     the viewport on one view and not another (e.g. switching settings category)
+     does not make the bar appear and disappear and shift the whole layout
+     sideways. */
+  scrollbar-gutter: stable;
 }
 
 body {
