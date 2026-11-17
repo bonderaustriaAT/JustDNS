@@ -316,10 +316,20 @@ function BackupSection() {
   );
 }
 
+type SettingsGroup = "allgemein" | "dns";
+
 interface CategoryMeta {
   id: string;
   titleKey: MessageKey;
+  /** Which rail group the category sits under. */
+  group: SettingsGroup;
+  /** A key holding space-separated search terms, so the search field finds a
+   *  category by what it contains (e.g. "ipv6") and not only by its title. */
+  keywordKey: MessageKey;
 }
+
+/** The rail groups, in display order. */
+const SETTINGS_GROUPS: SettingsGroup[] = ["allgemein", "dns"];
 
 function Category({
   id,
@@ -358,15 +368,20 @@ function Row({
   control: ReactNode;
   disabled?: boolean;
 }) {
+  // One line per setting: the name and its control. The explanation moves behind
+  // the ⓘ so the list stays scannable. Both the short description and the longer
+  // details feed the hint; the fuller text wins, and a short description that
+  // adds something is kept as a lead-in.
+  const hint =
+    details && description && !details.includes(description)
+      ? `${description}\n\n${details}`
+      : (details ?? description);
   return (
     <div className={styles.row} data-disabled={disabled || undefined}>
-      <div className={styles.text}>
-        <span className={styles.labelLine}>
-          <span className={styles.label}>{label}</span>
-          {details ? <InfoHint label={label} text={details} /> : null}
-        </span>
-        {description ? <span className={styles.description}>{description}</span> : null}
-      </div>
+      <span className={styles.labelLine}>
+        <span className={styles.label}>{label}</span>
+        {hint ? <InfoHint label={label} text={hint} /> : null}
+      </span>
       <div className={styles.control}>{control}</div>
     </div>
   );
@@ -1498,70 +1513,188 @@ export function Settings() {
   const { t } = useI18n();
   const { settings, update } = useSettings();
   const [selected, setSelected] = useState("schutz");
+  const [query, setQuery] = useState("");
 
   const categories = useMemo<CategoryMeta[]>(() => {
     // "Upstream" now hosts the speed profile — the headline user-facing choice —
     // so it stays visible even outside expert mode; the rest stay technical.
     const base: CategoryMeta[] = [
-      { id: "schutz", titleKey: "settings.cat.schutz" },
-      { id: "blockseite", titleKey: "settings.cat.blockseite" },
-      { id: "upstream", titleKey: "settings.cat.upstream" },
+      {
+        id: "schutz",
+        titleKey: "settings.cat.schutz",
+        group: "allgemein",
+        keywordKey: "settings.cat.schutz.kw",
+      },
+      {
+        id: "blockseite",
+        titleKey: "settings.cat.blockseite",
+        group: "allgemein",
+        keywordKey: "settings.cat.blockseite.kw",
+      },
       // Backup & restore stays visible even outside expert mode: making a
       // safety copy is a headline user-facing action, not a technical knob.
-      { id: "sicherung", titleKey: "settings.cat.sicherung" },
+      {
+        id: "sicherung",
+        titleKey: "settings.cat.sicherung",
+        group: "allgemein",
+        keywordKey: "settings.cat.sicherung.kw",
+      },
       // Alerts are an operator-facing headline too: a node going down or a
       // certificate expiring is exactly what someone wants pushed to them, so
       // it stays out from behind expert mode.
-      { id: "benachrichtigungen", titleKey: "settings.cat.benachrichtigungen" },
+      {
+        id: "benachrichtigungen",
+        titleKey: "settings.cat.benachrichtigungen",
+        group: "allgemein",
+        keywordKey: "settings.cat.benachrichtigungen.kw",
+      },
+      // Upstream hosts the speed profile — the headline resolver choice — so it
+      // stays visible even outside expert mode, as the first DNS category.
+      {
+        id: "upstream",
+        titleKey: "settings.cat.upstream",
+        group: "dns",
+        keywordKey: "settings.cat.upstream.kw",
+      },
     ];
     if (settings.expertMode) {
       base.push(
         // Encryption (both directions: client DoT/DoH and upstream) is a
         // technical area, so it lives behind expert mode.
-        { id: "verschluesselung", titleKey: "settings.cat.verschluesselung" },
-        { id: "netzwerk", titleKey: "settings.cat.netzwerk" },
-        { id: "cache", titleKey: "settings.cat.cache" },
-        { id: "protokoll", titleKey: "settings.cat.protokoll" },
+        {
+          id: "verschluesselung",
+          titleKey: "settings.cat.verschluesselung",
+          group: "dns",
+          keywordKey: "settings.cat.verschluesselung.kw",
+        },
+        {
+          id: "netzwerk",
+          titleKey: "settings.cat.netzwerk",
+          group: "dns",
+          keywordKey: "settings.cat.netzwerk.kw",
+        },
+        {
+          id: "cache",
+          titleKey: "settings.cat.cache",
+          group: "dns",
+          keywordKey: "settings.cat.cache.kw",
+        },
+        {
+          id: "protokoll",
+          titleKey: "settings.cat.protokoll",
+          group: "dns",
+          keywordKey: "settings.cat.protokoll.kw",
+        },
       );
     }
     return base;
   }, [settings.expertMode]);
 
   // Fall back to the first category when the selected one is hidden (e.g. the
-  // expert mode that revealed it was switched off).
+  // expert mode that revealed it was switched off). The search only filters the
+  // rail; the open panel stays put so typing never rips the content away.
   const active = categories.some((c) => c.id === selected) ? selected : categories[0].id;
+
+  // Categories the search field keeps visible: every term must appear in the
+  // category's title or its keyword list, so "ipv6" finds Network even though
+  // the word is not in the title. An empty query shows all.
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = categories.filter((category) => {
+    if (terms.length === 0) return true;
+    const haystack = `${t(category.titleKey)} ${t(category.keywordKey)}`.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
 
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>{t("settings.title")}</h1>
 
-      <section className={styles.expertBand}>
-        <div className={styles.text}>
-          <span className={styles.label}>{t("settings.expertMode")}</span>
-          <span className={styles.description}>{t("settings.expertModeDesc")}</span>
-        </div>
-        <Toggle
-          label={t("settings.expertMode")}
-          checked={settings.expertMode}
-          onChange={(v) => update("expertMode", v)}
-        />
-      </section>
-
       <div className={styles.layout}>
-        <nav className={styles.rail} aria-label={t("settings.categoriesAria")}>
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              type="button"
-              className={active === category.id ? styles.railActive : styles.railLink}
-              aria-current={active === category.id || undefined}
-              onClick={() => setSelected(category.id)}
+        <div className={styles.rail}>
+          <div className={styles.search}>
+            <svg
+              className={styles.searchIcon}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
             >
-              {t(category.titleKey)}
-            </button>
-          ))}
-          {!settings.expertMode && <p className={styles.railHint}>{t("settings.railHint")}</p>}
-        </nav>
+              <circle cx="11" cy="11" r="7" />
+              <path d="M16.5 16.5L21 21" />
+            </svg>
+            <input
+              type="search"
+              className={styles.searchInput}
+              value={query}
+              placeholder={t("settings.search.placeholder")}
+              aria-label={t("settings.search.aria")}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            {query ? (
+              <button
+                type="button"
+                className={styles.searchClear}
+                aria-label={t("settings.search.clear")}
+                onClick={() => setQuery("")}
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+
+          <nav className={styles.railNav} aria-label={t("settings.categoriesAria")}>
+            {SETTINGS_GROUPS.map((group) => {
+              const inGroup = matches.filter((category) => category.group === group);
+              if (inGroup.length === 0) return null;
+              const groupLabelId = `settings-group-${group}`;
+              return (
+                <div
+                  key={group}
+                  className={styles.railGroup}
+                  role="group"
+                  aria-labelledby={groupLabelId}
+                >
+                  <div id={groupLabelId} className={styles.railGroupLabel}>
+                    {t(`settings.group.${group}` as MessageKey)}
+                  </div>
+                  {inGroup.map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      className={active === category.id ? styles.railActive : styles.railLink}
+                      aria-current={active === category.id || undefined}
+                      onClick={() => {
+                        setSelected(category.id);
+                        setQuery("");
+                      }}
+                    >
+                      {t(category.titleKey)}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+            {terms.length > 0 && matches.length === 0 ? (
+              <p className={styles.railEmpty}>{t("settings.search.empty", { q: query.trim() })}</p>
+            ) : null}
+          </nav>
+
+          <div className={styles.expertFoot}>
+            <span className={styles.labelLine}>
+              <span className={styles.label}>{t("settings.expertMode")}</span>
+              <InfoHint label={t("settings.expertMode")} text={t("settings.expertModeDesc")} />
+            </span>
+            <Toggle
+              label={t("settings.expertMode")}
+              checked={settings.expertMode}
+              onChange={(v) => update("expertMode", v)}
+            />
+          </div>
+        </div>
 
         <WriteGuard>
         <div className={styles.sections}>

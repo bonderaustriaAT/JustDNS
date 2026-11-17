@@ -12,6 +12,11 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 - Changed: **The Block/Allow submenu is tidier.** Its two sub-pages ("Your own lists by URL" and
   "Ready-made lists") now carry their own small icons and line up under a guide line, so the
   submenu reads as a clear branch of the list.
+- Changed: **Settings are rebuilt for clarity.** The category rail is now grouped under General
+  and DNS, with a search field that finds a category by name or by what it holds (typing "ipv6"
+  reaches Network). Each setting is one line (its name and its control); the explanation moves
+  behind the ⓘ next to the name. Expert mode is now a quiet switch at the foot of the rail instead
+  of a wide band at the top.
 
 ## [0.37.3] - 2026-11-17
 

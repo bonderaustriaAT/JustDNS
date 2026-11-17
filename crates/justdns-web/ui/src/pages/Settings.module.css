@@ -8,32 +8,104 @@
   font-size: var(--step-3);
 }
 
-/* The expert switch sits apart from the categories: a sunken band so it reads
-   as a mode change, not just another toggle. */
-.expertBand {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  background: var(--surface-sunken);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
 .layout {
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: var(--space-5);
   align-items: start;
 }
 
+/* The rail is a sticky column: a search field, the grouped category list, and a
+   quiet expert-mode switch pinned at its foot. */
 .rail {
   position: sticky;
   inset-block-start: 76px;
   display: flex;
   flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Search field: find a setting by name or by what it contains, without scanning
+   every category by hand. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.searchIcon {
+  inline-size: 15px;
+  block-size: 15px;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.searchInput {
+  inline-size: 100%;
+  min-inline-size: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--step--1);
+}
+
+.searchInput:focus {
+  outline: none;
+}
+
+/* Hide the browser's native clear control so only our own × shows. */
+.searchInput::-webkit-search-cancel-button {
+  display: none;
+}
+
+.searchClear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 18px;
+  block-size: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.searchClear:hover {
+  color: var(--text);
+}
+
+.railNav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.railGroup {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
+}
+
+/* A quiet heading above each rail group (General, DNS): a signpost, not a row. */
+.railGroupLabel {
+  padding-inline: var(--space-3);
+  padding-block-end: 2px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
 }
 
 .railLink,
@@ -62,11 +134,22 @@
   border-inline-start-color: var(--signal);
 }
 
-.railHint {
-  margin-block-start: var(--space-3);
+.railEmpty {
   padding-inline: var(--space-3);
   color: var(--text-muted);
   font-size: var(--step--1);
+}
+
+/* The expert switch, pinned quietly at the foot of the rail: a mode change that
+   reveals the technical categories, kept out of the way until wanted. */
+.expertFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-start: var(--space-2);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
 }
 
 .sections {
@@ -118,16 +201,11 @@
   border-block-start: none;
 }
 
-.text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
 .labelLine {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  min-inline-size: 0;
 }
 
 .label {
@@ -136,16 +214,9 @@
 
 /* A dependent setting is dimmed and inert while its parent feature is off, so
    it reads as "available once that is on". */
-.row[data-disabled] .text,
+.row[data-disabled] .labelLine,
 .row[data-disabled] .control {
   opacity: 0.45;
-}
-
-.description {
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  line-height: 1.5;
-  max-inline-size: 48ch;
 }
 
 .control {
@@ -463,39 +534,41 @@
     gap: var(--space-4);
   }
 
+  /* The rail sits above the content rather than beside it, so it stops being
+     sticky and its groups lay their buttons out as wrapping chips to save
+     vertical space. */
   .rail {
-    position: sticky;
-    inset-block-start: 60px;
+    position: static;
+  }
+
+  .railGroup {
     flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-1);
-    overflow-x: auto;
-    padding-block: var(--space-2);
-    background: color-mix(in srgb, var(--bg) 90%, transparent);
-    backdrop-filter: blur(8px);
-    z-index: 5;
+  }
+
+  .railGroupLabel {
+    inline-size: 100%;
+    padding-inline: 0;
   }
 
   .railLink,
   .railActive {
+    inline-size: auto;
     white-space: nowrap;
-    border-inline-start: none;
-    border-block-end: 2px solid transparent;
+    border: 1px solid var(--line);
+    border-inline-start: 1px solid var(--line);
   }
 
   .railActive {
-    border-inline-start: none;
-    border-block-end-color: var(--signal);
+    border-color: var(--signal);
     background: transparent;
-  }
-
-  .railHint {
-    display: none;
   }
 }
 
 @media (max-width: 540px) {
-  .row,
-  .expertBand {
+  .row {
     align-items: flex-start;
     flex-direction: column;
     gap: var(--space-3);

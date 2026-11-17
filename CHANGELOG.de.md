@@ -14,6 +14,11 @@ Format Jahr-Monat-Tag.
 - Geändert: **Das Untermenü Block/Allow ist aufgeräumter.** Seine beiden Unterseiten („Eigene Listen
   per URL" und „Fertige Listen") haben nun eigene kleine Symbole und richten sich an einer
   Führungslinie aus, sodass das Untermenü als klarer Zweig der Liste lesbar ist.
+- Geändert: **Die Einstellungen sind neu aufgebaut.** Die Kategorie-Leiste ist jetzt nach Allgemein
+  und DNS gruppiert, mit einem Suchfeld, das eine Kategorie über den Namen oder ihren Inhalt findet
+  (die Eingabe „ipv6" führt zu Netzwerk). Jede Einstellung ist eine Zeile (Name und Bedienelement);
+  die Erklärung wandert hinter das ⓘ neben dem Namen. Der Expertenmodus ist nun ein ruhiger Schalter
+  am Fuß der Leiste statt einer breiten Leiste oben.
 
 ## [0.37.3] - 2026-11-17
 
