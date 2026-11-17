@@ -4,6 +4,21 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.37.0] - 2026-11-17
+
+- Neu: **Phishing-Schutz gegen Nachahmer- und frische Domains.** Blocklisten greifen nur, wenn
+  ein Name schon auf ihnen steht — gegen gezieltes Phishing über frisch registrierte
+  Nachahmer-Domains hilft das kaum. JustDNS prüft Anfragen jetzt zusätzlich **berechnet**: auf
+  verwechselbare Zeichen und Punycode gegen eine Liste geschützter Marken (Tech & Mail, Banken AT
+  und DE, dazu eigene) und, über ein Listen-Abo, auf **neu registrierte Domains** (NRD). Pro
+  Kategorie entscheidest du zwischen **nur warnen** (die Antwort bleibt unverändert, der Treffer
+  wird nur im Protokoll markiert und optional per Webhook gemeldet) und **blockieren**. Die
+  Erkennung läuft vollständig lokal; die NRD-Feeds (Quelle HaGeZi, GPLv3) sind als Zeitfenster
+  einzeln anklickbar — vom kleinsten 7-Tage-Fenster bis 28 Tage. Neuer Menüpunkt *Phishing-Schutz*
+  unter DNSSEC; Treffer erscheinen als Badge im Protokoll. Standardmäßig aus, Änderungen wirken
+  sofort ohne Neustart. (Eine optionale Online-Prüfung des Registrierungsdatums per RDAP ist
+  vorbereitet, aber noch nicht im Dashboard freigeschaltet.)
+
 ## [0.36.0] - 2026-11-15
 
 - Neu: **CNAME-getarnte Tracker entlarven.** Manche Tracker verstecken sich als CNAME auf einer

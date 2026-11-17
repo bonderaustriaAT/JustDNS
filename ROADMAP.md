@@ -185,6 +185,11 @@ no action, in the spirit of the HA peer encryption.
   no-sniff, a tight referrer policy and a locked-down permissions policy on every response
   — on by default, nothing to configure. CSRF is already covered by the `SameSite=Strict`
   session cookie. See [the guide](docs/guides/browser-hardening.md).
+- [x] **Phishing protection.** A computed detection layer alongside the blocker: lookalike domains
+  (confusable characters and Punycode) against a list of protected brands, plus newly registered
+  domains through a list subscription. Per category, warn only (answer unchanged, hit marked in the
+  log) or block. Fully local; opt-in, off by default. See
+  [the guide](docs/guides/phishing.md).
 - [ ] **HTTPS for the dashboard out of the box.** Serve the dashboard over TLS by default
   (with a stored certificate), and add HSTS once it does.
 - [ ] **Login hardening.** Brute-force throttling with a self-healing lockout and hardened

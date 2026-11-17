@@ -22,6 +22,7 @@ Neu bei JustDNS? Beginne mit [Ersteinrichtung](guides/setup.de.md), danach
 | [Land & Netz der Antworten (GeoIP)](guides/geoip.de.md) | Land und Netz (ASN) hinter jeder Antwort sehen – offline |
 | [Weltkarte & beobachtete Netze](guides/world-map.de.md) | Weltkarte, wohin die Geräte telefonieren; ein Land oder Netz beobachten, um es zu markieren und zu alarmieren |
 | [DNSSEC-Validierung](guides/dnssec.de.md) | Antwort-Signaturen prüfen und manipulierte Antworten abweisen |
+| [Phishing-Schutz](guides/phishing.de.md) | Nachahmer-Domains (verwechselbare Zeichen, Punycode) und frisch registrierte Domains erkennen und wahlweise warnen oder blockieren |
 | [Sperr- & Erlauben-Listen](guides/lists.de.md) | Werbung/Schadsoftware blocken, Feeds abonnieren, einzelne Domains erlauben oder sperren |
 | [Blockierte Dienste](guides/blocked-services.de.md) | Ganze Dienste (TikTok, YouTube, …) mit einem Schalter sperren, global oder je Ebene |
 | [Block-Seite](guides/block-page.de.md) | Einem geblockten Gerät eine erklärende Seite über HTTP und HTTPS zeigen statt einer leeren Fehlermeldung |
