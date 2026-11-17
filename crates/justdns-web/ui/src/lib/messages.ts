@@ -322,6 +322,7 @@ const de = {
   "phishing.kindLookalike": "Lookalike",
   "phishing.kindPunycode": "Punycode",
   "phishing.kindNrd": "Neu registriert",
+  "phishing.badge": "Phishing",
   "phishing.badgeWarn": "Gewarnt",
   "phishing.badgeBlock": "Blockiert",
 
@@ -1823,6 +1824,7 @@ const en: Catalog = {
   "phishing.kindLookalike": "Lookalike",
   "phishing.kindPunycode": "Punycode",
   "phishing.kindNrd": "Newly registered",
+  "phishing.badge": "Phishing",
   "phishing.badgeWarn": "Warned",
   "phishing.badgeBlock": "Blocked",
 

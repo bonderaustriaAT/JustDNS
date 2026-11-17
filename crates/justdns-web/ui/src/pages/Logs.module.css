@@ -368,25 +368,26 @@
 }
 
 /* Phishing verdict chip on a flagged query: amber for a warn, red for a block. */
-.phishingBadge {
-  font-size: var(--step--2);
+/* The phishing marker lives in the right-hand status cluster, shaped like the
+   source/rcode pills so the row reads as one tidy line of status chips. Colour
+   alone carries warn (amber) vs. block (red); the kind and brand are in the
+   title and the expanded detail. */
+.phishingPill {
+  font-size: 0.72rem;
   font-weight: 600;
-  border-radius: var(--radius-sm);
-  padding-inline: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
   white-space: nowrap;
-  margin-inline-start: var(--space-1);
 }
 
-.phishingBadge[data-mode="warn"] {
+.phishingPill[data-mode="warn"] {
   color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
 }
 
-.phishingBadge[data-mode="block"] {
+.phishingPill[data-mode="block"] {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .time {
