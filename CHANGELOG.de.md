@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.38.1] - 2026-11-17
+
+- Behoben: **Der Wechsel der Einstellungs-Kategorie verschiebt die Seite nicht mehr seitlich.** Das
+  Fenster reserviert nun immer Platz für die vertikale Scrollleiste, sodass eine höhere oder
+  kürzere Kategorie die Leiste nicht mehr erscheinen und verschwinden lässt und das Layout nach
+  links und rechts ruckt.
+
 ## [0.38.0] - 2026-11-17
 
 - Geändert: **Die Seitenleiste ist gruppiert und leichter zu überblicken.** Das Menü ist jetzt in

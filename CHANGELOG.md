@@ -3,6 +3,12 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.38.1] - 2026-11-17
+
+- Fixed: **Switching settings category no longer shifts the page sideways.** The window now always
+  reserves room for the vertical scrollbar, so a taller or shorter category view no longer makes the
+  bar appear and disappear and jolt the whole layout left and right.
+
 ## [0.38.0] - 2026-11-17
 
 - Changed: **The sidebar is grouped for easier scanning.** The menu is now split into four
