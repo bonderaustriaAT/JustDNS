@@ -162,7 +162,11 @@ export function Logs() {
   // not the in-memory ring: a name entered minutes later still turns up, instead
   // of ageing out of the hot ring the moment newer queries push it off.
   const searching = query.trim().length > 0;
-  const explore = facetsActive || searching;
+  // A country/ASN filter applies only to the live feed, so when one is set a
+  // search stays live (needle plus geo) instead of switching to the history view,
+  // which has no geo filter and would silently drop it.
+  const geoActive = geoCountryVal !== undefined || geoAsnVal !== undefined;
+  const explore = facetsActive || (searching && !geoActive);
 
   const liveState = useLogs(query, live, !explore, geoCountryVal, geoAsnVal);
   const history = useHistory(historyFilter, explore);
@@ -392,6 +396,8 @@ export function Logs() {
               state={history}
               openKey={openKey}
               setOpenKey={setOpenKey}
+              searching={searching}
+              term={term}
             />
           ) : (
             <LiveResults
@@ -459,10 +465,14 @@ function HistoryResults({
   state,
   openKey,
   setOpenKey,
+  searching,
+  term,
 }: {
   state: ReturnType<typeof useHistory>;
   openKey: string | null;
   setOpenKey: (key: string | null) => void;
+  searching: boolean;
+  term: string;
 }) {
   const { t } = useI18n();
   const { rows, error, loading, loadingMore, hasMore, loadMore } = state;
@@ -475,9 +485,8 @@ function HistoryResults({
     );
   }
   if (rows.length === 0) {
-    return (
-      <p className={styles.note}>{error ? t("logs.historyError", { error }) : t("logs.historyEmpty")}</p>
-    );
+    const empty = searching ? t("logs.noMatches", { term }) : t("logs.historyEmpty");
+    return <p className={styles.note}>{error ? t("logs.historyError", { error }) : empty}</p>;
   }
   return (
     <>
