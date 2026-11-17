@@ -7,6 +7,7 @@ import {
   type Group,
   type HistoryFilter,
   type NodeInfo,
+  type PhishingQuery,
   type QuerySource,
   type ResolverStat,
 } from "../lib/api";
@@ -21,9 +22,13 @@ import styles from "./Logs.module.css";
  *  does not fire a request per character. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-/** The source facets, in the order they read in the sidebar: the signal worth
- *  seeing first, then the ordinary outcomes. */
+/** The source facets, in the order they read as pills: the signal worth seeing
+ *  first, then the ordinary outcomes. */
 const SOURCE_FACETS: QuerySource[] = ["blocked", "cache", "upstream", "local", "rewrite"];
+
+/** The phishing filter options, in the order the select lists them. `null` is
+ *  "no phishing filter". */
+const PHISHING_OPTIONS: (PhishingQuery | null)[] = [null, "any", "warn", "block"];
 
 /** Record-type and response-code options for the selects, by ascending wire
  *  value so the common ones (A, then AAAA; NOERROR, then the errors) lead. */
@@ -74,9 +79,13 @@ export function Logs() {
   const [query, setQuery] = useState("");
   const [live, setLive] = useState(true);
   const [openKey, setOpenKey] = useState<string | null>(null);
+  // The secondary filters (type, code, resolver, device, geo, time) fold behind
+  // a disclosure so the bar stays a search plus a row of source pills by default.
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Facet filters. Any one of them switches the page into history mode.
   const [sources, setSources] = useState<QuerySource[]>([]);
+  const [phishing, setPhishing] = useState<PhishingQuery | null>(null);
   const [recordType, setRecordType] = useState<number | null>(null);
   const [responseCode, setResponseCode] = useState<number | null>(null);
   const [resolver, setResolver] = useState<string | null>(null);
@@ -143,6 +152,7 @@ export function Logs() {
 
   const facetsActive =
     sources.length > 0 ||
+    phishing !== null ||
     recordType !== null ||
     responseCode !== null ||
     resolver !== null ||
@@ -151,11 +161,34 @@ export function Logs() {
     startMs !== null ||
     endMs !== null;
 
+  // How many of the folded-away filters are set, so the disclosure can show a
+  // count without opening (the source pills and phishing live outside it). The
+  // geo filter only counts while it actually applies: a history facet disables
+  // it (it is live-only), so counting it then would overstate what is in effect.
+  const moreActiveCount =
+    (recordType !== null ? 1 : 0) +
+    (responseCode !== null ? 1 : 0) +
+    (resolver !== null ? 1 : 0) +
+    (device !== null || group !== null ? 1 : 0) +
+    (startMs !== null || endMs !== null ? 1 : 0) +
+    (!facetsActive && (geoCountryVal !== undefined || geoAsnVal !== undefined) ? 1 : 0);
+
   // Memoised so its identity is stable between renders: the history hook keys
   // its first-page load on this object.
   const historyFilter = useMemo<HistoryFilter>(
-    () => ({ sources, recordType, responseCode, resolver, device, group, startMs, endMs, q: query }),
-    [sources, recordType, responseCode, resolver, device, group, startMs, endMs, query],
+    () => ({
+      sources,
+      phishing,
+      recordType,
+      responseCode,
+      resolver,
+      device,
+      group,
+      startMs,
+      endMs,
+      q: query,
+    }),
+    [sources, phishing, recordType, responseCode, resolver, device, group, startMs, endMs, query],
   );
 
   // A text search is a filter too, so it reads the full durable history (DuckDB),
@@ -179,6 +212,7 @@ export function Logs() {
 
   function resetFilters() {
     setSources([]);
+    setPhishing(null);
     setRecordType(null);
     setResponseCode(null);
     setResolver(null);
@@ -186,6 +220,8 @@ export function Logs() {
     setGroup(null);
     setStartStr("");
     setEndStr("");
+    setGeoCountry("");
+    setGeoAsn("");
   }
 
   const term = query.trim();
@@ -209,207 +245,273 @@ export function Logs() {
           </label>
         </div>
         <p className={styles.scopeNote}>{t("logs.scopeNote")}</p>
-        <input
-          type="search"
-          className={styles.input}
-          placeholder={t("logs.searchPlaceholder")}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-        />
+
+        <div className={styles.search}>
+          <svg
+            className={styles.searchIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M16.5 16.5L21 21" />
+          </svg>
+          <input
+            type="search"
+            className={styles.searchInput}
+            placeholder={t("logs.searchPlaceholder")}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+
+        <div className={styles.filterBar} aria-label={t("logs.filters")}>
+          {SOURCE_FACETS.map((source) => {
+            const on = sources.includes(source);
+            return (
+              <button
+                key={source}
+                type="button"
+                className={styles.pill}
+                data-on={on || undefined}
+                aria-pressed={on}
+                onClick={() => toggleSource(source)}
+              >
+                <span className={styles.pillDot} data-source={source} aria-hidden="true" />
+                {sourceLabel(source, lang)}
+              </button>
+            );
+          })}
+
+          <label className={styles.pillSelect} data-on={phishing !== null || undefined}>
+            <span className={styles.pillDot} data-phishing aria-hidden="true" />
+            <span className={styles.pillSelectLabel}>
+              {phishing === null
+                ? t("logs.filterPhishing")
+                : phishing === "any"
+                  ? t("logs.phishingAny")
+                  : phishing === "warn"
+                    ? t("logs.phishingWarn")
+                    : t("logs.phishingBlock")}
+            </span>
+            <span className={styles.pillCaret} aria-hidden="true">
+              ›
+            </span>
+            <select
+              aria-label={t("logs.filterPhishing")}
+              value={phishing ?? ""}
+              onChange={(event) =>
+                setPhishing(event.target.value === "" ? null : (event.target.value as PhishingQuery))
+              }
+            >
+              {PHISHING_OPTIONS.map((option) => (
+                <option key={option ?? "off"} value={option ?? ""}>
+                  {option === null
+                    ? t("logs.phishingOff")
+                    : option === "any"
+                      ? t("logs.phishingAny")
+                      : option === "warn"
+                        ? t("logs.phishingWarn")
+                        : t("logs.phishingBlock")}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            className={styles.moreButton}
+            data-on={moreActiveCount > 0 || undefined}
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((value) => !value)}
+          >
+            {t("logs.moreFilters")}
+            {moreActiveCount > 0 ? <span className={styles.moreCount}>{moreActiveCount}</span> : null}
+            <span className={styles.caret} data-open={moreOpen || undefined} aria-hidden="true">
+              ›
+            </span>
+          </button>
+
+          {facetsActive && (
+            <button type="button" className={styles.reset} onClick={resetFilters}>
+              {t("logs.filterReset")}
+            </button>
+          )}
+        </div>
+
+        {moreOpen && (
+          <div className={styles.morePanel}>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterType")}</span>
+              <select
+                className={styles.select}
+                value={recordType ?? ""}
+                onChange={(event) =>
+                  setRecordType(event.target.value === "" ? null : Number(event.target.value))
+                }
+              >
+                <option value="">{t("logs.filterAny")}</option>
+                {RECORD_TYPE_OPTIONS.map((code) => (
+                  <option key={code} value={code}>
+                    {recordTypeLabel(code)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterCode")}</span>
+              <select
+                className={styles.select}
+                value={responseCode ?? ""}
+                onChange={(event) =>
+                  setResponseCode(event.target.value === "" ? null : Number(event.target.value))
+                }
+              >
+                <option value="">{t("logs.filterAny")}</option>
+                {RESPONSE_CODE_OPTIONS.map((code) => (
+                  <option key={code} value={code}>
+                    {responseCodeLabel(code)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterResolver")}</span>
+              <select
+                className={styles.select}
+                value={resolver ?? ""}
+                onChange={(event) => setResolver(event.target.value === "" ? null : event.target.value)}
+                disabled={resolverOptions.length === 0}
+              >
+                <option value="">{t("logs.filterAny")}</option>
+                {resolverOptions.map((option) => (
+                  <option key={option.resolver} value={option.resolver}>
+                    {option.resolver}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterDeviceGroup")}</span>
+              <select
+                className={styles.select}
+                value={device != null ? `d:${device}` : group != null ? `g:${group}` : ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value.startsWith("g:")) {
+                    setGroup(value.slice(2));
+                    setDevice(null);
+                  } else if (value.startsWith("d:")) {
+                    setDevice(value.slice(2));
+                    setGroup(null);
+                  } else {
+                    setDevice(null);
+                    setGroup(null);
+                  }
+                }}
+                disabled={deviceOptions.length === 0 && groupOptions.length === 0}
+              >
+                <option value="">{t("logs.filterAny")}</option>
+                {groupOptions.length > 0 && (
+                  <optgroup label={t("logs.filterGroups")}>
+                    {groupOptions.map((option) => (
+                      <option key={option.id} value={`g:${option.id}`}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {deviceOptions.length > 0 && (
+                  <optgroup label={t("logs.filterDevices")}>
+                    {deviceOptions.map((option) => (
+                      <option key={option.target} value={`d:${option.target}`}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterFrom")}</span>
+              <input
+                type="datetime-local"
+                className={styles.select}
+                value={startStr}
+                onChange={(event) => setStartStr(event.target.value)}
+              />
+            </label>
+
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("logs.filterTo")}</span>
+              <input
+                type="datetime-local"
+                className={styles.select}
+                value={endStr}
+                onChange={(event) => setEndStr(event.target.value)}
+              />
+            </label>
+
+            <fieldset className={styles.geoField} disabled={facetsActive}>
+              <legend className={styles.fieldLabel}>{t("logs.filterGeo")}</legend>
+              <div className={styles.geoInputs}>
+                <input
+                  type="text"
+                  className={styles.select}
+                  value={geoCountry}
+                  onChange={(event) => setGeoCountry(event.target.value)}
+                  placeholder={t("logs.filterGeoCountry")}
+                  maxLength={2}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <input
+                  type="number"
+                  className={styles.select}
+                  value={geoAsn}
+                  onChange={(event) => setGeoAsn(event.target.value)}
+                  placeholder={t("logs.filterGeoAsn")}
+                  min={0}
+                  step={1}
+                  autoComplete="off"
+                />
+              </div>
+              <span className={styles.fieldHint}>
+                {facetsActive ? t("logs.filterGeoLiveOnly") : t("logs.filterGeoHint")}
+              </span>
+            </fieldset>
+          </div>
+        )}
       </header>
 
-      <div className={styles.explorer}>
-        <aside className={styles.filters} aria-label={t("logs.filters")}>
-          <div className={styles.filtersHead}>
-            <h2 className={styles.filtersTitle}>{t("logs.filters")}</h2>
-            {facetsActive && (
-              <button type="button" className={styles.reset} onClick={resetFilters}>
-                {t("logs.filterReset")}
-              </button>
-            )}
-          </div>
-
-          <fieldset className={styles.facet}>
-            <legend className={styles.facetLabel}>{t("logs.filterSource")}</legend>
-            {SOURCE_FACETS.map((source) => (
-              <label key={source} className={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={sources.includes(source)}
-                  onChange={() => toggleSource(source)}
-                />
-                <span className={styles.source} data-source={source}>
-                  {sourceLabel(source, lang)}
-                </span>
-              </label>
-            ))}
-          </fieldset>
-
-          <fieldset className={styles.facet} disabled={facetsActive}>
-            <legend className={styles.facetLabel}>{t("logs.filterGeo")}</legend>
-            <input
-              type="text"
-              className={styles.select}
-              value={geoCountry}
-              onChange={(event) => setGeoCountry(event.target.value)}
-              placeholder={t("logs.filterGeoCountry")}
-              maxLength={2}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <input
-              type="number"
-              className={styles.select}
-              value={geoAsn}
-              onChange={(event) => setGeoAsn(event.target.value)}
-              placeholder={t("logs.filterGeoAsn")}
-              min={0}
-              step={1}
-              autoComplete="off"
-            />
-            <span className={styles.facetHint}>
-              {facetsActive ? t("logs.filterGeoLiveOnly") : t("logs.filterGeoHint")}
-            </span>
-          </fieldset>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterType")}</span>
-            <select
-              className={styles.select}
-              value={recordType ?? ""}
-              onChange={(event) =>
-                setRecordType(event.target.value === "" ? null : Number(event.target.value))
-              }
-            >
-              <option value="">{t("logs.filterAny")}</option>
-              {RECORD_TYPE_OPTIONS.map((code) => (
-                <option key={code} value={code}>
-                  {recordTypeLabel(code)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterCode")}</span>
-            <select
-              className={styles.select}
-              value={responseCode ?? ""}
-              onChange={(event) =>
-                setResponseCode(event.target.value === "" ? null : Number(event.target.value))
-              }
-            >
-              <option value="">{t("logs.filterAny")}</option>
-              {RESPONSE_CODE_OPTIONS.map((code) => (
-                <option key={code} value={code}>
-                  {responseCodeLabel(code)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterResolver")}</span>
-            <select
-              className={styles.select}
-              value={resolver ?? ""}
-              onChange={(event) => setResolver(event.target.value === "" ? null : event.target.value)}
-              disabled={resolverOptions.length === 0}
-            >
-              <option value="">{t("logs.filterAny")}</option>
-              {resolverOptions.map((option) => (
-                <option key={option.resolver} value={option.resolver}>
-                  {option.resolver}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterDeviceGroup")}</span>
-            <select
-              className={styles.select}
-              value={device != null ? `d:${device}` : group != null ? `g:${group}` : ""}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value.startsWith("g:")) {
-                  setGroup(value.slice(2));
-                  setDevice(null);
-                } else if (value.startsWith("d:")) {
-                  setDevice(value.slice(2));
-                  setGroup(null);
-                } else {
-                  setDevice(null);
-                  setGroup(null);
-                }
-              }}
-              disabled={deviceOptions.length === 0 && groupOptions.length === 0}
-            >
-              <option value="">{t("logs.filterAny")}</option>
-              {groupOptions.length > 0 && (
-                <optgroup label={t("logs.filterGroups")}>
-                  {groupOptions.map((option) => (
-                    <option key={option.id} value={`g:${option.id}`}>
-                      {option.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {deviceOptions.length > 0 && (
-                <optgroup label={t("logs.filterDevices")}>
-                  {deviceOptions.map((option) => (
-                    <option key={option.target} value={`d:${option.target}`}>
-                      {option.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterFrom")}</span>
-            <input
-              type="datetime-local"
-              className={styles.select}
-              value={startStr}
-              onChange={(event) => setStartStr(event.target.value)}
-            />
-          </label>
-
-          <label className={styles.facet}>
-            <span className={styles.facetLabel}>{t("logs.filterTo")}</span>
-            <input
-              type="datetime-local"
-              className={styles.select}
-              value={endStr}
-              onChange={(event) => setEndStr(event.target.value)}
-            />
-          </label>
-        </aside>
-
-        <section className={styles.results}>
-          {explore ? (
-            <HistoryResults
-              state={history}
-              openKey={openKey}
-              setOpenKey={setOpenKey}
-              searching={searching}
-              term={term}
-            />
-          ) : (
-            <LiveResults
-              state={liveState}
-              openKey={openKey}
-              setOpenKey={setOpenKey}
-              searching={searching}
-              term={term}
-            />
-          )}
-        </section>
-      </div>
+      <section className={styles.results}>
+        {explore ? (
+          <HistoryResults
+            state={history}
+            openKey={openKey}
+            setOpenKey={setOpenKey}
+            searching={searching}
+            term={term}
+          />
+        ) : (
+          <LiveResults
+            state={liveState}
+            openKey={openKey}
+            setOpenKey={setOpenKey}
+            searching={searching}
+            term={term}
+          />
+        )}
+      </section>
     </div>
   );
 }
@@ -490,7 +592,6 @@ function HistoryResults({
   }
   return (
     <>
-      <p className={styles.hint}>{t("logs.historyHint")}</p>
       <p className={styles.count}>
         {t("logs.historyShown", { n: rows.length })}
         {error ? t("logs.historyError", { error }) : ""}
@@ -512,9 +613,10 @@ function HistoryResults({
   );
 }
 
-/** The shared results list: one grid, one expandable row per entry. In the
- *  history view the rows span several days, so the Zeit cell also shows the
- *  date; the live view is always "today", so it stays time-only. */
+/** The stream: one expandable row per entry. A colour-coded dot carries the
+ *  source, the domain leads, and only the tags a row actually has (phishing,
+ *  geo, the answering node) show up — so an ordinary row stays quiet. In the
+ *  history view the rows span several days, so the time also shows the date. */
 function LogList({
   rows,
   openKey,
@@ -530,12 +632,6 @@ function LogList({
   const { nodeLabels, selfLabel, showNodes } = useNodeLabels();
   return (
     <ol className={styles.list}>
-      <li className={styles.columns} aria-hidden="true">
-        <span>{t("logs.colTime")}</span>
-        <span>{t("logs.colClient")}</span>
-        <span>{t("logs.colDomain")}</span>
-        <span className={styles.detailsHead}>{t("logs.colDetails")}</span>
-      </li>
       {rows.map((row, index) => {
         const key = `${row.at_ms}-${index}`;
         const open = openKey === key;
@@ -552,6 +648,12 @@ function LogList({
               aria-expanded={open}
               onClick={() => setOpenKey(open ? null : key)}
             >
+              <span
+                className={styles.dot}
+                data-source={row.source}
+                title={row.sourceText}
+                aria-label={row.sourceText}
+              />
               <span className={styles.time}>
                 {showDate && <span className={styles.date}>{row.date}</span>}
                 {row.time}
@@ -560,8 +662,34 @@ function LogList({
                 {row.deviceName ?? row.client}
               </span>
               <span className={styles.domainCell}>
-                <span className={styles.domain} title={row.name}>
-                  {row.name}
+                <span className={styles.domainLine}>
+                  <span className={styles.domain} title={row.name}>
+                    {row.name}
+                  </span>
+                  {row.phishing &&
+                    (() => {
+                      const kindLabel =
+                        row.phishing.kind === "lookalike"
+                          ? t("phishing.kindLookalike")
+                          : row.phishing.kind === "punycode"
+                            ? t("phishing.kindPunycode")
+                            : t("phishing.kindNrd");
+                      const verdict = row.phishing.blocked
+                        ? t("phishing.badgeBlock")
+                        : t("phishing.badgeWarn");
+                      const detail = row.phishing.brand
+                        ? `${kindLabel} · ${row.phishing.brand}`
+                        : kindLabel;
+                      return (
+                        <span
+                          className={styles.phishingPill}
+                          data-mode={row.phishing.blocked ? "block" : "warn"}
+                          title={`${t("phishing.title")}: ${detail} · ${verdict}`}
+                        >
+                          {t("phishing.badge")}
+                        </span>
+                      );
+                    })()}
                 </span>
                 {row.addresses.length > 0 ? (
                   <span className={styles.resolved} title={row.addresses.join(", ")}>
@@ -597,30 +725,6 @@ function LogList({
                 ) : null}
               </span>
               <span className={styles.meta}>
-                {row.phishing &&
-                  (() => {
-                    const kindLabel =
-                      row.phishing.kind === "lookalike"
-                        ? t("phishing.kindLookalike")
-                        : row.phishing.kind === "punycode"
-                          ? t("phishing.kindPunycode")
-                          : t("phishing.kindNrd");
-                    const verdict = row.phishing.blocked
-                      ? t("phishing.badgeBlock")
-                      : t("phishing.badgeWarn");
-                    const detail = row.phishing.brand
-                      ? `${kindLabel} · ${row.phishing.brand}`
-                      : kindLabel;
-                    return (
-                      <span
-                        className={styles.phishingPill}
-                        data-mode={row.phishing.blocked ? "block" : "warn"}
-                        title={`${t("phishing.title")}: ${detail} · ${verdict}`}
-                      >
-                        {t("phishing.badge")}
-                      </span>
-                    );
-                  })()}
                 {showNodes &&
                   (() => {
                     const isSelf = !row.origin;
@@ -641,9 +745,6 @@ function LogList({
                     );
                   })()}
                 <span className={styles.type}>{row.type}</span>
-                <span className={styles.source} data-source={row.source}>
-                  {row.sourceText}
-                </span>
                 {row.rcodeTone !== "none" && (
                   <span className={styles.rcode} data-tone={row.rcodeTone}>
                     {row.rcode}

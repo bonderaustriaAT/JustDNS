@@ -654,11 +654,16 @@ export interface HistoryCursor {
  *  filter (with `q` blank and no facets) returns the newest slice of the whole
  *  history. `sources` is OR-combined; a `null` select means "any". `startMs` /
  *  `endMs` are epoch-millisecond bounds, inclusive. */
+/** The phishing filter options: any hit, or narrowed to one mode. */
+export type PhishingQuery = "any" | "warn" | "block";
+
 export interface HistoryFilter {
   sources: QuerySource[];
   recordType: number | null;
   responseCode: number | null;
   resolver: string | null;
+  /** Keep only phishing hits, optionally one mode. `null` applies no constraint. */
+  phishing: PhishingQuery | null;
   /** Filter to one named device, by its `target` (address or CIDR range). */
   device: string | null;
   /** Filter to one device group, by its stable `id`. `device` wins if both set. */
@@ -1443,6 +1448,7 @@ export const api = {
     if (filter.startMs != null) params.set("startMs", String(filter.startMs));
     if (filter.endMs != null) params.set("endMs", String(filter.endMs));
     if (filter.q.trim()) params.set("q", filter.q.trim());
+    if (filter.phishing) params.set("phishing", filter.phishing);
     return getJson<HistoryResponse>(`/api/queries/history?${params}`, signal);
   },
   /** The cluster roster resolved to display labels, so the explorer can show

@@ -96,16 +96,19 @@
   gap: 2px;
 }
 
-/* A quiet heading above each rail group (General, DNS): a signpost, not a row. */
+/* A clear heading above each rail group (General, DNS): a titled section marker.
+   Brighter than a row label and underlined with a hairline so the groups read as
+   distinct blocks at a glance. */
 .railGroupLabel {
   padding-inline: var(--space-3);
-  padding-block-end: 2px;
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
+  padding-block-end: var(--space-1);
+  margin-block-end: var(--space-1);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  opacity: 0.75;
+  border-block-end: 1px solid var(--line);
 }
 
 .railLink,

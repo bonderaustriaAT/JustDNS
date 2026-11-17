@@ -10,8 +10,8 @@ mod recorder;
 mod store;
 
 pub use duck::{
-    Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, QueryFilter, StoreError,
-    TrackerScanRow, natural_key,
+    Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, PhishingFilter, QueryFilter,
+    StoreError, TrackerScanRow, natural_key,
 };
 pub use event::{DnssecStatus, PhishingFlag, PhishingKind, QueryEvent, QuerySource};
 pub use recorder::{

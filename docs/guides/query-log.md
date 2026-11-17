@@ -15,12 +15,14 @@ Each entry shows:
 - **Device / client** — the device name if you have [named it](devices.md), otherwise
   the IP address.
 - **Name** that was looked up.
-- **How it was answered** — one of:
+- **How it was answered** — marked by a **coloured dot** at the start of the row, one of:
   - **Cache** — served from the local cache.
   - **Upstream** — looked up at your resolvers.
   - **Local** — answered by JustDNS itself.
   - **Rewrite** — answered by one of your [rewrites](rewrites.md).
   - **Blocked** — stopped by a filter.
+- **Phishing** — if [phishing detection](phishing.md) fired, the row carries a marker
+  right next to the name: **amber** for a warning, **red** for a block.
 - **Addresses** it resolved to (empty for a block or a non-address record).
 - **Server** — in a [high-availability](high-availability.md) cluster, a small badge shows
   which node answered the query, by its **hostname** (the host part of the node's
@@ -35,10 +37,17 @@ everything the device you named "Kids' tablet" asked for.
 
 ## Filtering and the full history
 
-To the left of the list is a **filter rail**. Use it to narrow the log by:
+Above the list is a **filter bar**. The common filters are in the open:
 
-- **Source** — one or more of blocked, cache, upstream, local or rewrite (tick
-  several to see any of them).
+- **Source** — toggles for blocked, cache, upstream, local and rewrite. Tap one or
+  several; several show any of them.
+- **Phishing** — shows only entries where [phishing detection](phishing.md) fired:
+  **hits only**, **warned only** or **blocked only**. This is how you hunt down a
+  suspicious name such as a freshly registered lookalike domain — across the whole
+  history, too.
+
+Behind **More filters** are the rarer ones:
+
 - **Record type** — A, AAAA, HTTPS, and so on.
 - **Response code** — NOERROR, NXDOMAIN, SERVFAIL, …
 - **Resolver** — which upstream answered (only the ones that have answered recently
@@ -47,9 +56,12 @@ To the left of the list is a **filter rail**. Use it to narrow the log by:
   [group](policies.md). Only named devices are offered; a group matches every device in
   it. A device defined as an address range (CIDR) matches every observed address inside
   it, following the same "most specific device wins" resolution as the device column.
+- **Country / network (ASN)** — narrows by where the answer resolves. This applies to
+  the **live feed** only: the stored history has no geo index, so this filter rests as
+  soon as another filter switches the view to history.
 - **From / To** — a time range.
 
-As soon as you set any filter, the page switches from the live tail to the **full
+As soon as you set any filter (other than Country / network), the page switches from the live tail to the **full
 stored history**: it reads straight from the durable log on disk, so you are no longer
 limited to the most recent entries kept in memory. Because this view spans several days,
 the **Time** column here also shows the **date**. Live updating pauses while you filter

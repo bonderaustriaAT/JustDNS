@@ -15,12 +15,16 @@ Jeder Eintrag zeigt:
 - **Gerät / Client** — der Gerätename, wenn du es [benannt hast](devices.de.md), sonst
   die IP-Adresse.
 - **Name**, der abgefragt wurde.
-- **Wie es beantwortet wurde** — eines von:
+- **Wie es beantwortet wurde** — am Zeilenanfang als **farbiger Punkt** markiert, eines
+  von:
   - **Cache** — aus dem lokalen Cache geliefert.
   - **Upstream** — bei deinen Resolvern nachgefragt.
   - **Lokal** — von JustDNS selbst beantwortet.
   - **Rewrite** — von einem deiner [Rewrites](rewrites.de.md) beantwortet.
   - **Geblockt** — von einem Filter gestoppt.
+- **Phishing** — hat die [Phishing-Erkennung](phishing.de.md) angeschlagen, trägt die
+  Zeile direkt neben dem Namen eine Markierung: **gelb** für eine Warnung, **rot** für
+  eine Sperre.
 - **Adressen**, auf die es auflöste (leer bei einer Sperre oder einem
   Nicht-Adress-Record).
 - **Server** — in einem [Hochverfügbarkeits](high-availability.de.md)-Verbund zeigt ein
@@ -37,11 +41,17 @@ das **Gerät** — einschließlich des sprechenden Gerätenamens, sodass die Suc
 
 ## Filtern und die gesamte Historie
 
-Links neben der Liste liegt eine **Filterschiene**. Damit grenzt du das Protokoll ein
-nach:
+Über der Liste liegt eine **Filterleiste**. Die häufigsten Filter liegen offen:
 
-- **Quelle** — eine oder mehrere von Geblockt, Cache, Upstream, Lokal oder Rewrite
-  (mehrere anhaken zeigt alle davon).
+- **Quelle** — Umschalter für Geblockt, Cache, Upstream, Lokal und Rewrite. Tippe einen
+  oder mehrere an; mehrere zeigen alle davon.
+- **Phishing** — zeigt nur Einträge, bei denen die
+  [Phishing-Erkennung](phishing.de.md) angeschlagen hat: **Nur Treffer**, **Nur
+  gewarnt** oder **Nur blockiert**. So findest du gezielt verdächtige Namen wie eine
+  frisch registrierte Nachahmer-Domain — auch quer durch die ganze Historie.
+
+Hinter **Mehr Filter** liegen die selteneren:
+
 - **Record-Typ** — A, AAAA, HTTPS und so weiter.
 - **Antwortcode** — NOERROR, NXDOMAIN, SERVFAIL, …
 - **Resolver** — welcher Upstream geantwortet hat (es erscheinen nur die, die zuletzt
@@ -51,9 +61,12 @@ nach:
   alle Geräte darin. Ein als Adressbereich (CIDR) definiertes Gerät trifft dabei jede
   beobachtete Adresse in seinem Bereich — nach derselben „spezifischstes Gerät gewinnt“-
   Zuordnung wie in der Gerätespalte.
+- **Land / Netz (ASN)** — grenzt nach dem Ziel der Antwort ein. Das wirkt nur auf den
+  **Live-Feed**: Die gespeicherte Historie hat keinen Geo-Index, daher ruht dieser
+  Filter, sobald ein anderer Filter auf die Historie umschaltet.
 - **Von / Bis** — ein Zeitraum.
 
-Sobald du einen Filter setzt, wechselt die Seite vom Live-Verlauf auf die **gesamte
+Sobald du einen Filter setzt (außer Land / Netz), wechselt die Seite vom Live-Verlauf auf die **gesamte
 gespeicherte Historie**: Sie liest direkt aus dem dauerhaften Protokoll auf der Platte,
 du bist also nicht mehr auf die jüngsten, im Arbeitsspeicher gehaltenen Einträge
 beschränkt. Weil diese Ansicht über mehrere Tage reicht, zeigt die **Zeit**-Spalte hier
