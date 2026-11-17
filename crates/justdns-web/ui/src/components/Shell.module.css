@@ -112,27 +112,24 @@
   flex: 1;
 }
 
-/* The handful of top-level links, and each collapsible section, stack their
-   rows with the same tight rhythm; the sections themselves are spaced apart by
-   the `.groups` gap. */
-.navTop,
-.navGroup {
+/* Each labelled section stacks its rows with the same tight rhythm; the sections
+   themselves are spaced apart by the `.groups` gap. */
+.navSection {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-/* A section's pages, revealed when its header is open. A quiet guide line and a
-   small indent tie them to the header without the heavy offset a full submenu
-   needs — the icons still line up as a column of their own. */
-.groupItems {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-block-start: 3px;
-  margin-inline-start: calc(var(--space-2) + 9px);
-  padding-inline-start: var(--space-2);
-  border-inline-start: 1px solid var(--line);
+/* A quiet heading above each section's rows: small, muted and spaced out, so it
+   reads as a signpost for the block below rather than a clickable row. */
+.sectionLabel {
+  padding: var(--space-1) var(--space-2) 2px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
 }
 
 .navItem,
@@ -211,21 +208,41 @@
   text-align: center;
 }
 
+/* The two Block/Allow sub-pages. A quiet guide line and a small indent tie them
+   to the parent row, lined up under its label (past the parent icon), with their
+   own icons forming a second column of their own. */
 .subNav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Indent to line up under the parent label, past the icon. */
-  margin-inline-start: calc(var(--space-2) + 18px + var(--space-2));
+  margin-block-start: 2px;
+  margin-inline-start: calc(var(--space-2) + 9px);
+  padding-inline-start: var(--space-2);
+  border-inline-start: 1px solid var(--line);
 }
 
 .navSub,
 .navSubActive {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: var(--step--1);
-  white-space: nowrap;
+  white-space: normal;
+}
+
+/* The small leading icon on a sub-page row: a notch smaller than a top-level
+   icon so the submenu stays visibly subordinate. */
+.navSubIcon {
+  display: inline-flex;
+  flex: none;
+}
+
+.navSubIcon svg {
+  inline-size: 15px;
+  block-size: 15px;
 }
 
 .navSub:hover {

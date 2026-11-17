@@ -41,7 +41,9 @@
   font-size: var(--step--1);
   font-weight: 400;
   line-height: 1.45;
-  white-space: normal;
+  /* Preserve the blank line between a short description and its fuller details,
+     while still wrapping long lines. */
+  white-space: pre-line;
   pointer-events: none;
 }
 

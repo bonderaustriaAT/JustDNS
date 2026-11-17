@@ -3,6 +3,21 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.38.0] - 2026-11-17
+
+- Changed: **The sidebar is grouped for easier scanning.** The menu is now split into four
+  labelled sections (Overview, Protection, Rules, System), each a quiet heading above its pages,
+  with every entry shown at once. The two long sections no longer fold in and out, so a page is
+  always one click away and the whole list stays readable.
+- Changed: **The Block/Allow submenu is tidier.** Its two sub-pages ("Your own lists by URL" and
+  "Ready-made lists") now carry their own small icons and line up under a guide line, so the
+  submenu reads as a clear branch of the list.
+- Changed: **Settings are rebuilt for clarity.** The category rail is now grouped under General
+  and DNS, with a search field that finds a category by name or by what it holds (typing "ipv6"
+  reaches Network). Each setting is one line (its name and its control); the explanation moves
+  behind the ⓘ next to the name. Expert mode is now a quiet switch at the foot of the rail instead
+  of a wide band at the top.
+
 ## [0.37.3] - 2026-11-17
 
 - Changed: **The phishing marker in the query log is clearer.** A hit now shows a small
