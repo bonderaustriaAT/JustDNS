@@ -52,7 +52,7 @@ encrypts its own files independently; the upgrade needs no coordination there.
 ## For the technically curious
 
 The key is a 32-byte random master key, generated with the system CSPRNG on first boot
-and written to `JUSTDNS_SECRET_KEY_PATH` (default `/keys/master.key`) with owner-only
+and written to `JUSTDNS_SECRET_KEY_PATH` (the image sets this to `/keys/master.key`) with owner-only
 permissions, flushed to disk before use. From it, each secret file derives its own
 subkey with **HKDF-SHA256** under a per-file label (`auth-v1`, `config-v1`), so no two
 files share the exact key. The payload is sealed with **ChaCha20-Poly1305**; the

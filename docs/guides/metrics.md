@@ -14,7 +14,7 @@ no extra port needs opening.
 ## Turning it on
 
 The endpoint is **off by default**. The simplest way to switch it on is in the
-dashboard: open **Settings → Netzwerk**, find **Metrics token (Prometheus)**, press
+dashboard: open **Settings → Network**, find **Metrics token (Prometheus)**, press
 **Generate token**, copy it, and it saves automatically. From then on `/metrics` is
 served and the scraper must present that token. Clearing the field turns the endpoint
 off again. The token is stored with the rest of your configuration, encrypted at rest.

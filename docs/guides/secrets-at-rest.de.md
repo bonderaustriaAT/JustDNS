@@ -53,7 +53,7 @@ eigenen Dateien unabhängig; dort braucht das Update keine Abstimmung.
 ## Für die technisch Neugierigen
 
 Der Schlüssel ist ein 32-Byte-Zufalls-Masterschlüssel, beim ersten Start mit dem
-System-CSPRNG erzeugt und nach `JUSTDNS_SECRET_KEY_PATH` (Default `/keys/master.key`)
+System-CSPRNG erzeugt und nach `JUSTDNS_SECRET_KEY_PATH` (vom Image auf `/keys/master.key` gesetzt)
 mit Besitzer-Rechten geschrieben, vor der Nutzung auf die Platte geflusht. Daraus leitet
 jede Secret-Datei per **HKDF-SHA256** unter einem eigenen Label (`auth-v1`, `config-v1`)
 ihren eigenen Teilschlüssel ab, sodass keine zwei Dateien denselben Schlüssel teilen.

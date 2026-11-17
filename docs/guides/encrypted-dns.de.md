@@ -107,9 +107,11 @@ den Hostnamen und die Auswahlen, nicht die private Identität des Servers); nach
 Einspielen auf einer frischen Maschine die Zertifikate auf der Zertifikate-Seite neu
 erzeugen oder erneut hochladen.
 
-**Die selbstsignierte CA installieren.**
+**Die selbstsignierte CA installieren.** Lade sie zuerst auf der
+[Zertifikate-Seite](certificates.de.md) herunter — die Datei ist nach dem Zertifikat
+benannt (beim Standard `Standard-ca.pem`). Dann:
 
-- **Windows:** `justdns-ca.pem` doppelklicken → *Zertifikat installieren* →
+- **Windows:** die Datei doppelklicken → *Zertifikat installieren* →
   *Lokaler Computer* → *Alle Zertifikate in folgendem Speicher ablegen* →
   **Vertrauenswürdige Stammzertifizierungsstellen**.
 - **macOS:** in der **Schlüsselbundverwaltung** (System-Schlüsselbund) öffnen, dann
