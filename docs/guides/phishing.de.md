@@ -47,13 +47,16 @@ das DNSSEC-Urteil. Der Client bekommt dieselbe Antwort wie ohne Phishing-Schutz.
   unten). Je mehr Fenster aktiv sind, desto weiter reicht die Abdeckung — und
   desto mehr Arbeitsspeicher kostet die Liste.
 - Ein **Webhook-Schalter** meldet Treffer zusätzlich über die globalen
-  [Benachrichtigungen](notifications.de.md).
+  [Benachrichtigungen](notifications.de.md). Meldungen werden pro Gerät und
+  Domain zusammengefasst: Eine offene Seite, die laufend dieselbe Domain
+  auflöst, löst höchstens eine Meldung pro Stunde aus, nicht im Sekundentakt.
 - Darunter zeigt eine **Trefferliste** die letzten Phishing-Treffer aus dem
   Protokoll, jeweils mit Art (*Lookalike*, *Punycode*, *Neu registriert*) und
   Modus (*Gewarnt* oder *Blockiert*).
 
 Ein Treffer taucht außerdem direkt im [Protokoll](query-log.de.md) auf: als
-farbiges Badge an der Domain (bernstein beim Warnen, rot beim Blockieren) und als
+kleine *Phishing*-Pille in der Statusspalte neben der Quelle (bernstein beim
+Warnen, rot beim Blockieren). Art und nachgeahmte Marke stehen im Tooltip und als
 eigenes Feld in der Detailansicht einer Zeile.
 
 ## Die NRD-Feeds anklicken

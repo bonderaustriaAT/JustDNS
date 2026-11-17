@@ -42,14 +42,17 @@ verdict. The client gets the same answer it would without phishing protection.
   segment, and the **NRD feeds** to click on (see below). The more windows are
   active, the wider the coverage — and the more memory the list costs.
 - A **webhook switch** also reports hits through the global
-  [notifications](notifications.md).
+  [notifications](notifications.md). Alerts are grouped per device and domain: an
+  open page that keeps resolving the same domain raises at most one alert per hour,
+  not one every few seconds.
 - Below that, a **hits list** shows the most recent phishing hits from the log,
   each with its kind (*Lookalike*, *Punycode*, *Newly registered*) and mode
   (*Warned* or *Blocked*).
 
-A hit also shows up directly in the [query log](query-log.md): as a coloured badge
-on the domain (amber for warn, red for block) and as its own field in a row's
-detail view.
+A hit also shows up directly in the [query log](query-log.md): as a small *Phishing*
+pill in the status column next to the source (amber for warn, red for block). The
+kind and imitated brand are in the tooltip and as their own field in a row's detail
+view.
 
 ## Clicking the NRD feeds
 

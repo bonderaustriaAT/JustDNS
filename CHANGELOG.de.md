@@ -4,6 +4,23 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.37.3] - 2026-11-17
+
+- Geändert: **Die Phishing-Markierung im Protokoll ist übersichtlicher.** Ein Treffer zeigt jetzt
+  eine kleine „Phishing"-Pille in der Statusspalte neben der Quelle (Amber bei Warnen, Rot bei
+  Blockieren) statt einer breiten „Gewarnt"-Leiste, sodass die Zeile ruhig bleibt. Die Art des
+  Treffers und die nachgeahmte Marke stehen im aufgeklappten Detail der Zeile und im Tooltip.
+- Geändert: **Klarere Phishing-Meldungen.** Der Webhook meldet nun „Phishing-Warnung" oder
+  „Phishing blockiert", nennt das anfragende Gerät und sagt, ob die Antwort nur markiert oder
+  blockiert wurde.
+- Behoben: **Phishing-Meldungen wiederholen sich nicht mehr für eine offene Seite.** Meldungen
+  werden pro Gerät und registrierbarer Domain zusammengefasst, sodass eine Seite, die viele
+  Sub-Hosts derselben Domain auflöst, eine Meldung pro Stunde auslöst statt eine je Sub-Host.
+- Behoben: **Die Suche im Protokoll liest jetzt das volle Aufbewahrungsfenster.** Eine Textsuche
+  durchsuchte bisher nur den flüchtigen Live-Puffer, sodass ein Eintrag nach wenigen Minuten
+  verschwunden schien; sie liest nun die dauerhafte Historie (gemäß eingestellter Aufbewahrung,
+  z. B. 7 Tage), genau wie die Filter in der Seitenleiste.
+
 ## [0.37.2] - 2026-11-17
 
 - Behoben: **Eine vom Client abgebrochene TCP-Verbindung wird nicht mehr als Fehler geloggt.** Wenn

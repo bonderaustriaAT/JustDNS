@@ -3,6 +3,22 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.37.3] - 2026-11-17
+
+- Changed: **The phishing marker in the query log is clearer.** A hit now shows a small
+  "Phishing" pill in the status column beside the source (amber when warned, red when blocked)
+  instead of a wide "Warned" bar, so the row stays tidy. The kind of match and the imitated brand
+  are in the row's expanded detail and its tooltip.
+- Changed: **Clearer phishing alerts.** The webhook now reads "Phishing-Warnung" or "Phishing
+  blockiert", names the device that asked, and says whether the answer was only marked or blocked.
+- Fixed: **Phishing alerts no longer repeat for one open page.** Alerts are de-duplicated per device
+  and registrable domain, so a page that re-resolves many sub-hosts of the same site raises one
+  alert per hour instead of one per sub-host.
+- Fixed: **Searching the query log now reads the full retention window.** A text search previously
+  scanned only the live in-memory feed, so an entry could seem to vanish within minutes; it now
+  reads the durable history (kept for the configured retention, e.g. 7 days), exactly like the
+  sidebar filters.
+
 ## [0.37.2] - 2026-11-17
 
 - Fixed: **A client dropping a TCP connection is no longer logged as an error.** When a client

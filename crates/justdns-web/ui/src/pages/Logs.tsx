@@ -158,8 +158,14 @@ export function Logs() {
     [sources, recordType, responseCode, resolver, device, group, startMs, endMs, query],
   );
 
-  const liveState = useLogs(query, live, !facetsActive, geoCountryVal, geoAsnVal);
-  const history = useHistory(historyFilter, facetsActive);
+  // A text search is a filter too, so it reads the full durable history (DuckDB),
+  // not the in-memory ring: a name entered minutes later still turns up, instead
+  // of ageing out of the hot ring the moment newer queries push it off.
+  const searching = query.trim().length > 0;
+  const explore = facetsActive || searching;
+
+  const liveState = useLogs(query, live, !explore, geoCountryVal, geoAsnVal);
+  const history = useHistory(historyFilter, explore);
 
   function toggleSource(source: QuerySource) {
     setSources((prev) =>
@@ -179,7 +185,6 @@ export function Logs() {
   }
 
   const term = query.trim();
-  const searching = term.length > 0;
 
   return (
     <div className={styles.page}>
@@ -187,15 +192,15 @@ export function Logs() {
         <div className={styles.headline}>
           <h1 className={styles.title}>{t("logs.title")}</h1>
           <label className={styles.live}>
-            <span className={styles.liveLabel} data-on={live && !facetsActive}>
+            <span className={styles.liveLabel} data-on={live && !explore}>
               <span className={styles.liveDot} aria-hidden="true" />
-              {facetsActive ? t("logs.paused") : live ? t("logs.live") : t("logs.paused")}
+              {explore ? t("logs.paused") : live ? t("logs.live") : t("logs.paused")}
             </span>
             <Toggle
-              checked={live && !facetsActive}
+              checked={live && !explore}
               onChange={setLive}
               label={t("logs.liveToggle")}
-              disabled={facetsActive}
+              disabled={explore}
             />
           </label>
         </div>
@@ -382,7 +387,7 @@ export function Logs() {
         </aside>
 
         <section className={styles.results}>
-          {facetsActive ? (
+          {explore ? (
             <HistoryResults
               state={history}
               openKey={openKey}
@@ -549,26 +554,6 @@ function LogList({
                 <span className={styles.domain} title={row.name}>
                   {row.name}
                 </span>
-                {row.phishing &&
-                  (() => {
-                    const kindLabel =
-                      row.phishing.kind === "lookalike"
-                        ? t("phishing.kindLookalike")
-                        : row.phishing.kind === "punycode"
-                          ? t("phishing.kindPunycode")
-                          : t("phishing.kindNrd");
-                    return (
-                      <span
-                        className={styles.phishingBadge}
-                        data-mode={row.phishing.blocked ? "block" : "warn"}
-                        title={
-                          row.phishing.brand ? `${kindLabel} · ${row.phishing.brand}` : kindLabel
-                        }
-                      >
-                        {row.phishing.blocked ? t("phishing.badgeBlock") : t("phishing.badgeWarn")}
-                      </span>
-                    );
-                  })()}
                 {row.addresses.length > 0 ? (
                   <span className={styles.resolved} title={row.addresses.join(", ")}>
                     <span className={styles.resolvedArrow} aria-hidden="true">
@@ -603,6 +588,30 @@ function LogList({
                 ) : null}
               </span>
               <span className={styles.meta}>
+                {row.phishing &&
+                  (() => {
+                    const kindLabel =
+                      row.phishing.kind === "lookalike"
+                        ? t("phishing.kindLookalike")
+                        : row.phishing.kind === "punycode"
+                          ? t("phishing.kindPunycode")
+                          : t("phishing.kindNrd");
+                    const verdict = row.phishing.blocked
+                      ? t("phishing.badgeBlock")
+                      : t("phishing.badgeWarn");
+                    const detail = row.phishing.brand
+                      ? `${kindLabel} · ${row.phishing.brand}`
+                      : kindLabel;
+                    return (
+                      <span
+                        className={styles.phishingPill}
+                        data-mode={row.phishing.blocked ? "block" : "warn"}
+                        title={`${t("phishing.title")}: ${detail} · ${verdict}`}
+                      >
+                        {t("phishing.badge")}
+                      </span>
+                    );
+                  })()}
                 {showNodes &&
                   (() => {
                     const isSelf = !row.origin;
