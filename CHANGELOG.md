@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.37.2] - 2026-11-17
+
+- Fixed: **A client dropping a TCP connection is no longer logged as an error.** When a client
+  simply closed a DNS-over-TCP connection (reset by peer) while JustDNS was waiting for the next
+  message, this produced a scary `WARN` about a connection ended on error. It is now treated as the
+  clean close it is, so routine client disconnects stay quiet in the log.
+
 ## [0.37.1] - 2026-11-17
 
 - Fixed: **Newly-registered-domain (NRD) lists now start working right after you switch them on.**
