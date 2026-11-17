@@ -4,6 +4,21 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.39.0] - 2026-11-17
+
+- Geändert: **Das Protokoll ist als Fokus-Stream neu gestaltet.** Statt der Filterschiene links
+  liegt die Suche oben, darunter eine ruhige Leiste mit Quell-Umschaltern und dem Phishing-Filter;
+  die selteneren Filter (Typ, Antwortcode, Resolver, Gerät, Land/Netz, Zeitraum) liegen hinter
+  „Mehr Filter". Jede Zeile führt die Domain groß, mit einem farbigen Punkt für die Quelle am Anfang
+  und Markierungen nur dort, wo es etwas zu zeigen gibt. Alles, was die Ansicht vorher konnte, bleibt.
+- Neu: **Nach Phishing filtern.** Ein neuer Filter zeigt nur Einträge, bei denen die
+  Phishing-Erkennung angeschlagen hat, wahlweise nur gewarnte oder nur blockierte, quer durch die
+  ganze gespeicherte Historie. So findest du eine Nachahmer-Domain gezielt, auch wenn sie längst aus
+  dem Live-Strom gelaufen ist.
+- Geändert: **Die Gruppenüberschriften in den Einstellungen sind deutlicher.** „Allgemein" und „DNS"
+  stehen jetzt heller, kräftiger und mit einer feinen Trennlinie über ihren Zeilen, sodass die
+  Leiste auf einen Blick in ihre Abschnitte zerfällt.
+
 ## [0.38.1] - 2026-11-17
 
 - Behoben: **Der Wechsel der Einstellungs-Kategorie verschiebt die Seite nicht mehr seitlich.** Das

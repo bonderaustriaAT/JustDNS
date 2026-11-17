@@ -77,7 +77,23 @@
   }
 }
 
-.input {
+/* The command bar: a full-width search with a leading magnifier. */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  inset-inline-start: var(--space-3);
+  inline-size: 1rem;
+  block-size: 1rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.searchInput {
   inline-size: 100%;
   font-family: var(--font-mono);
   font-size: var(--step--1);
@@ -86,85 +102,202 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
+  padding-inline-start: calc(var(--space-3) + 1.4rem);
 }
 
-.input::placeholder {
+.searchInput::placeholder {
   color: var(--text-muted);
   font-family: var(--font-body);
 }
 
-.input:focus-visible {
+.searchInput:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
   border-color: var(--signal);
 }
 
-.count {
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  font-variant-numeric: tabular-nums;
-}
-
-.note {
-  color: var(--text-muted);
-  font-size: var(--step-1);
-  padding-block: var(--space-4);
-}
-
-/* A quiet one-line explanation shown above the history results so it is clear
-   the view now spans the whole stored log, not just the live tail. */
-.hint {
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  margin-block-end: var(--space-2);
-}
-
-.endNote {
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  text-align: center;
-  padding-block: var(--space-3);
-}
-
-/* The explorer: a narrow filter rail on the left, the results on the right. */
-.explorer {
-  display: grid;
-  grid-template-columns: 184px minmax(0, 1fr);
-  gap: var(--space-5);
-  align-items: start;
-}
-
-/* The filter rail. Sticky so the facets stay in reach while the list scrolls. */
-.filters {
+/* The filter band: source toggles, the phishing control and the "more" disclosure
+   sit in one wrapping row, so the common filters are one click with no rail. */
+.filterBar {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  position: sticky;
-  inset-block-start: var(--space-3);
-}
-
-.filtersHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
 }
 
-.filtersTitle {
+/* A source toggle, or the phishing control: a pill that fills in when active. */
+.pill,
+.pillSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
   font-size: var(--step--1);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--text-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pill[data-on],
+.pillSelect[data-on] {
+  color: var(--text);
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 12%, var(--surface-sunken));
+}
+
+.pill:hover,
+.pillSelect:hover {
+  border-color: var(--signal);
+}
+
+.pill:focus-visible,
+.pillSelect:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The phishing control wraps a native select laid invisibly over the pill, so the
+   pill itself is the hit target while the label shows the current choice. */
+.pillSelect {
+  position: relative;
+}
+
+.pillSelect select {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  margin: 0;
+  border: none;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.pillSelectLabel,
+.pillCaret {
+  pointer-events: none;
+}
+
+.pillCaret {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  rotate: 90deg;
+}
+
+/* The leading dot on a source pill (and on each stream row) carries the source
+   in colour; the dot on the phishing control reads as the alert hue. */
+.pillDot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex: none;
+}
+
+.pillDot[data-phishing] {
+  background: var(--danger);
+}
+
+.dot[data-source="blocked"],
+.pillDot[data-source="blocked"] {
+  background: var(--danger);
+}
+
+.dot[data-source="cache"],
+.pillDot[data-source="cache"] {
+  background: var(--signal);
+}
+
+.dot[data-source="upstream"],
+.pillDot[data-source="upstream"] {
+  background: color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+
+.dot[data-source="local"],
+.pillDot[data-source="local"] {
+  background: var(--amber);
+}
+
+.dot[data-source="rewrite"],
+.pillDot[data-source="rewrite"] {
+  background: var(--rewrite);
+}
+
+/* The "more filters" disclosure: a quiet pill that counts the folded filters. */
+.moreButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.moreButton:hover {
+  border-color: var(--signal);
+  color: var(--text);
+}
+
+.moreButton[data-on] {
+  color: var(--text);
+  border-color: var(--signal);
+}
+
+.moreButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.moreCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 1.1rem;
+  block-size: 1.1rem;
+  padding-inline: 4px;
+  border-radius: 999px;
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+  color: var(--surface);
+  background: var(--signal);
+}
+
+.caret {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: transform 0.15s ease;
+}
+
+.caret[data-open] {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    transition: none;
+  }
 }
 
 /* A plain text button, in signal colour so it reads as the one undo. */
 .reset {
   font: inherit;
-  font-size: var(--step--2);
+  font-size: var(--step--1);
   color: var(--signal-strong);
   background: none;
   border: none;
-  padding: 0;
+  padding: 0 var(--space-2);
   cursor: pointer;
 }
 
@@ -178,50 +311,63 @@
   border-radius: var(--radius-sm);
 }
 
-/* Each facet group: a small label over its control, separated by a hairline. */
-.facet {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: 0;
-  padding-block-start: var(--space-3);
-  border: none;
-  border-block-start: 1px solid var(--line);
+/* The folded-away filters: a panel of compact labelled controls that drops below
+   the band. A responsive grid so it reflows from one row to several. */
+.morePanel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 
-.facetLabel {
+/* One control in the panel: a small label over its input. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.fieldLabel {
   font-size: var(--step--1);
   color: var(--text-muted);
   padding: 0;
 }
 
-/* A short explanatory line under a facet's inputs (e.g. the live-only geo
-   filter). Quieter and smaller than the label it sits beneath. */
-.facetHint {
-  font-size: var(--step--2);
+/* The live-only geo filter spans the panel and holds its two inputs side by side,
+   with a hint underneath. It dims when a history facet makes it inapplicable. */
+.geoField {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-inline-size: 0;
+}
+
+.geoInputs {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.geoInputs .select {
+  inline-size: auto;
+  flex: 1 1 0;
+}
+
+.fieldHint {
+  font-size: var(--step--1);
   color: var(--text-muted);
   line-height: 1.4;
 }
 
-/* A disabled facet (the geo filter while a history facet is active) dims so it
-   reads as temporarily inapplicable rather than broken. */
-.facet:disabled {
+.geoField:disabled {
   opacity: 0.55;
-}
-
-/* One source checkbox: box plus the same tinted pill the list uses, so the
-   facet reads in the colour of what it filters to. */
-.check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  cursor: pointer;
-}
-
-.check input {
-  accent-color: var(--signal);
-  cursor: pointer;
 }
 
 .select {
@@ -244,6 +390,25 @@
 .select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.count {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: var(--step-1);
+  padding-block: var(--space-4);
+}
+
+.endNote {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  text-align: center;
+  padding-block: var(--space-3);
 }
 
 .results {
@@ -285,26 +450,6 @@
   padding: 0;
 }
 
-/* Column labels and every row share one grid so headings line up with data. */
-.columns,
-.row {
-  display: grid;
-  grid-template-columns: 4.75rem minmax(6.5rem, 10rem) minmax(0, 1fr) auto;
-  column-gap: var(--space-3);
-  align-items: center;
-}
-
-.columns {
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  padding-block: var(--space-2);
-  border-block-end: 1px solid var(--line-strong);
-}
-
-.detailsHead {
-  justify-self: end;
-}
-
 /* Each entry is a list item holding a clickable summary button and, when open,
    its detail panel. */
 .item {
@@ -315,9 +460,14 @@
   border-block-start: none;
 }
 
-/* The summary row is a full-width button so the whole entry is clickable and
-   keyboard-reachable; the button chrome is stripped back to the bare row. */
+/* The stream row: a leading source dot, time, client, the prominent domain, then
+   the right-hand status cluster. A full-width button so the whole entry is
+   clickable and keyboard-reachable. */
 .row {
+  display: grid;
+  grid-template-columns: auto 4.75rem minmax(6rem, 9rem) minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  align-items: center;
   inline-size: 100%;
   font: inherit;
   text-align: start;
@@ -326,6 +476,7 @@
   border: none;
   cursor: pointer;
   padding-block: var(--space-2);
+  padding-inline: var(--space-2);
   border-radius: var(--radius-sm);
 }
 
@@ -336,6 +487,15 @@
 .row:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+}
+
+/* The leading dot carries the source in colour, so a scan reads blocked (red),
+   cache (green), upstream (grey), local (amber) and rewrite (blue) at a glance. */
+.dot {
+  inline-size: 9px;
+  block-size: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
 }
 
 /* A blocked entry carries a quiet red edge so it stands out while scrolling. */
@@ -353,41 +513,6 @@
   box-shadow:
     inset 2px 0 0 var(--danger),
     inset 4px 0 0 var(--amber);
-}
-
-/* The "watched" badge sits ahead of the network chips in amber. */
-.watchedBadge {
-  font-size: var(--step--2);
-  font-weight: 600;
-  color: var(--warn);
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
-  border-radius: var(--radius-sm);
-  padding-inline: var(--space-1);
-  white-space: nowrap;
-}
-
-/* Phishing verdict chip on a flagged query: amber for a warn, red for a block. */
-/* The phishing marker lives in the right-hand status cluster, shaped like the
-   source/rcode pills so the row reads as one tidy line of status chips. Colour
-   alone carries warn (amber) vs. block (red); the kind and brand are in the
-   title and the expanded detail. */
-.phishingPill {
-  font-size: 0.72rem;
-  font-weight: 600;
-  padding: 1px var(--space-2);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.phishingPill[data-mode="warn"] {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-}
-
-.phishingPill[data-mode="block"] {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 
 .time {
@@ -409,13 +534,15 @@
 .client {
   font-family: var(--font-mono);
   font-size: var(--step--1);
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The domain cell stacks the name over the IPs it resolved to. min-inline-size
-   keeps the ellipsis on both lines inside the grid column. */
+/* The domain cell: the prominent name (with any phishing pill inline) over the
+   quiet address and geo lines. min-inline-size keeps the ellipsis inside the
+   grid column. */
 .domainCell {
   display: flex;
   flex-direction: column;
@@ -423,15 +550,47 @@
   gap: 1px;
 }
 
+.domainLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+/* The domain leads the row: a touch larger and brighter than the metadata. */
 .domain {
   font-family: var(--font-mono);
-  font-size: var(--step--1);
+  font-size: var(--step-0);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The addresses the query resolved to, a quiet second line under the name. */
+/* Phishing verdict chip on a flagged query: amber for a warn, red for a block.
+   Sits right after the domain so a suspicious name reads as suspicious at once.
+   Colour alone carries warn vs. block; the kind and brand are in the title and
+   the expanded detail. */
+.phishingPill {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.phishingPill[data-mode="warn"] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+
+.phishingPill[data-mode="block"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+/* The addresses the query resolved to, a quiet line under the name. */
 .resolved {
   font-family: var(--font-mono);
   font-size: var(--step--2);
@@ -467,6 +626,18 @@
   text-overflow: ellipsis;
 }
 
+/* The "watched" badge sits ahead of the network chips in amber. */
+.watchedBadge {
+  font-size: var(--step--2);
+  font-weight: 600;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: var(--radius-sm);
+  padding-inline: var(--space-1);
+  white-space: nowrap;
+}
+
 .meta {
   display: inline-flex;
   align-items: center;
@@ -484,8 +655,8 @@
 
 /* Which cluster node answered the query, shown once a high-availability set has
    more than one node: the serving server's hostname. A quiet mono chip with a
-   faint outline, so provenance is legible without competing with the source
-   pill. */
+   faint outline, so provenance is legible without competing with the status
+   chips. */
 .node {
   font-family: var(--font-mono);
   font-size: 0.68rem;
@@ -501,41 +672,6 @@
   color: color-mix(in srgb, var(--text-muted) 75%, transparent);
   background: var(--surface-sunken);
   border-color: var(--line);
-}
-
-/* Where the answer came from, tinted so a scan reads cache vs. upstream fast. */
-.source {
-  font-size: 0.72rem;
-  padding: 1px var(--space-2);
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--surface-sunken);
-}
-
-.source[data-source="cache"] {
-  color: var(--signal-strong);
-  background: color-mix(in srgb, var(--signal) 14%, transparent);
-}
-
-.source[data-source="local"] {
-  color: var(--warn);
-  background: color-mix(in srgb, var(--amber) 18%, transparent);
-}
-
-/* A rewrite is user intent, not a quirk of the lookup — mark it in its own blue
-   so it stands out from the amber "Lokal" (a suppressed AAAA) at a glance. */
-.source[data-source="rewrite"] {
-  color: var(--rewrite);
-  background: color-mix(in srgb, var(--rewrite) 16%, transparent);
-  font-weight: 600;
-}
-
-/* Blocked is the signal worth seeing: a solid red pill, not a quiet tint. */
-.source[data-source="blocked"] {
-  color: #fff;
-  background: var(--danger);
-  font-weight: 600;
-  letter-spacing: 0.01em;
 }
 
 .rcode {
@@ -556,6 +692,15 @@
   background: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
+.duration {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-inline-size: 3.5rem;
+  text-align: end;
+}
+
 .chevron {
   display: inline-block;
   color: var(--text-muted);
@@ -572,15 +717,6 @@
   .chevron {
     transition: none;
   }
-}
-
-.duration {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  min-inline-size: 3.5rem;
-  text-align: end;
 }
 
 /* The expanded detail panel for one entry. */
@@ -643,20 +779,8 @@
   border-radius: var(--radius-sm);
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-inline-size: 0;
-}
-
 .reasonGrid .field {
   display: contents;
-}
-
-.fieldLabel {
-  font-size: var(--step--1);
-  color: var(--text-muted);
 }
 
 .fieldValue {
@@ -671,7 +795,7 @@
   gap: var(--space-2);
 }
 
-.fieldHint {
+.detail .fieldHint {
   font-family: var(--font-body);
   color: var(--text-muted);
 }
@@ -749,67 +873,34 @@
   color: var(--danger);
 }
 
-/* Below the explorer's two-column width, the rail folds up over the list and
-   its facets flow in a compact wrapping band so it stays shallow. */
-@media (max-width: 760px) {
-  .explorer {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-4);
-  }
-
-  .filters {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: var(--space-3) var(--space-4);
-  }
-
-  .filtersHead {
-    flex-basis: 100%;
-  }
-
-  .facet {
-    flex: 1 1 8rem;
-    min-inline-size: 7rem;
-    border-block-start: none;
-    padding-block-start: 0;
-  }
-
-  /* The source checkboxes span the band and sit inline so the group is short. */
-  .facet:first-of-type {
-    flex-basis: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2) var(--space-3);
-  }
-}
-
+/* On a phone the row folds: the domain leads its own line, with time, client and
+   the status cluster on a quiet second line. */
 @media (max-width: 600px) {
-  .columns {
-    display: none;
-  }
-
   .detailGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .row {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
     grid-template-areas:
-      "domain domain meta"
-      "time   client meta";
+      "dot domain domain meta"
+      "dot time   client meta";
     column-gap: var(--space-2);
     row-gap: 2px;
     padding-block: var(--space-3);
+  }
+
+  .dot {
+    grid-area: dot;
+    align-self: start;
+    margin-block-start: 0.4rem;
   }
 
   .domainCell {
     grid-area: domain;
   }
 
-  /* A quiet second line: when the query happened, and who asked. */
+  /* Time and client drop to a quiet strip beneath the domain. */
   .time {
     grid-area: time;
   }
@@ -822,6 +913,6 @@
   .meta {
     grid-area: meta;
     align-self: center;
-    max-inline-size: 10rem;
+    max-inline-size: 9rem;
   }
 }

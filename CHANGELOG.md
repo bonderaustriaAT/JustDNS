@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.39.0] - 2026-11-17
+
+- Changed: **The query log is redesigned as a focus stream.** Instead of the filter rail on the
+  left, the search sits on top, with a quiet bar of source toggles and the phishing filter beneath
+  it; the rarer filters (type, response code, resolver, device, country/network, time range) fold
+  behind "More filters". Each row leads with the domain, a coloured source dot at the start and tags
+  only where there is something to show. Everything the view could do before is kept.
+- New: **Filter by phishing.** A new filter shows only entries where phishing detection fired,
+  optionally warned-only or blocked-only, across the whole stored history. That is how you track
+  down a lookalike domain on purpose, even once it has scrolled out of the live stream.
+- Changed: **The group headings in Settings are clearer.** "General" and "DNS" now stand brighter,
+  bolder and with a hairline rule above their rows, so the rail falls into its sections at a glance.
+
 ## [0.38.1] - 2026-11-17
 
 - Fixed: **Switching settings category no longer shifts the page sideways.** The window now always

@@ -383,8 +383,23 @@ impl DuckStore {
 /// than it, which is stable even when many rows share an `at_ms`.
 pub type Cursor = (i64, i64);
 
+/// Which phishing hits a history query keeps. The detector stores its verdict as
+/// `"<mode>:<kind>[:<brand>]"` (for example `warn:nrd` or `block:lookalike:PayPal`)
+/// and an empty string when it did not fire, so each variant is a plain prefix
+/// test on the `phishing` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhishingFilter {
+    /// Any phishing hit, warned or blocked.
+    Any,
+    /// Only warn-mode hits (the answer was left unchanged).
+    Warn,
+    /// Only block-mode hits (the query was refused).
+    Block,
+}
+
 /// A server-side filter over the durable query log. Every field is optional; a
 /// default filter (with a `limit`) matches the whole log, newest first.
+
 #[derive(Debug, Default, Clone)]
 pub struct QueryFilter {
     /// Keyset cursor: return only rows strictly older than this `(at_ms, rowid)`.
@@ -412,6 +427,9 @@ pub struct QueryFilter {
     pub clients: Option<Vec<String>>,
     /// Match rows whose name or client address contains this, case-insensitively.
     pub needle: Option<String>,
+    /// Keep only phishing hits, optionally narrowed to one mode. `None` applies no
+    /// phishing constraint.
+    pub phishing: Option<PhishingFilter>,
     /// Maximum rows to return.
     pub limit: usize,
 }
@@ -491,6 +509,18 @@ impl DuckReader {
             let pattern = format!("%{}%", escape_like(needle));
             binds.push(Box::new(pattern.clone()));
             binds.push(Box::new(pattern));
+        }
+        if let Some(phishing) = filter.phishing {
+            // Constant SQL fragments: the `phishing` column holds `"<mode>:<kind>…"`
+            // or an empty string, so a prefix test is all each option needs.
+            wheres.push(
+                match phishing {
+                    PhishingFilter::Any => "phishing <> ''",
+                    PhishingFilter::Warn => "phishing LIKE 'warn:%'",
+                    PhishingFilter::Block => "phishing LIKE 'block:%'",
+                }
+                .to_owned(),
+            );
         }
 
         let where_sql = if wheres.is_empty() {
@@ -1209,6 +1239,65 @@ mod tests {
                 brand: Some("PayPal".to_owned()),
             })
         );
+    }
+
+    #[test]
+    fn phishing_filter_narrows_to_hits() {
+        use crate::event::{PhishingFlag, PhishingKind};
+
+        let store = DuckStore::open_in_memory().unwrap();
+        let mut warned = event(1, QuerySource::Upstream, 0);
+        warned.phishing = Some(PhishingFlag {
+            kind: PhishingKind::Nrd,
+            blocked: false,
+            brand: None,
+        });
+        let mut blocked = event(2, QuerySource::Blocked, 3);
+        blocked.phishing = Some(PhishingFlag {
+            kind: PhishingKind::Lookalike,
+            blocked: true,
+            brand: Some("PayPal".to_owned()),
+        });
+        let clean = event(3, QuerySource::Cache, 0);
+        store.insert_batch(&[warned, blocked, clean]).unwrap();
+        let reader = store.reader().unwrap();
+
+        let any: Vec<i64> = reader
+            .query(&QueryFilter {
+                phishing: Some(PhishingFilter::Any),
+                ..all(10)
+            })
+            .unwrap()
+            .iter()
+            .map(|r| r.event.at_ms)
+            .collect();
+        assert_eq!(
+            any,
+            vec![2, 1],
+            "both hits, newest first, not the clean row"
+        );
+
+        let warn: Vec<i64> = reader
+            .query(&QueryFilter {
+                phishing: Some(PhishingFilter::Warn),
+                ..all(10)
+            })
+            .unwrap()
+            .iter()
+            .map(|r| r.event.at_ms)
+            .collect();
+        assert_eq!(warn, vec![1], "only the warn-mode hit");
+
+        let block: Vec<i64> = reader
+            .query(&QueryFilter {
+                phishing: Some(PhishingFilter::Block),
+                ..all(10)
+            })
+            .unwrap()
+            .iter()
+            .map(|r| r.event.at_ms)
+            .collect();
+        assert_eq!(block, vec![2], "only the block-mode hit");
     }
 
     /// A filter that reads everything, newest first, with a generous page size.

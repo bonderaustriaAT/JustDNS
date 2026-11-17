@@ -43,8 +43,8 @@ use justdns_schedule::{
     Schedule, ScheduleDraft, ScheduleError, ScheduleStore, ScheduleTarget, TargetScope, parse_tz,
 };
 use justdns_store::{
-    ActivityBucket, Cursor, DnssecStatus, DomainCount, QueryEvent, QueryFilter, QuerySource,
-    ResolverStat, Store,
+    ActivityBucket, Cursor, DnssecStatus, DomainCount, PhishingFilter, QueryEvent, QueryFilter,
+    QuerySource, ResolverStat, Store,
 };
 use reports::{
     REPORT_TOP_N, RenderLang, Report, ReportPeriod, ReportStore, ReportSummary, adhoc_window,
@@ -6318,6 +6318,7 @@ async fn privacy_networks(
         origin: None,
         clients: None,
         needle: None,
+        phishing: None,
         limit: NETWORK_SCAN_LIMIT,
     };
     let store_for_read = store.clone();
@@ -6682,6 +6683,9 @@ struct HistoryParams {
     /// addresses to match.
     group: Option<String>,
     q: Option<String>,
+    /// Keep only phishing hits: `"any"`, `"warn"` or `"block"`. Absent or an
+    /// unknown value applies no phishing constraint.
+    phishing: Option<String>,
     limit: Option<usize>,
 }
 
@@ -6791,6 +6795,13 @@ async fn queries_history(
         None
     };
 
+    let phishing = params.phishing.as_deref().and_then(|raw| match raw.trim() {
+        "any" => Some(PhishingFilter::Any),
+        "warn" => Some(PhishingFilter::Warn),
+        "block" => Some(PhishingFilter::Block),
+        _ => None,
+    });
+
     let filter = QueryFilter {
         before,
         start_ms: params.start_ms,
@@ -6802,6 +6813,7 @@ async fn queries_history(
         origin: params.origin,
         clients: client_filter,
         needle: trimmed(params.q),
+        phishing,
         limit,
     };
 

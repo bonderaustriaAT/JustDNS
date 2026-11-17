@@ -478,6 +478,7 @@ impl AlertEvaluator {
             origin: None,
             clients: None,
             needle: None,
+            phishing: None,
             limit: WATCHED_GEO_SCAN_LIMIT,
         };
         let rows = match self.store.history(&filter) {
@@ -552,6 +553,7 @@ impl AlertEvaluator {
             origin: Some(String::new()),
             clients: None,
             needle: None,
+            phishing: None,
             limit: PHISHING_SCAN_LIMIT,
         };
         let rows = match self.store.history(&filter) {
