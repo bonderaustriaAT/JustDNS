@@ -2082,7 +2082,16 @@ async fn set_preset(
     Path(key): Path<String>,
     Json(body): Json<PresetBody>,
 ) -> Result<Json<ListsView>, (StatusCode, String)> {
-    lists.set_preset(&key, body.on).map_err(list_error)?;
+    // set_preset persists and rebuilds the blocker (CPU + disk), so it runs on the
+    // blocking pool to keep the async runtime responsive. The large feed download
+    // is a separate background task; the flag flip returns at once.
+    let worker = lists.clone();
+    let key_for_task = key.clone();
+    let on = body.on;
+    tokio::task::spawn_blocking(move || worker.set_preset(&key_for_task, on))
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map_err(list_error)?;
     if body.on {
         fetch_feed_in_background(&lists, format!("preset-{key}"));
     }

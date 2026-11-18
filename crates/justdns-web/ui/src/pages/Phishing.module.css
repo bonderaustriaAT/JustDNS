@@ -290,9 +290,28 @@
   min-inline-size: 0;
 }
 
+.feedHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .feedName {
   font-size: var(--step--1);
   font-weight: 600;
+}
+
+/* A positive pill marking the NRD window JustDNS recommends as the starting
+   choice, mirroring the catalogue's badge. */
+.recommendedTag {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
 }
 
 .feedDesc {

@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.40.1] - 2026-11-18
+
+- Fixed: **The NRD list switches on the phishing page respond instantly.** Turning an NRD list on or
+  off now flips the switch at once and pulls the large list in the background, instead of leaving the
+  control stuck until the download settled. The server also rebuilds the list off the request thread,
+  so the page stays responsive.
+- Changed: **The NRD list descriptions name their window and size.** Each of the four lists now
+  states which 7-day window it covers and its approximate size, and the 7-day list is marked as the
+  recommended starting choice.
+
 ## [0.40.0] - 2026-11-18
 
 - Changed: **The phishing filter in the query log opens a themed menu.** Its choice list (any hit,

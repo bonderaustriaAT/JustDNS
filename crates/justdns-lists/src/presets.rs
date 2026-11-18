@@ -204,7 +204,7 @@ Zweifel bleibt eine Domain draußen.",
     Preset {
         key: "nrd-7",
         category: "nrd",
-        recommended: false,
+        recommended: true,
         name: "Neu registrierte Domains: letzte 7 Tage",
         url: "https://raw.githubusercontent.com/hagezi/nrd/main/domains/nrd7.txt",
         kind: ListKind::Warn,
@@ -310,7 +310,7 @@ mod tests {
             .collect();
         assert_eq!(
             recommended,
-            ["hagezi-multi", "hagezi-tif", "justdns-dach"]
+            ["hagezi-multi", "hagezi-tif", "justdns-dach", "nrd-7"]
                 .into_iter()
                 .collect(),
             "the recommended-badge set changed; update this test deliberately",
