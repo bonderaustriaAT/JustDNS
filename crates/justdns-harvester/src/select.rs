@@ -39,6 +39,10 @@ pub struct SelectConfig {
     /// Registrable roots never proposed: first-party and shared infrastructure
     /// whose blocking would break sites (CDNs, fonts, payment, the big clouds).
     pub safelist: SuffixSet,
+    /// The operator's own and otherwise protected domains — ALWAYS excluded, with
+    /// a distinct reason, so a report can never surface them. Blocking these would
+    /// break the user's own services, which the harvester must never target.
+    pub own_domains: SuffixSet,
     /// Score weights (see [`score`]).
     pub w_clients: f64,
     pub w_hits: f64,
@@ -58,6 +62,7 @@ impl Default for SelectConfig {
             fanout_clients: 3,
             name_terms: default_name_terms(),
             safelist: default_safelist(),
+            own_domains: default_own_domains(),
             w_clients: 3.0,
             w_hits: 1.0,
             w_days: 1.5,
@@ -69,49 +74,99 @@ impl Default for SelectConfig {
 }
 
 /// The tracking/measurement/ad name fragments the relevance test looks for.
+///
+/// Deliberately specific: each term is distinctive enough that a plain substring
+/// match rarely fires on a first-party name. The loose, false-positive-prone
+/// fragments (`tag`, `ads`, `stat`, `count`, `collect`, `teli`) were removed —
+/// they matched everyday words and names. Brand-name ad networks (yieldlab,
+/// adition, …) carry no such keyword and are reached through the fan-out+geo path
+/// instead, then confirmed by a human.
 pub fn default_name_terms() -> Vec<String> {
     [
-        "track",
-        "metri",
-        "stat",
-        "count",
-        "pixel",
-        "ivw",
-        "teli",
-        "analyt",
-        "adserv",
-        "werbe",
-        "reichweite",
-        "beacon",
-        "collect",
-        "telemetr",
+        "tracker",
         "tracking",
-        "tag",
-        "ads",
+        "telemetr",
+        "telemetry",
+        "analytics",
+        "analytic",
+        "metrics",
+        "metrik",
+        "pixel",
+        "beacon",
+        "adserver",
+        "adservice",
+        "adserving",
+        "adtech",
+        "advert",
+        "werbung",
+        "reichweite",
+        "zaehlpixel",
+        "quantcast",
+        "piwik",
+        "matomo",
         "oewa",
         "ioam",
+        "ivw",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect()
 }
 
-/// A conservative safelist of first-party / shared infrastructure that must never
-/// be proposed, matched by suffix. Deliberately short; the user can extend it.
+/// First-party / shared infrastructure that must never be proposed, matched by
+/// suffix. These are the recurring families a DNS log is full of — the big
+/// platforms, CDNs, OS/package and certificate infrastructure, and common IoT
+/// clouds — none of which is a tracker and all of which would break a service if
+/// blocked. Ad/tracking domains are deliberately NOT listed here; those are
+/// caught by the feed coverage, not whitelisted.
 pub fn default_safelist() -> SuffixSet {
     let mut set = SuffixSet::new();
     set.add_list(
-        "akamai.net\nakamaiedge.net\ncloudfront.net\nfastly.net\ncloudflare.net\ncloudflare.com\n\
-         gstatic.com\ngoogleapis.com\ngoogleusercontent.com\nfbcdn.net\njsdelivr.net\nunpkg.com\n\
-         cdnjs.cloudflare.com\nfonts.googleapis.com\nfonts.gstatic.com\nstripe.com\npaypal.com\n\
-         amazonaws.com\nazureedge.net\nwindows.net\ngithub.io\ngithubusercontent.com\n",
+        "\
+# Microsoft
+microsoft.com\nmicrosoftonline.com\nwindows.com\nwindows.net\noffice.com\noffice365.com\n\
+live.com\noutlook.com\nskype.com\nmsn.com\nbing.com\nazure.com\nazureedge.net\ncloud.microsoft\n\
+msftconnecttest.com\nmsftncsi.com\nonedrive.com\nsharepoint.com\nteams.microsoft.com\n\
+# Google
+google.com\ngoogle.at\ngoogle.de\ngoogle.ch\ngooglevideo.com\nyoutube.com\nytimg.com\nggpht.com\n\
+gstatic.com\ngoogleusercontent.com\ngoogleapis.com\ngvt1.com\ngvt2.com\nandroid.com\ndns.google\n\
+# Apple
+apple.com\nicloud.com\nmzstatic.com\ncdn-apple.com\napple-dns.net\npush.apple.com\naaplimg.com\n\
+# Amazon
+amazon.com\namazon.de\namazon.at\namazon.co.uk\namazonalexa.com\nmedia-amazon.com\n\
+ssl-images-amazon.com\na2z.com\namazontrust.com\naiv-cdn.net\naiv-delivery.net\namazonaws.com\n\
+# Meta
+facebook.com\nfbcdn.net\ninstagram.com\ncdninstagram.com\nwhatsapp.com\nwhatsapp.net\nmeta.com\n\
+# Other big first-party apps\nspotify.com\nscdn.co\nspotifycdn.com\ndiscord.com\ndiscordapp.com\n\
+discordapp.net\nbitwarden.com\nproton.me\nsignal.org\nmozilla.org\nmozilla.net\nfirefox.com\n\
+# CDNs / shared edge\nakamai.net\nakamaiedge.net\nakamaihd.net\ncloudfront.net\nfastly.net\n\
+fastlylb.net\ncloudflare.com\ncloudflare.net\ncloudflare-dns.com\njsdelivr.net\nunpkg.com\n\
+cdnjs.cloudflare.com\nfonts.googleapis.com\nfonts.gstatic.com\n\
+# Payments\nstripe.com\npaypal.com\npaypalobjects.com\n\
+# Dev / hosting / OS / packages\ngithub.io\ngithubusercontent.com\ngithub.com\ngitlab.com\n\
+debian.org\nubuntu.com\ncanonical.com\nlaunchpad.net\narchlinux.org\nfedoraproject.org\n\
+wazuh.com\ndocker.com\ndocker.io\nnpmjs.org\npypi.org\n\
+# Time / DNS / connectivity\nntp.org\npool.ntp.org\nquad9.net\nopendns.com\nnextdns.io\n\
+# Certificates / PKI\ndigicert.com\nlencr.org\nletsencrypt.org\nsectigo.com\nglobalsign.com\n\
+pki.goog\nusertrust.com\n\
+# IoT / router clouds\nshelly.cloud\nroborock.com\ntuya.com\ntuyaeu.com\nui.com\nubnt.com\n\
+ubiquiti.com\nhomeassistant.io\nnabu.casa\n",
     );
+    set
+}
+
+/// The operator's own / protected domains, hard-excluded with their own reason.
+/// `justfuture.at` is the operator's domain; extend via `HARVEST_OWN_DOMAINS`.
+pub fn default_own_domains() -> SuffixSet {
+    let mut set = SuffixSet::new();
+    set.add_list("justfuture.at\nspeedmaster.at\n");
     set
 }
 
 /// Why a root was dropped — surfaced in the report so the exclusion is auditable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExcludeReason {
+    OwnDomain,
     AlreadyBlocked,
     AlreadyCovered,
     Safelisted,
@@ -126,6 +181,7 @@ impl ExcludeReason {
     /// A short German label for the report.
     pub fn label(&self) -> &'static str {
         match self {
+            ExcludeReason::OwnDomain => "eigene/geschützte Domain (nie Kandidat)",
             ExcludeReason::AlreadyBlocked => "bereits auf dieser Instanz geblockt",
             ExcludeReason::AlreadyCovered => "schon durch Liste/Hagezi abgedeckt",
             ExcludeReason::Safelisted => "Safelist (Erstanbieter-/Shared-Infrastruktur)",
@@ -218,7 +274,13 @@ pub fn prefilter(
         })
     };
 
-    // Stage 0 — hard exclusions that need no network.
+    // Stage 0 — hard exclusions that need no network. The operator's own and
+    // protected domains come first and unconditionally: these must never appear
+    // in a report, whatever their shape, because blocking them would break the
+    // user's own services. The harvester targets trackers and ads, nothing else.
+    if cfg.own_domains.covers(root) {
+        return drop(ExcludeReason::OwnDomain);
+    }
     if blocked.covers(root) {
         return drop(ExcludeReason::AlreadyBlocked);
     }
@@ -247,7 +309,14 @@ pub fn prefilter(
         geo_dach: is_dach_tld(root),
         fanout: stat.distinct_clients() >= cfg.fanout_clients,
     };
-    if !signals.name_hit && !signals.geo_dach && !signals.fanout {
+    // Qualify only on a real tracker shape. A tracking/measurement name is a
+    // strong signal on its own. Otherwise we need BOTH the third-party fan-out
+    // (many devices reach it) AND a DACH TLD — the shape of a regional ad/beacon
+    // network. Fan-out alone is far too loose: it is also the shape of every
+    // first-party cloud API, so on its own it filled the report with the user's
+    // own and other legitimate services. Those are now dropped here.
+    let qualifies = signals.name_hit || (signals.fanout && signals.geo_dach);
+    if !qualifies {
         return drop(ExcludeReason::NoTrackerSignal);
     }
 
@@ -292,12 +361,12 @@ pub fn finalize(
         let site_hosts: std::collections::HashSet<&str> = host_sites
             .iter()
             .filter(|(_, v)| *v == SiteOutcome::HumanSite)
-            .map(|(h, _)| h.as_str())
+            .map(|(h, _)| h.trim_end_matches('.'))
             .collect();
         let hosts: Vec<String> = prelim
             .hosts
             .iter()
-            .map(|(h, _)| h.clone())
+            .map(|(h, _)| h.trim_end_matches('.').to_owned())
             .filter(|h| h != &prelim.root)
             .filter(|h| !coverage.covers(h))
             .filter(|h| !site_hosts.contains(h.as_str()))
@@ -424,7 +493,7 @@ mod tests {
             80,
             &["a", "b", "c", "d"],
             &[1, 2, 3],
-            &[("count.example.at", 80)],
+            &[("tracking.example.at", 80)],
         );
         let prelim = prefilter("example.at", &s, &empty, &empty, &cfg()).unwrap();
         assert!(prelim.signals.geo_dach && prelim.signals.name_hit && prelim.signals.fanout);
@@ -438,6 +507,65 @@ mod tests {
         assert_eq!(bland.distinct_clients(), 2);
         assert_eq!(
             prefilter("shop.com", &bland, &empty, &empty, &cfg())
+                .unwrap_err()
+                .reason,
+            ExcludeReason::NoTrackerSignal
+        );
+    }
+
+    #[test]
+    fn drops_own_domains_before_anything_else() {
+        let empty = SuffixSet::new();
+        // The operator's own domain, full tracker shape (DACH TLD, fan-out, many
+        // hits) — must STILL be dropped, as OwnDomain, never surfaced.
+        let s = stat(
+            200,
+            &["a", "b", "c", "d", "e"],
+            &[1, 2],
+            &[("metrics.justfuture.at", 200)],
+        );
+        assert_eq!(
+            prefilter("justfuture.at", &s, &empty, &empty, &cfg())
+                .unwrap_err()
+                .reason,
+            ExcludeReason::OwnDomain
+        );
+        // A sub-host of the second protected domain is covered by suffix too.
+        let s2 = stat(90, &["a", "b", "c"], &[1, 2], &[("api.speedmaster.at", 90)]);
+        assert_eq!(
+            prefilter("speedmaster.at", &s2, &empty, &empty, &cfg())
+                .unwrap_err()
+                .reason,
+            ExcludeReason::OwnDomain
+        );
+    }
+
+    #[test]
+    fn fan_out_alone_no_longer_qualifies() {
+        let empty = SuffixSet::new();
+        // A .com first-party API reached by many devices: fan-out only, no name,
+        // no DACH TLD. This used to leak into the report; it must now drop.
+        let s = stat(
+            300,
+            &["a", "b", "c", "d", "e"],
+            &[1, 2],
+            &[("api.someservice.com", 300)],
+        );
+        assert_eq!(
+            prefilter("someservice.com", &s, &empty, &empty, &cfg())
+                .unwrap_err()
+                .reason,
+            ExcludeReason::NoTrackerSignal
+        );
+        // A DACH TLD reached by only two devices (geo only, no fan-out, no name)
+        // also no longer qualifies.
+        let mut geo_only = DomainStat::default();
+        for i in 0..40 {
+            let client = if i % 2 == 0 { "10.0.0.5" } else { "10.0.0.6" };
+            geo_only.observe("www.firma.at", client, crate::model::MS_PER_DAY);
+        }
+        assert_eq!(
+            prefilter("firma.at", &geo_only, &empty, &empty, &cfg())
                 .unwrap_err()
                 .reason,
             ExcludeReason::NoTrackerSignal
