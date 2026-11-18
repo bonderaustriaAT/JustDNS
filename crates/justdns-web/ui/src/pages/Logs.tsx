@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Toggle } from "../components/Toggle";
 import {
@@ -71,6 +71,152 @@ function useNodeLabels() {
   const selfLabel = useMemo(() => nodes.find((node) => node.self)?.label ?? "", [nodes]);
   // Only worth showing which server answered once there is more than one.
   return { nodeLabels, selfLabel, showNodes: nodes.length > 1 };
+}
+
+/** The phishing filter: a pill trigger with a themed popover, so the choice list
+ *  matches the dark UI instead of the browser's native (OS-styled) select. Behaves
+ *  like a listbox — open on click or arrow key, pick with click or Enter, close on
+ *  Escape or an outside click, and the active row carries a check. */
+function PhishingFilter({
+  value,
+  onChange,
+}: {
+  value: PhishingQuery | null;
+  onChange: (next: PhishingQuery | null) => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // While open, dismiss on an outside click or Escape. The listeners live only for
+  // the open window so a closed menu costs nothing.
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // On open, land focus on the current choice so keyboard users start from where
+  // they are, not the top of the list.
+  useEffect(() => {
+    if (!open) return;
+    wrapRef.current
+      ?.querySelector<HTMLButtonElement>("[role='option'][data-selected]")
+      ?.focus();
+  }, [open]);
+
+  const optionLabel = (option: PhishingQuery | null) =>
+    option === null
+      ? t("logs.phishingOff")
+      : option === "any"
+        ? t("logs.phishingAny")
+        : option === "warn"
+          ? t("logs.phishingWarn")
+          : t("logs.phishingBlock");
+
+  const triggerLabel = value === null ? t("logs.filterPhishing") : optionLabel(value);
+
+  // Roving focus across the option rows for the arrow keys.
+  const moveFocus = (delta: number) => {
+    const items = wrapRef.current?.querySelectorAll<HTMLButtonElement>("[role='option']");
+    if (!items || items.length === 0) return;
+    const list = Array.from(items);
+    const current = list.findIndex((el) => el === document.activeElement);
+    const next = (current + delta + list.length) % list.length;
+    list[next]?.focus();
+  };
+
+  return (
+    <div className={styles.phishingFilter} ref={wrapRef}>
+      <button
+        type="button"
+        className={styles.pillSelect}
+        data-on={value !== null || undefined}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls="phishing-filter-listbox"
+        aria-label={t("logs.filterPhishing")}
+        onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        <span
+          className={styles.pillDot}
+          data-phishing
+          data-mode={value ?? "off"}
+          aria-hidden="true"
+        />
+        <span className={styles.pillSelectLabel}>{triggerLabel}</span>
+        <span className={styles.pillCaret} data-open={open || undefined} aria-hidden="true">
+          ›
+        </span>
+      </button>
+      {open && (
+        <ul
+          id="phishing-filter-listbox"
+          className={styles.phishingPopover}
+          role="listbox"
+          aria-label={t("logs.filterPhishing")}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              moveFocus(1);
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              moveFocus(-1);
+            }
+          }}
+        >
+          {PHISHING_OPTIONS.map((option) => {
+            const selected = option === value;
+            return (
+              <li key={option ?? "off"} className={styles.phishingItem}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={styles.phishingOption}
+                  data-selected={selected || undefined}
+                  onClick={() => {
+                    onChange(option);
+                    setOpen(false);
+                  }}
+                >
+                  <span
+                    className={styles.phishingOptionDot}
+                    data-mode={option ?? "off"}
+                    aria-hidden="true"
+                  />
+                  <span className={styles.phishingOptionLabel}>{optionLabel(option)}</span>
+                  {selected && (
+                    <span className={styles.phishingOptionCheck} aria-hidden="true">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function Logs() {
@@ -288,40 +434,7 @@ export function Logs() {
             );
           })}
 
-          <label className={styles.pillSelect} data-on={phishing !== null || undefined}>
-            <span className={styles.pillDot} data-phishing aria-hidden="true" />
-            <span className={styles.pillSelectLabel}>
-              {phishing === null
-                ? t("logs.filterPhishing")
-                : phishing === "any"
-                  ? t("logs.phishingAny")
-                  : phishing === "warn"
-                    ? t("logs.phishingWarn")
-                    : t("logs.phishingBlock")}
-            </span>
-            <span className={styles.pillCaret} aria-hidden="true">
-              ›
-            </span>
-            <select
-              aria-label={t("logs.filterPhishing")}
-              value={phishing ?? ""}
-              onChange={(event) =>
-                setPhishing(event.target.value === "" ? null : (event.target.value as PhishingQuery))
-              }
-            >
-              {PHISHING_OPTIONS.map((option) => (
-                <option key={option ?? "off"} value={option ?? ""}>
-                  {option === null
-                    ? t("logs.phishingOff")
-                    : option === "any"
-                      ? t("logs.phishingAny")
-                      : option === "warn"
-                        ? t("logs.phishingWarn")
-                        : t("logs.phishingBlock")}
-                </option>
-              ))}
-            </select>
-          </label>
+          <PhishingFilter value={phishing} onChange={setPhishing} />
 
           <button
             type="button"

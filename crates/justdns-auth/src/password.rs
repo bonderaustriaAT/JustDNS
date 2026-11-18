@@ -4,15 +4,15 @@
 //! Password hashing and verification with Argon2id (the library default).
 
 use argon2::Argon2;
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 
 /// Hash `password` into a PHC string (algorithm, parameters and salt included),
-/// suitable for storing. A fresh random salt is drawn per call.
+/// suitable for storing. A fresh random salt is drawn per call: argon2 0.6's
+/// single-argument `hash_password` generates one from the OS RNG internally.
 pub(crate) fn hash(password: &str) -> Result<String, String> {
-    let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map(|hash| hash.to_string())
         .map_err(|error| error.to_string())
 }

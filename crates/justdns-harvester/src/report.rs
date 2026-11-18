@@ -199,8 +199,7 @@ impl Report {
     /// `out_dir`, returning the two timestamped paths.
     pub fn write(&self, out_dir: &Path) -> io::Result<(PathBuf, PathBuf)> {
         std::fs::create_dir_all(out_dir)?;
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
         let md = self.to_markdown();
 
         let json_path = out_dir.join(format!("candidates-{}.json", self.generated_unix));

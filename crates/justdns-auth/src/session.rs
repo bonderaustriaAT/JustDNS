@@ -19,8 +19,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
-
 /// How long a session stays valid without re-login: one week.
 pub const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(60 * 60 * 24 * 7);
 
@@ -148,7 +146,7 @@ impl SessionStore {
 /// A URL-safe random token: `TOKEN_BYTES` of OS randomness, hex-encoded.
 fn random_token() -> String {
     let mut bytes = [0u8; TOKEN_BYTES];
-    OsRng.fill_bytes(&mut bytes);
+    getrandom::fill(&mut bytes).expect("OS randomness unavailable");
     let mut out = String::with_capacity(TOKEN_BYTES * 2);
     for byte in bytes {
         out.push(char::from_digit((byte >> 4) as u32, 16).unwrap());

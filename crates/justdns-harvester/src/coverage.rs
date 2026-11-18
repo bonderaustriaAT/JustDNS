@@ -33,8 +33,7 @@ const MULTI_SUFFIXES: &[&str] = &[
 
 /// Normalise a queried name for matching: lowercase and strip a trailing dot.
 pub fn normalise(name: &str) -> String {
-    let trimmed = name.trim().trim_end_matches('.').to_ascii_lowercase();
-    trimmed
+    name.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 /// The registrable root of a host: the shortest suffix that is still a real,

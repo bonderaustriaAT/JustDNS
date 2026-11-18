@@ -288,13 +288,16 @@ impl UpdateChecker {
     fn get(&self, url: &str) -> Result<String, String> {
         let agent = format!("justdns/{}", self.current_raw);
         let response = ureq::get(url)
-            .timeout(FETCH_TIMEOUT)
-            .set("User-Agent", &agent)
-            .set("Accept", "application/vnd.github+json")
+            .config()
+            .timeout_global(Some(FETCH_TIMEOUT))
+            .build()
+            .header("User-Agent", &agent)
+            .header("Accept", "application/vnd.github+json")
             .call()
             .map_err(|error| error.to_string())?;
         let mut body = String::new();
         response
+            .into_body()
             .into_reader()
             .take(MAX_FETCH_BYTES)
             .read_to_string(&mut body)

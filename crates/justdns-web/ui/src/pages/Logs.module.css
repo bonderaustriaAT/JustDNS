@@ -160,25 +160,7 @@
   outline-offset: 1px;
 }
 
-/* The phishing control wraps a native select laid invisibly over the pill, so the
-   pill itself is the hit target while the label shows the current choice. */
-.pillSelect {
-  position: relative;
-}
-
-.pillSelect select {
-  position: absolute;
-  inset: 0;
-  inline-size: 100%;
-  block-size: 100%;
-  margin: 0;
-  border: none;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.pillSelectLabel,
-.pillCaret {
+.pillSelectLabel {
   pointer-events: none;
 }
 
@@ -187,6 +169,108 @@
   font-size: 0.95rem;
   line-height: 1;
   rotate: 90deg;
+  transition: rotate 120ms ease;
+}
+
+/* The caret turns to point down while the menu is open. */
+.pillCaret[data-open] {
+  rotate: 270deg;
+}
+
+/* The phishing filter: a pill trigger with a themed popover menu, so the choice
+   list matches the dark UI instead of the browser's native OS-styled select. */
+.phishingFilter {
+  position: relative;
+  display: inline-flex;
+}
+
+.phishingPopover {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-1));
+  inset-inline-start: 0;
+  z-index: 20;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  min-inline-size: max-content;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 45%, transparent);
+}
+
+.phishingItem {
+  margin: 0;
+}
+
+.phishingOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  inline-size: 100%;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.phishingOption:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+}
+
+.phishingOption:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+.phishingOption[data-selected] {
+  color: var(--text);
+  background: color-mix(in srgb, var(--signal) 12%, var(--surface-sunken));
+}
+
+.phishingOptionDot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex: none;
+}
+
+.phishingOptionDot[data-mode="off"] {
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+
+.phishingOptionDot[data-mode="any"] {
+  background: var(--text-muted);
+}
+
+.phishingOptionDot[data-mode="warn"] {
+  background: var(--amber);
+}
+
+.phishingOptionDot[data-mode="block"] {
+  background: var(--danger);
+}
+
+.phishingOptionLabel {
+  flex: 1 1 auto;
+}
+
+.phishingOptionCheck {
+  color: var(--signal);
+  font-size: 0.9rem;
+  line-height: 1;
+  flex: none;
 }
 
 /* The leading dot on a source pill (and on each stream row) carries the source
@@ -200,6 +284,20 @@
 }
 
 .pillDot[data-phishing] {
+  background: var(--danger);
+}
+
+/* The trigger dot takes the hue of the chosen mode; idle (no filter) keeps the
+   alert red so the control still reads as the phishing facet. */
+.pillDot[data-phishing][data-mode="any"] {
+  background: var(--text-muted);
+}
+
+.pillDot[data-phishing][data-mode="warn"] {
+  background: var(--amber);
+}
+
+.pillDot[data-phishing][data-mode="block"] {
   background: var(--danger);
 }
 

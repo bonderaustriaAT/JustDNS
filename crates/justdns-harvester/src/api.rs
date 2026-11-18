@@ -61,23 +61,29 @@ impl ApiClient {
             "password": self.password,
         })
         .to_string();
-        let response = self
+        let mut response = self
             .agent
             .post(&url)
-            .set("Content-Type", "application/json")
-            .send_string(&body)
+            .header("Content-Type", "application/json")
+            .send(&body)
             .map_err(ApiError::from_ureq)?;
 
-        let cookie = response.all("set-cookie").into_iter().find_map(|value| {
-            value
-                .split(';')
-                .next()
-                .filter(|pair| pair.trim_start().starts_with(&format!("{SESSION_COOKIE}=")))
-                .map(str::to_owned)
-        });
+        let cookie = response
+            .headers()
+            .get_all("set-cookie")
+            .into_iter()
+            .filter_map(|value| value.to_str().ok())
+            .find_map(|value| {
+                value
+                    .split(';')
+                    .next()
+                    .filter(|pair| pair.trim_start().starts_with(&format!("{SESSION_COOKIE}=")))
+                    .map(str::to_owned)
+            });
 
         let text = response
-            .into_string()
+            .body_mut()
+            .read_to_string()
             .map_err(|e| ApiError::Decode(e.to_string()))?;
         let parsed: LoginResponse =
             serde_json::from_str(&text).map_err(|e| ApiError::Decode(e.to_string()))?;
@@ -95,7 +101,7 @@ impl ApiClient {
     }
 
     /// GET a path with the session cookie, re-logging in once on a 401.
-    fn get(&mut self, path: &str) -> Result<ureq::Response, ApiError> {
+    fn get(&mut self, path: &str) -> Result<ureq::http::Response<ureq::Body>, ApiError> {
         if self.cookie.is_none() {
             self.login()?;
         }
@@ -103,13 +109,13 @@ impl ApiClient {
         let attempt = |client: &ApiClient| {
             let mut req = client.agent.get(&url);
             if let Some(cookie) = &client.cookie {
-                req = req.set("Cookie", cookie);
+                req = req.header("Cookie", cookie);
             }
             req.call()
         };
         match attempt(self) {
             Ok(response) => Ok(response),
-            Err(ureq::Error::Status(401, _)) => {
+            Err(ureq::Error::StatusCode(401)) => {
                 debug!("session expired, re-authenticating");
                 self.cookie = None;
                 self.login()?;
@@ -144,7 +150,8 @@ impl ApiClient {
             }
             let text = self
                 .get(&path)?
-                .into_string()
+                .body_mut()
+                .read_to_string()
                 .map_err(|e| ApiError::Decode(e.to_string()))?;
             let page: HistoryPage =
                 serde_json::from_str(&text).map_err(|e| ApiError::Decode(e.to_string()))?;
@@ -193,7 +200,7 @@ pub enum ApiError {
 
 impl ApiError {
     fn from_ureq(error: ureq::Error) -> Self {
-        if let ureq::Error::Status(code, _) = error {
+        if let ureq::Error::StatusCode(code) = error {
             ApiError::Http(code)
         } else {
             ApiError::Transport(error.to_string())

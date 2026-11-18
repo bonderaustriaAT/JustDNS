@@ -128,7 +128,7 @@ fn load_coverage(agent: &ureq::Agent, urls: &[String]) -> SuffixSet {
     let mut set = SuffixSet::new();
     for url in urls {
         match agent.get(url).call() {
-            Ok(response) => match response.into_string() {
+            Ok(mut response) => match response.body_mut().read_to_string() {
                 Ok(body) => set.add_list(&body),
                 Err(error) => warn!(%url, %error, "coverage feed read failed; skipping"),
             },
@@ -303,10 +303,10 @@ fn main() {
         "justdns-harvester starting (read-only, report-only)"
     );
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(30))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into();
     let mut client = ApiClient::new(&cfg.base_url, &cfg.username, &cfg.password, agent.clone());
     let resolver = DohResolver::new(cfg.doh_endpoint.clone(), cfg.probe_timeout);
     let site_probe = HttpSiteProbe::new(cfg.probe_timeout);

@@ -62,12 +62,14 @@ pub fn send(cfg: &Notifications, title: &str, body: &str) -> Result<(), String> 
     let req = build_request(cfg, title, body)?;
     guard_target(&req.url)?;
     let mut call = ureq::post(&req.url)
-        .timeout(HTTP_TIMEOUT)
-        .set("Content-Type", req.content_type);
+        .config()
+        .timeout_global(Some(HTTP_TIMEOUT))
+        .build()
+        .header("Content-Type", req.content_type);
     if let Some((name, value)) = &req.extra_header {
-        call = call.set(name, value);
+        call = call.header(*name, value.as_str());
     }
-    call.send_string(&req.body)
+    call.send(&req.body)
         .map(|_| ())
         .map_err(|error| error.to_string())
 }

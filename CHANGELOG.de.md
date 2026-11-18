@@ -4,6 +4,19 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.40.0] - 2026-11-18
+
+- Geändert: **Der Phishing-Filter im Protokoll öffnet jetzt ein eigenes Menü.** Seine Auswahlliste
+  (jeder Treffer, nur gewarnt, nur blockiert) ist passend zur dunklen Oberfläche gestaltet, mit
+  einem farbigen Punkt je Modus und einem Haken bei der aktiven Auswahl, statt des schlichten
+  System-Dropdowns des Browsers. Es öffnet weiterhin per Klick oder Pfeiltaste und liest sich für
+  einen Screenreader gleich.
+- Geändert: **Abhängigkeiten auf den aktuellen Stand gebracht.** Alle Rust- und Web-Abhängigkeiten
+  sind auf ihre neueste Version gewechselt, darunter mehrere große Versionssprünge (die Bibliotheken
+  für Passwort-Hashing, TOTP, Zertifikate und HTTP-Client auf der Rust-Seite; React, TypeScript,
+  Vite und das Build-Werkzeug auf der Web-Seite). Am Verhalten der App ändert sich nichts; sie baut,
+  und alle Tests laufen mit den neuen Versionen.
+
 ## [0.39.0] - 2026-11-17
 
 - Geändert: **Das Protokoll ist als Fokus-Stream neu gestaltet.** Statt der Filterschiene links
