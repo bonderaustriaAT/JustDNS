@@ -20,10 +20,10 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
   dot for each mode and a check on the active choice, in place of the browser's plain system
   dropdown. It still opens by click or arrow key and reads the same to a screen reader.
 - Changed: **Dependencies brought up to their current releases.** Every Rust and web dependency
-  moved to its latest version, including several major upgrades (the password-hashing, TOTP,
-  certificate and HTTP-client libraries on the Rust side; React, TypeScript, Vite and the build
-  tooling on the web side). Nothing changes in how the app behaves; it builds and the full test
-  suite passes on the new versions.
+  moved to its latest version, including several major upgrades: argon2, totp-rs, rcgen, ureq,
+  axum-extra, base64 and x509-parser on the Rust side; React, TypeScript, Vite and
+  @vitejs/plugin-react on the web side. Nothing changes in how the app behaves; it builds and the
+  full test suite passes on the new versions.
 
 ## [0.39.0] - 2026-11-17
 
