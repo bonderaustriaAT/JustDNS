@@ -1,0 +1,230 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.phase {
+  font-size: var(--step-0);
+}
+
+.count {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The aggregate bar: a filled track plus a big percentage. */
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.bar {
+  flex: 1;
+  block-size: 0.6rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  block-size: 100%;
+  border-radius: 999px;
+  background: var(--signal);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bar > i[data-done="true"] {
+  background: var(--signal-strong);
+}
+
+.pct {
+  font-size: var(--step-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-inline-size: 3rem;
+  text-align: end;
+}
+
+.message {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* One tile per node, each with its own ring. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.ring {
+  position: relative;
+  inline-size: 4rem;
+  block-size: 4rem;
+  margin-block-end: var(--space-1);
+}
+
+.ring svg {
+  inline-size: 100%;
+  block-size: 100%;
+  transform: rotate(-90deg);
+}
+
+.track {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 6;
+}
+
+.value {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease;
+}
+
+.ring[data-tone="wait"] .value {
+  stroke: transparent;
+}
+
+.ring[data-tone="done"] .value {
+  stroke: var(--signal-strong);
+}
+
+.ring[data-tone="failed"] .value {
+  stroke: var(--danger);
+}
+
+.ringNum {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--step--1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ringNum[data-tone="wait"] {
+  color: var(--text-muted);
+}
+
+.ringNum[data-tone="failed"] {
+  color: var(--danger);
+}
+
+.tileLabel {
+  inline-size: 100%;
+  font-size: var(--step--1);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileRole {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.tilePhase {
+  margin-block-start: 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+}
+
+.tilePhase[data-tone="active"] {
+  color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+}
+
+.tilePhase[data-tone="done"] {
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+}
+
+.tilePhase[data-tone="failed"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.tileError {
+  font-size: 0.72rem;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
+/* The standing reminder while the rollout runs. */
+.warn {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  color: var(--text);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.warnIcon {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin-block-start: 2px;
+  border-radius: 50%;
+  background: var(--warn);
+  position: relative;
+}
+
+.warnIcon::after {
+  content: "!";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink);
+}

@@ -3,12 +3,9 @@ import { Link } from "react-router-dom";
 
 import { ApiError, api, type HaStatus, type UpdateInfo } from "../lib/api";
 import { useI18n } from "../lib/i18n";
-import {
-  CLUSTER_NODE_PHASE_KEY,
-  CLUSTER_PHASE_KEY,
-  useClusterUpdate,
-} from "../lib/useClusterUpdate";
+import { useClusterUpdate } from "../lib/useClusterUpdate";
 import { downloadRestore } from "../lib/downloadRestore";
+import { ClusterUpdateProgress } from "./ClusterUpdateProgress";
 import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./UpdateCard.module.css";
 
@@ -351,26 +348,12 @@ export function UpdateCard() {
       ) : null}
 
       {clusterMode && cluster.state && cluster.state.phase !== "idle" ? (
-        <div className={styles.clusterProgress} role="status" aria-live="polite">
-          <strong className={styles.clusterProgressTitle}>
-            {t(CLUSTER_PHASE_KEY[cluster.state.phase])}
-            {cluster.state.target ? ` → ${cluster.state.target}` : ""}
-          </strong>
-          <ul className={styles.clusterNodes}>
-            {cluster.state.nodes.map((node) => (
-              <li key={node.nodeId} className={styles.clusterNode}>
-                <span>
-                  {node.label}
-                  {node.isPrimary ? ` (${t("ha.cluster.primaryTag")})` : ""}
-                </span>
-                <span data-phase={node.phase}>{t(CLUSTER_NODE_PHASE_KEY[node.phase])}</span>
-              </li>
-            ))}
-          </ul>
+        <>
+          <ClusterUpdateProgress state={cluster.state} />
           <Link className={styles.releaseLink} to="/ha">
             {t("update.clusterDetails")}
           </Link>
-        </div>
+        </>
       ) : null}
 
       <p className={styles.checked}>{t("update.lastChecked", { time: lastChecked })}</p>
@@ -486,6 +469,10 @@ export function UpdateCard() {
           body={t("ha.cluster.updateBody")}
           details={
             <>
+              <p className={styles.dialogWarn} role="alert">
+                <span className={styles.dialogWarnIcon} aria-hidden="true" />
+                {t("update.cluster.warnDialog")}
+              </p>
               <label className={styles.field}>
                 <span className={styles.fieldLabel}>{t("update.backupPasswordLabel")}</span>
                 <input

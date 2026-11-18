@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.41.0] - 2026-11-18
+
+- Changed: **The cluster update on the System page shows each node's progress.** While a rolling
+  update runs, "System & Diagnose" now draws an overall progress bar with a percentage and a tile
+  per node with its own ring, so you can see at a glance which node is updating, restarting or
+  already back on the new version. A failed node no longer counts towards the overall percentage.
+- New: **A reminder not to change settings during the rollout.** Starting a cluster update now opens
+  a warning first, and a standing notice stays on the card while the update runs, since the nodes
+  restart one after another and settings changed in between can be lost.
+
 ## [0.40.1] - 2026-11-18
 
 - Fixed: **The NRD list switches on the phishing page respond instantly.** Turning an NRD list on or

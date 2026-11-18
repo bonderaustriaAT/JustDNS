@@ -4,6 +4,18 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.41.0] - 2026-11-18
+
+- Geändert: **Das Cluster-Update auf der System-Seite zeigt den Fortschritt jeder Node.** Während ein
+  Rolling-Update läuft, zeichnet „System & Diagnose" jetzt einen Gesamt-Fortschrittsbalken mit
+  Prozentanzeige und je Node eine Kachel mit eigenem Ring, sodass du auf einen Blick siehst, welche
+  Node gerade aktualisiert, neu startet oder schon wieder auf der neuen Version läuft. Eine
+  fehlgeschlagene Node zählt nicht mehr in den Gesamtprozentsatz.
+- Neu: **Ein Hinweis, während des Rollouts nichts umzustellen.** Ein Cluster-Update öffnet jetzt
+  zuerst eine Warnung, und ein stehender Hinweis bleibt auf der Karte, solange das Update läuft, weil
+  die Nodes nacheinander neu starten und Einstellungen, die man dazwischen ändert, verloren gehen
+  können.
+
 ## [0.40.1] - 2026-11-18
 
 - Behoben: **Die NRD-Schalter auf der Phishing-Seite reagieren sofort.** Eine NRD-Liste an- oder
