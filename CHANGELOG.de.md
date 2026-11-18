@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.42.1] - 2026-11-18
+
+- Behoben: **Die Statuszeile der Übersicht zeigt den Pausen-Zustand.** Solange zum Troubleshooten
+  alle Blockierung pausiert ist, steht oben jetzt „Schutz pausiert" in Warnfarbe statt des grünen
+  „Schutz aktiv", sodass die Zeile der Pause-Karte darunter nicht mehr widerspricht. Die Zeile folgt
+  auch einer Pause, die in einem anderen Tab oder auf einer anderen Node gesetzt wurde.
+
 ## [0.42.0] - 2026-11-18
 
 - Neu: **Zum Troubleshooten alle Blockierung pausieren.** Eine neue Karte auf der Übersicht schaltet

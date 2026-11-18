@@ -54,6 +54,18 @@
   animation: dotPulse 2.2s ease-out infinite;
 }
 
+/* While blocking is paused the banner turns to a steady danger state, so the
+   green "active" line never sits above the red pause card. */
+.status[data-paused] {
+  color: var(--danger);
+}
+
+.status[data-paused] .dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent);
+  animation: none;
+}
+
 @keyframes dotPulse {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 45%, transparent);

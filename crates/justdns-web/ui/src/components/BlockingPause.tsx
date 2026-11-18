@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { api, ApiError, type BlockingState } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import styles from "./BlockingPause.module.css";
 
@@ -26,16 +26,25 @@ function formatRemaining(ms: number): string {
     : `${minutes}:${pad(seconds)}`;
 }
 
+interface BlockingPauseProps {
+  /** The current pause deadline (Unix ms) or null when blocking is active. Owned
+   *  by the overview so the status line and this card never disagree. */
+  untilMs: number | null;
+  /** Push a freshly learned deadline up to the owner (after arming, clearing or
+   *  when the running pause reaches its deadline). */
+  onChange: (untilMs: number | null) => void;
+}
+
 /**
  * The troubleshooting "pause all blocking" control: an inline card that turns off
  * lists, phishing/NRD and CNAME uncloaking for 1 minute, 5 minutes or a custom
  * number of hours, then shows a ring countdown with a resume action while a pause
  * is in force. Admin only; the server also gates it and expires the pause on its
- * own. Rendered on the overview so the paused state is impossible to miss.
+ * own. The pause deadline is owned by the overview and passed in, so the page's
+ * protection banner reflects the same state.
  */
-export function BlockingPause() {
+export function BlockingPause({ untilMs, onChange }: BlockingPauseProps) {
   const { t } = useI18n();
-  const [untilMs, setUntilMs] = useState<number | null>(null);
   // The span the active pause started from, so the ring can show how much is
   // left. Seeded from the remaining time when a pause is already running on load.
   const [totalMs, setTotalMs] = useState<number | null>(null);
@@ -44,43 +53,22 @@ export function BlockingPause() {
   const [hours, setHours] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Remember the span locally too, so a reload mid-pause still draws a full ring.
+  // True once the ring's reference span is set for the current pause, so a poll
+  // that re-delivers the same deadline does not reset a shrinking ring.
   const seededTotal = useRef(false);
 
-  const apply = useCallback((state: BlockingState, startedFrom?: number) => {
-    const until = state.pausedUntilMs;
-    setUntilMs(until);
-    if (until == null) {
+  // Keep the ring's reference span in step with the deadline the owner provides:
+  // clear it when blocking resumes, and seed it from what is left for a pause we
+  // did not start here (`pause` seeds it itself before the deadline arrives).
+  useEffect(() => {
+    if (untilMs == null) {
       setTotalMs(null);
       seededTotal.current = false;
-    } else if (startedFrom != null) {
-      setTotalMs(startedFrom);
-      seededTotal.current = true;
     } else if (!seededTotal.current) {
-      // An already-running pause we did not start: base the ring on what is left.
-      setTotalMs(Math.max(1_000, until - Date.now()));
+      setTotalMs(Math.max(1_000, untilMs - Date.now()));
       seededTotal.current = true;
     }
-  }, []);
-
-  // Load the current state once, then poll softly so a pause started on another
-  // tab or node also shows here.
-  useEffect(() => {
-    const controller = new AbortController();
-    const load = () =>
-      api
-        .blockingState(controller.signal)
-        .then((state) => apply(state))
-        .catch(() => {
-          // A transient read failure leaves the last known state on screen.
-        });
-    load();
-    const timer = setInterval(load, 15_000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [apply]);
+  }, [untilMs]);
 
   // Tick the clock only while a pause is running, so the countdown advances and
   // clears itself the moment it reaches zero.
@@ -91,15 +79,13 @@ export function BlockingPause() {
   }, [untilMs]);
 
   const remainingMs = untilMs == null ? 0 : untilMs - now;
-  // The deadline has passed: fall back to the active view without waiting for the
-  // next poll.
+  // The deadline has passed: tell the owner so the whole page falls back to the
+  // active view without waiting for the next poll.
   useEffect(() => {
     if (untilMs != null && remainingMs <= 0) {
-      setUntilMs(null);
-      setTotalMs(null);
-      seededTotal.current = false;
+      onChange(null);
     }
-  }, [untilMs, remainingMs]);
+  }, [untilMs, remainingMs, onChange]);
 
   async function pause() {
     const seconds =
@@ -108,8 +94,12 @@ export function BlockingPause() {
     setError(null);
     try {
       const state = await api.pauseBlocking(seconds);
-      apply(state, seconds * 1_000);
+      // Seed the ring from the requested span before the new deadline arrives,
+      // so it starts full rather than from the round-trip remainder.
+      setTotalMs(seconds * 1_000);
+      seededTotal.current = true;
       setNow(Date.now());
+      onChange(state.pausedUntilMs);
     } catch (err) {
       setError(
         t("blocking.error", {
@@ -126,7 +116,7 @@ export function BlockingPause() {
     setError(null);
     try {
       const state = await api.resumeBlocking();
-      apply(state);
+      onChange(state.pausedUntilMs);
     } catch (err) {
       setError(
         t("blocking.error", {
