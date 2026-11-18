@@ -55,6 +55,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
+mod demo;
 mod geo_watch;
 mod ha;
 mod ha_crypto;
@@ -71,6 +72,11 @@ use update::{UpdateChecker, UpdateProgress};
 /// SameSite=Strict; not marked Secure because the dashboard is served over
 /// plain HTTP on the LAN, where a Secure cookie would never be sent back.
 const SESSION_COOKIE: &str = "justdns_session";
+
+/// The identity handed to an anonymous visitor in public demo mode. Never a real
+/// account (it has no password and cannot be created): only a label on the
+/// read-only [`Identity`] the demo node attaches to unauthenticated reads.
+const DEMO_USER: &str = "demo";
 
 /// Default number of recent queries returned by `/api/queries`.
 const DEFAULT_QUERY_LIMIT: usize = 50;
@@ -253,6 +259,11 @@ struct AppState {
     /// the database paths come from the binary's environment, never the synced
     /// settings, so a bring-your-own path on one node never leaks to the cluster.
     geo: Option<Arc<GeoDb>>,
+    /// Public demo mode (set by `JUSTDNS_DEMO` on that one node only): an
+    /// unauthenticated visitor is served as an anonymous, read-only Viewer, so the
+    /// dashboard opens straight away with no login. Writes stay gated (Editor/Admin)
+    /// and secrets stay redacted, exactly as for any Viewer. Off everywhere else.
+    demo: bool,
 }
 
 impl FromRef<AppState> for Store {
@@ -413,6 +424,20 @@ pub async fn serve(
     // Generated summary reports, loaded from the data volume (empty on first run).
     let reports = ReportStore::load(&reports_path);
 
+    // Public demo mode: node-local, read straight from the environment so it is set
+    // on the one demo node only and never travels with the synced settings.
+    let demo = std::env::var("JUSTDNS_DEMO")
+        .map(|value| {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false);
+    if demo {
+        tracing::warn!(
+            "JUSTDNS_DEMO is on: unauthenticated visitors are served as read-only viewers",
+        );
+    }
+
     let app_state = AppState {
         store,
         config,
@@ -441,12 +466,19 @@ pub async fn serve(
         reports,
         cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
         geo,
+        demo,
     };
 
     // Fill the block-page server IP from this node's own cluster address when the
     // admin left it blank, so a blocked name points at the right node without
     // anyone typing the IP by hand. Node-local and idempotent (see the function).
     autofill_block_page_ips(&app_state);
+
+    // Public demo node: switch the curated lists on and start the synthetic query
+    // feed, so a read-only visitor sees a live, populated dashboard.
+    if app_state.demo {
+        demo::start(app_state.store.clone(), app_state.lists.clone());
+    }
 
     // The HA sync loop pulls each peer's snapshot, merges it and applies the
     // result — on its own blocking thread, like the update checker. It is gated on
@@ -848,6 +880,25 @@ fn required_role(method: &Method, path: &str) -> Role {
     if is_write { Role::Editor } else { Role::Viewer }
 }
 
+/// What the anonymous visitor on a public demo node may read. A safe GET only:
+/// never a write, never the self-service account surface (there is no demo
+/// account), never an admin read that could leak a secret (the sync key, backups,
+/// system logs, the audit trail, user list). The cluster roster (`/api/ha/status`)
+/// is allowed through on purpose, so the demo can show its simulated cluster; it
+/// carries no secret (the key is never in the status).
+fn demo_readable(method: &Method, path: &str) -> bool {
+    if !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        return false;
+    }
+    if path == "/api/account" || path.starts_with("/api/account/") {
+        return false;
+    }
+    if path == "/api/ha/status" {
+        return true;
+    }
+    matches!(required_role(method, path), Role::Viewer)
+}
+
 /// Guard the data API. A request passes only when its session cookie names a
 /// live, fully authenticated session **and** the user's role meets the
 /// endpoint's [`required_role`]. A missing or pending session answers 401 (the
@@ -859,21 +910,33 @@ async fn require_auth(
     mut request: Request,
     next: Next,
 ) -> Response {
-    let Some(username) = jar
-        .get(SESSION_COOKIE)
-        .and_then(|cookie| state.sessions.username_for(cookie.value()))
-    else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    // The account must still exist (it may have been deleted mid-session).
-    let Some(role) = state.users.role_of(&username) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
+
+    let (username, role, demo_anon) = match jar
+        .get(SESSION_COOKIE)
+        .and_then(|cookie| state.sessions.username_for(cookie.value()))
+    {
+        // A live session: the account must still exist (it may have been deleted
+        // mid-session).
+        Some(username) => match state.users.role_of(&username) {
+            Some(role) => (username, role, false),
+            None => return StatusCode::UNAUTHORIZED.into_response(),
+        },
+        // No session, but this is the public demo node: serve an anonymous,
+        // read-only viewer so the dashboard opens with no login. Only the demo-safe
+        // reads (see `demo_readable`); anything else answers 401.
+        None if state.demo && demo_readable(&method, &path) => {
+            (DEMO_USER.to_owned(), Role::Viewer, true)
+        }
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    // The demo viewer's readable set is already decided by `demo_readable`, so the
+    // normal role gate is skipped for it (the cluster roster is an admin read it is
+    // deliberately allowed to see). Every real session still goes through the gate.
     let needed = required_role(&method, &path);
-    if !role.at_least(needed) {
+    if !demo_anon && !role.at_least(needed) {
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -937,6 +1000,9 @@ struct AuthState {
     /// Where to manage the cluster — the primary node's URL — shown to a follower.
     #[serde(skip_serializing_if = "Option::is_none")]
     primary_url: Option<String>,
+    /// `true` on the public demo node: the UI then opens straight to a read-only
+    /// dashboard (no login) and shows the demo banner. `false` everywhere else.
+    demo: bool,
 }
 
 async fn auth_state(State(state): State<AppState>, jar: CookieJar) -> Json<AuthState> {
@@ -962,6 +1028,7 @@ async fn auth_state(State(state): State<AppState>, jar: CookieJar) -> Json<AuthS
         } else {
             None
         },
+        demo: state.demo,
     })
 }
 
@@ -1086,6 +1153,16 @@ fn internal(message: String) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, message)
 }
 
+/// The public demo node runs with no account: there is nothing to sign in to and
+/// no first-run setup to claim. Refuse both so an open, anonymous node cannot be
+/// taken over by anyone who reaches `/api/auth/setup` first.
+fn demo_auth_closed(state: &AppState) -> Result<(), (StatusCode, String)> {
+    if state.demo {
+        return Err((StatusCode::FORBIDDEN, "disabled on the demo node".into()));
+    }
+    Ok(())
+}
+
 /// Create the first administrator on an unconfigured box and log them straight
 /// in. Refused once an admin exists, so this cannot be used to take over.
 async fn auth_setup(
@@ -1093,6 +1170,7 @@ async fn auth_setup(
     jar: CookieJar,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
+    demo_auth_closed(&state)?;
     match state.users.create_admin(&creds.username, &creds.password) {
         Ok(()) => {
             let token = state.sessions.create(&creds.username);
@@ -1120,6 +1198,7 @@ async fn auth_login(
     jar: CookieJar,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
+    demo_auth_closed(&state)?;
     if state.throttle.is_locked(&creds.username) {
         record(
             &state,
@@ -4276,12 +4355,61 @@ fn cluster_role(state: &AppState) -> ClusterRole {
 }
 
 async fn ha_status(State(state): State<AppState>) -> Json<ha::HaStatus> {
+    if state.demo {
+        return Json(demo_ha_status(&state));
+    }
     let mut status = state.ha.status();
     let role = cluster_role(&state);
     status.primary_node_id = role.primary_node_id;
     status.is_primary = role.is_primary;
     status.primary_url = role.primary_url;
     Json(status)
+}
+
+/// A fabricated three-node cluster for the public demo node: this node as the
+/// healthy primary plus two healthy followers, all on the same version and freshly
+/// synced. Node-local presentation only — nothing here touches the real HA state,
+/// which stays inert on a demo node.
+fn demo_ha_status(state: &AppState) -> ha::HaStatus {
+    let mut status = state.ha.status();
+    let now = now_ms_u64();
+    let version = status.version.clone();
+    status.enabled = true;
+    status.paired = true;
+    status.key_set = true;
+    status.key_from_env = true;
+    status.self_url = Some("https://demo-node-1.justdns".to_owned());
+    status.tracked = 2048;
+    status.peers = vec![
+        ha::Peer {
+            url: "https://demo-node-2.justdns".to_owned(),
+            added_at_ms: now.saturating_sub(86_400_000),
+            peer_node_id: Some("demo-node-2".to_owned()),
+            peer_version: Some(version.clone()),
+            last_sync_ms: Some(now.saturating_sub(4_000)),
+            last_error: None,
+        },
+        ha::Peer {
+            url: "https://demo-node-3.justdns".to_owned(),
+            added_at_ms: now.saturating_sub(86_400_000),
+            peer_node_id: Some("demo-node-3".to_owned()),
+            peer_version: Some(version),
+            last_sync_ms: Some(now.saturating_sub(2_500)),
+            last_error: None,
+        },
+    ];
+    status.primary_node_id = Some(status.node_id.clone());
+    status.is_primary = true;
+    status.primary_url = status.self_url.clone();
+    status
+}
+
+/// Milliseconds since the Unix epoch as a `u64`, for demo timestamps.
+fn now_ms_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// The filename of the safety backup written to a node's own data dir before an
@@ -7472,6 +7600,7 @@ mod tests {
             reports: test_reports(),
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
             geo: None,
+            demo: false,
         }
     }
 
@@ -10171,6 +10300,83 @@ mod tests {
             Request::get("/api/users")
                 .header("cookie", &cookie)
                 .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn demo_mode_serves_an_anonymous_read_only_viewer() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let mut state = test_state(store);
+        state.demo = true;
+        let app = router(state);
+
+        // No session at all: a normal viewer read is still served.
+        let res = send(&app, Request::get("/api/stats").body(Body::empty()).unwrap()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // The simulated cluster roster is readable and lists three nodes.
+        let res = send(
+            &app,
+            Request::get("/api/ha/status").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_of(res).await;
+        assert!(
+            body.contains("demo-node-2") && body.contains("demo-node-3"),
+            "the demo roster should list the two follower nodes: {body}"
+        );
+
+        // Writes are refused…
+        let res = send(
+            &app,
+            Request::put("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&Settings::default()).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // …and an admin read that could leak a secret stays closed.
+        let res = send(
+            &app,
+            Request::get("/api/users").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // The auth state advertises demo mode, so the UI opens without a login.
+        let res = send(
+            &app,
+            Request::get("/api/auth/state").body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(body_of(res).await.contains("\"demo\":true"));
+
+        // First-run setup is closed, so nobody can claim the open node by
+        // creating an admin, and sign-in is refused too.
+        let res = send(
+            &app,
+            Request::post("/api/auth/setup")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"username":"intruder","password":"takeover1234"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let res = send(
+            &app,
+            Request::post("/api/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"username":"intruder","password":"takeover1234"}"#))
                 .unwrap(),
         )
         .await;

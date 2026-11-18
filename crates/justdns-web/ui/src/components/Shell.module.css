@@ -499,6 +499,33 @@
   overflow-wrap: anywhere;
 }
 
+/* The public demo node's standing banner: the same warning amber as the
+   read-only banner, pinned at the very top, so every visitor knows the whole
+   dashboard is a read-only demo. */
+.demoBanner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  padding-inline: var(--space-4);
+  padding-block-start: calc(var(--space-2) + env(safe-area-inset-top));
+  background: var(--amber);
+  color: #633806;
+  border-block-end: 1px solid #ba7517;
+  font-size: var(--step--1);
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.demoBannerIcon {
+  inline-size: 18px;
+  block-size: 18px;
+  flex-shrink: 0;
+}
+
 /* Quiet version line at the foot of every page. */
 .footer {
   margin-block-start: var(--space-6);

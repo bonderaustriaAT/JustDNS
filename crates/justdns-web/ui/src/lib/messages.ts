@@ -1203,6 +1203,12 @@ const de = {
   "nav.audit": "Audit-Log",
   "nav.accountMenu": "Konto-Menü",
   "common.readOnly": "Nur-Lese-Zugriff – Änderungen hier brauchen mehr Rechte.",
+  "demo.banner":
+    "Demo-Node: Jeder sieht alle Einstellungen, nichts lässt sich ändern und es werden keine Tokens angezeigt.",
+  "demo.cluster.title": "Cluster",
+  "demo.cluster.subtitle": "{n} Nodes · alle gesund",
+  "demo.cluster.synced": "vor {n}s synchronisiert",
+  "demo.cluster.healthy": "gesund",
   "common.followerReadOnly":
     "Diese Node ist nur-lesend und wird von der Hauptnode verwaltet. Änderungen machst du dort:",
 
@@ -2717,6 +2723,12 @@ const en: Catalog = {
   "nav.audit": "Audit log",
   "nav.accountMenu": "Account menu",
   "common.readOnly": "Read-only access — changes here need a higher role.",
+  "demo.banner":
+    "Demo node: everyone sees every setting, nothing can be changed and no tokens are shown.",
+  "demo.cluster.title": "Cluster",
+  "demo.cluster.subtitle": "{n} nodes · all healthy",
+  "demo.cluster.synced": "synced {n}s ago",
+  "demo.cluster.healthy": "healthy",
   "common.followerReadOnly":
     "This node is read-only and managed from the primary node. Make changes there:",
 

@@ -30,6 +30,9 @@ interface AuthContextValue {
   canEdit: boolean;
   /// `false` only on a read-only follower of a live primary node.
   isPrimary: boolean;
+  /// `true` on the public demo node: the UI opens straight to a read-only
+  /// dashboard (no setup, no login) and shows the demo banner.
+  demo: boolean;
   /// The primary node's URL, shown to a follower so the user knows where to manage.
   primaryUrl: string | null;
   /// Create the first administrator and log in. Throws on failure.
@@ -61,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // behaves exactly as before this feature rather than locking the UI.
   const [isPrimary, setIsPrimary] = useState(true);
   const [primaryUrl, setPrimaryUrl] = useState<string | null>(null);
+  const [demo, setDemo] = useState(false);
 
   // Ask the server once on load who we are. If the API is unreachable we treat
   // the box as configured-but-logged-out, so the user sees the login screen
@@ -79,12 +83,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // only guards a malformed/old response.
         setIsPrimary(state.isPrimary ?? false);
         setPrimaryUrl(state.primaryUrl ?? null);
+        setDemo(state.demo ?? false);
       })
       .catch(() => {
         setConfigured(true);
         setAuthenticated(false);
         setUsername(null);
         setRole(null);
+        setDemo(false);
       })
       .finally(() => setStatus("ready"));
     return () => controller.abort();
@@ -112,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Fail closed, as in the initial load above.
     setIsPrimary(state.isPrimary ?? false);
     setPrimaryUrl(state.primaryUrl ?? null);
+    setDemo(state.demo ?? false);
   }, []);
 
   const setup = useCallback(async (user: string, password: string) => {
@@ -167,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin: role === "admin",
       canEdit: (role === "admin" || role === "editor") && isPrimary,
       isPrimary,
+      demo,
       primaryUrl,
       setup,
       completeSetup,
@@ -181,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username,
       role,
       isPrimary,
+      demo,
       primaryUrl,
       setup,
       completeSetup,

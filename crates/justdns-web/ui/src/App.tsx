@@ -26,15 +26,19 @@ import { useAuth } from "./state/auth";
 import { SettingsProvider } from "./state/settings";
 
 export function App() {
-  const { status, configured, authenticated, isAdmin } = useAuth();
+  const { status, configured, authenticated, isAdmin, demo } = useAuth();
 
   // Hold the whole UI back until we know whether a login is required, so the
   // dashboard never flashes before the gate decides.
   if (status === "loading") return null;
 
-  // First run: no admin yet, so run the setup wizard. Otherwise require a login.
-  if (!configured) return <SetupWizard />;
-  if (!authenticated) return <Login />;
+  // The public demo node opens straight to a read-only dashboard: no first-run
+  // setup, no login. Everywhere else the normal gate stands.
+  if (!demo) {
+    // First run: no admin yet, so run the setup wizard. Otherwise require a login.
+    if (!configured) return <SetupWizard />;
+    if (!authenticated) return <Login />;
+  }
 
   // The settings only load once a login is in place, so their guarded fetch
   // never fires on the login screen.

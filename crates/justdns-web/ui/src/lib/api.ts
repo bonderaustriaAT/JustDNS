@@ -1047,6 +1047,9 @@ export interface AuthState {
   isPrimary?: boolean;
   /** Where to manage the cluster — the primary node's URL — shown to a follower. */
   primaryUrl?: string;
+  /** `true` on the public demo node: the UI opens straight to a read-only
+   *  dashboard (no login) and shows the demo banner. Absent/false elsewhere. */
+  demo?: boolean;
 }
 
 /** Where a login stands after a step. `authenticated` is done; `mfa` means a

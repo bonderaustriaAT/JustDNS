@@ -352,7 +352,7 @@ function LangSwitch() {
 
 export function Shell({ children }: { children: ReactNode }) {
   const { t } = useI18n();
-  const { canEdit, isAdmin, isPrimary, primaryUrl } = useAuth();
+  const { canEdit, isAdmin, isPrimary, primaryUrl, demo } = useAuth();
   const { settings } = useSettings();
   const location = useLocation();
 
@@ -437,7 +437,26 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className={styles.shell}>
-      {(follower || readOnly) && (
+      {demo && (
+        <div className={styles.demoBanner} role="status">
+          <svg
+            className={styles.demoBannerIcon}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3l9 16H3L12 3z" />
+            <path d="M12 10v4M12 17v.01" />
+          </svg>
+          <span>{t("demo.banner")}</span>
+        </div>
+      )}
+
+      {!demo && (follower || readOnly) && (
         <div className={styles.globalBanner} role="status">
           <svg
             className={styles.globalBannerIcon}
@@ -546,7 +565,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className={styles.topBrand}>{brand}</div>
           <div className={styles.topbarActions}>
             <LangSwitch />
-            <AccountMenu />
+            {!demo && <AccountMenu />}
           </div>
         </header>
 

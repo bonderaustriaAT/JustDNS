@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ActivityChart } from "../components/ActivityChart";
+import { DemoCluster } from "../components/DemoCluster";
 import { useI18n } from "../lib/i18n";
 import { useOverview } from "../lib/useOverview";
 import styles from "./Overview.module.css";
@@ -74,6 +75,8 @@ export function Overview() {
         <span className={styles.dot} aria-hidden="true" />
         {t("overview.protectionActive")}
       </p>
+
+      <DemoCluster />
 
       <div className={styles.grid}>
         <section className={`${styles.card} ${styles.hero}`}>
