@@ -433,14 +433,38 @@
   margin-block-start: 0;
 }
 
-/* --- Cluster node list (Knotenliste) ----------------------------------- */
+/* The cluster toolbar: overall health on the left, the cluster-wide actions on
+   the right, so the status and what you can do with it sit on one line. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--line);
+}
 
+.toolbarActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.toolbarActions .buttonPrimary {
+  margin-block-start: 0;
+}
+
+/* --- Cluster node cards (Knotenkarten) --------------------------------- */
+
+/* A responsive card grid: one column on a phone, filling out to several as the
+   panel widens, so up to four nodes sit side by side instead of in a tall list. */
 .nodeList {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   gap: var(--space-3);
 }
 
@@ -459,6 +483,13 @@
 .nodeCardSelf {
   border-color: color-mix(in srgb, var(--signal) 35%, var(--line));
   background: color-mix(in srgb, var(--signal) 6%, var(--surface-sunken));
+}
+
+/* The primary (managing) node leads the cluster, so its card wears a clear accent
+   edge — on top of any "this node" tint — to stand out in the grid. */
+.nodeCard[data-primary] {
+  border-color: color-mix(in srgb, var(--accent, var(--signal)) 55%, var(--line));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--signal)) 30%, transparent);
 }
 
 .nodeHead {

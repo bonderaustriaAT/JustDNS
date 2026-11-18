@@ -1,0 +1,269 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-inline-size: 44rem;
+}
+
+/* While paused, the card wears a danger edge so the off state reads at a glance. */
+.paused {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.icon svg {
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+.title {
+  font-size: var(--step-1);
+  font-weight: 600;
+}
+
+.subtitle {
+  font-size: var(--step--2, 0.75rem);
+  color: var(--text-muted);
+  margin-block-start: 1px;
+}
+
+.intro {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-inline-size: var(--measure);
+  margin: 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* --- Duration picker ---------------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  align-self: start;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segment {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.segment + .segment {
+  border-inline-start: 1px solid var(--line-strong);
+}
+
+.segment:hover {
+  color: var(--text);
+}
+
+.segment[data-active="true"] {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+.hours {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.hours input {
+  inline-size: 4rem;
+  font: inherit;
+  font-size: var(--step--1);
+  text-align: center;
+  color: var(--text);
+  background: var(--surface-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+
+.hours input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Pause / resume actions --------------------------------------------- */
+
+.pause {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 500;
+  align-self: start;
+  cursor: pointer;
+  color: #fff;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-5);
+}
+
+.pause:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+}
+
+.pause:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.pause:focus-visible,
+.resume:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- Paused view -------------------------------------------------------- */
+
+.ringRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.ring {
+  position: relative;
+  flex: none;
+  inline-size: 80px;
+  block-size: 80px;
+}
+
+.ring svg {
+  inline-size: 80px;
+  block-size: 80px;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 6;
+}
+
+.ringFill {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+
+.ringLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.ringTime {
+  font-size: var(--step-0);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ringUnit {
+  font-size: var(--step--2, 0.7rem);
+  color: var(--text-muted);
+}
+
+.pausedBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-inline-size: 0;
+}
+
+.pausedTitle {
+  font-size: var(--step-1);
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.pausedNote {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-inline-size: var(--measure);
+  margin: 0;
+}
+
+.resume {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 500;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  margin-block-start: var(--space-1);
+}
+
+.resume:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+
+.resume:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.resumeIcon {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.error {
+  font-size: var(--step--1);
+  color: var(--danger);
+  margin: 0;
+}

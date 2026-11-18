@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -73,6 +73,13 @@ pub struct PipelineOptions {
     /// validation off the client never reports a verdict, so no answer is ever
     /// judged Bogus and that path stays inert.
     pub dnssec_validate: Arc<AtomicBool>,
+    /// A troubleshooting pause on all blocking: while the wall-clock time is
+    /// before this deadline (Unix milliseconds), the policy block, the phishing
+    /// block and CNAME uncloaking are all skipped, so every name resolves
+    /// normally. `0` means not paused. A shared, swappable slot so the web layer
+    /// can arm it live and the deadline makes it expire on its own without any
+    /// timer. Node-local and never persisted: a restart clears it.
+    pub pause_until: Arc<AtomicU64>,
 }
 
 /// The address the custom block page is reached at, per family. A blocked `A`
@@ -99,6 +106,7 @@ impl PipelineOptions {
             block_null_ip: Arc::new(AtomicBool::new(false)),
             block_page: Arc::new(ArcSwapOption::empty()),
             dnssec_validate: Arc::new(AtomicBool::new(false)),
+            pause_until: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -286,24 +294,34 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             }
         }
 
+        // A troubleshooting pause disables every block below (policy, phishing and
+        // the uncloak check) until its deadline passes, so a name that a list would
+        // refuse resolves normally while the admin hunts down a false positive.
+        // Rewrites above are unaffected — a local answer is not a block.
+        let blocking_paused = self.blocking_paused();
+
         // Blocked names are refused before any lookup, under the policy that
         // applies to this client (its device, its group, or the global default).
         // How depends on the block response: the null IP (so a connection to the
         // blocked host fails at once) or NXDOMAIN (the name simply does not exist).
-        if let Some(engine) = &self.policy_engine {
-            if engine.blocks(client, &query.name().to_string()) {
-                self.write_block_answer(query, response);
-                return Answered::local(AnswerSource::Blocked);
+        if !blocking_paused {
+            if let Some(engine) = &self.policy_engine {
+                if engine.blocks(client, &query.name().to_string()) {
+                    self.write_block_answer(query, response);
+                    return Answered::local(AnswerSource::Blocked);
+                }
             }
         }
 
         // A block-mode phishing hit refuses the name here, exactly like a policy
         // block and with the same block answer. A warn-mode hit falls through: the
         // answer is resolved normally and only the recorded marker reflects it.
-        if let Some(hit) = phishing {
-            if hit.mode == PhishingMode::Block {
-                self.write_block_answer(query, response);
-                return Answered::local(AnswerSource::Blocked);
+        if !blocking_paused {
+            if let Some(hit) = phishing {
+                if hit.mode == PhishingMode::Block {
+                    self.write_block_answer(query, response);
+                    return Answered::local(AnswerSource::Blocked);
+                }
             }
         }
 
@@ -396,6 +414,13 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         Answered::upstream(resolver, dnssec)
     }
 
+    /// Whether the troubleshooting pause is in force right now: armed (a non-zero
+    /// deadline) and the deadline has not yet passed. Read once per query.
+    fn blocking_paused(&self) -> bool {
+        let until = self.options.pause_until.load(Ordering::Relaxed);
+        until != 0 && now_ms() < until
+    }
+
     /// Write the configured block answer for `query` into `response`: the block
     /// page redirect when it is on, else the null IP, else NXDOMAIN. The caller
     /// clears any upstream records first.
@@ -418,6 +443,11 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
     /// returned are inspected — so there is no extra lookup and no loop risk.
     fn uncloak(&self, query: &Query, response: &mut Message, client: IpAddr) -> Option<Answered> {
         if !self.options.uncloak_cname.load(Ordering::Relaxed) {
+            return None;
+        }
+        // Uncloaking is a block, so the troubleshooting pause lifts it too: a
+        // cloaked tracker's real answer passes through while blocking is paused.
+        if self.blocking_paused() {
             return None;
         }
         let engine = self.policy_engine.as_ref()?;
@@ -606,6 +636,16 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         // validated answer for the queried name, so it carries no DNSSEC verdict.
         Answered::upstream(resolver, None)
     }
+}
+
+/// Wall-clock milliseconds since the Unix epoch, for the blocking-pause
+/// deadline. A clock before the epoch (never, in practice) reads as 0, which
+/// simply makes an armed pause look already expired — fail-safe towards blocking.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// The IPv4/IPv6 addresses in a response's answer section, in order. Non-address
@@ -1200,6 +1240,57 @@ mod tests {
         assert_eq!(allowed.response_code, ResponseCode::NoError);
         assert_eq!(allowed.answers.len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn pause_lets_a_blocked_name_resolve_until_the_deadline() {
+        let mock = Mock::new(Reply::A(Ipv4Addr::new(93, 184, 216, 34)));
+        let calls = mock.calls.clone();
+        let router = Arc::new(Router::new(UpstreamMode::Racing, vec![mock]));
+        let options = PipelineOptions::default();
+        // Keep a handle to the shared deadline so the test can arm and clear it.
+        let pause_until = options.pause_until.clone();
+        let pipe = Pipeline::new(DnsCache::new(100), router, options)
+            .with_policy_engine(block_ads_engine());
+
+        // Not paused: the blocked name is refused before any lookup.
+        let blocked = pipe
+            .handle(&request("ads.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(blocked.response_code, ResponseCode::NXDomain);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        // Paused (deadline well in the future): the same name now resolves
+        // upstream instead of being blocked.
+        let future = now_ms() + 60_000;
+        pause_until.store(future, Ordering::Relaxed);
+        let resolved = pipe
+            .handle(&request("ads.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(resolved.response_code, ResponseCode::NoError);
+        assert_eq!(
+            resolved.answers.len(),
+            1,
+            "a paused block resolves normally"
+        );
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "the paused query reaches upstream"
+        );
+
+        // A deadline already in the past is treated as not paused: the name is
+        // blocked again, exactly as if the pause had been cleared.
+        pause_until.store(now_ms().saturating_sub(1), Ordering::Relaxed);
+        let blocked_again = pipe
+            .handle(&request("other-ad.ads.example.", RecordType::A), CLIENT)
+            .await;
+        assert_eq!(blocked_again.response_code, ResponseCode::NXDomain);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "an expired pause blocks again, no new upstream call"
+        );
     }
 
     #[tokio::test]

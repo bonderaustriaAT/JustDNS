@@ -1539,6 +1539,23 @@ const de = {
   "ha.cluster.node.healthy": "gesund",
   "ha.cluster.node.skipped": "schon aktuell",
   "ha.cluster.node.failed": "fehlgeschlagen",
+
+  "blocking.title": "Schutz pausieren",
+  "blocking.subtitle": "Blocklisten, Phishing-Schutz und NRD",
+  "blocking.intro":
+    "Zum Troubleshooten alle Blocking-Features vorübergehend abschalten. Läuft danach von selbst wieder an.",
+  "blocking.min1": "1 Min",
+  "blocking.min5": "5 Min",
+  "blocking.customLabel": "eigene Dauer",
+  "blocking.hoursUnit": "Std.",
+  "blocking.pauseAction": "Alles pausieren",
+  "blocking.pausing": "Pausiere …",
+  "blocking.activeTitle": "Schutz ist aus",
+  "blocking.activeNote": "Alle Blocking-Features sind pausiert, dein Netzwerk ist ungefiltert.",
+  "blocking.remaining": "verbleibend",
+  "blocking.resume": "Fortsetzen",
+  "blocking.resuming": "Setze fort …",
+  "blocking.error": "Aktion fehlgeschlagen: {error}",
 } as const;
 
 type Catalog = Record<keyof typeof de, string>;
@@ -3051,6 +3068,23 @@ const en: Catalog = {
   "ha.cluster.node.healthy": "healthy",
   "ha.cluster.node.skipped": "already current",
   "ha.cluster.node.failed": "failed",
+
+  "blocking.title": "Pause protection",
+  "blocking.subtitle": "Block lists, phishing protection and NRD",
+  "blocking.intro":
+    "Turn all blocking off for a moment to troubleshoot. It resumes on its own afterwards.",
+  "blocking.min1": "1 min",
+  "blocking.min5": "5 min",
+  "blocking.customLabel": "custom",
+  "blocking.hoursUnit": "h",
+  "blocking.pauseAction": "Pause all",
+  "blocking.pausing": "Pausing …",
+  "blocking.activeTitle": "Protection is off",
+  "blocking.activeNote": "All blocking is paused, your network is unfiltered.",
+  "blocking.remaining": "remaining",
+  "blocking.resume": "Resume",
+  "blocking.resuming": "Resuming …",
+  "blocking.error": "Action failed: {error}",
 };
 
 export type MessageKey = keyof typeof de;
