@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.42.1] - 2026-11-18
+
+- Fixed: **The overview banner reflects a paused state.** While all blocking is paused for
+  troubleshooting, the status line at the top now reads "Protection paused" in a danger colour
+  instead of staying on the green "Protection active", so it no longer contradicts the pause card
+  below it. The banner follows a pause started on another tab or node too.
+
 ## [0.42.0] - 2026-11-18
 
 - New: **Pause all blocking for troubleshooting.** A new card on the overview lets an administrator

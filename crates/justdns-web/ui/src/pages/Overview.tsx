@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ActivityChart } from "../components/ActivityChart";
 import { BlockingPause } from "../components/BlockingPause";
+import { useBlockingPause } from "../lib/useBlockingPause";
 import { useI18n } from "../lib/i18n";
 import { useOverview } from "../lib/useOverview";
 import { useAuth } from "../state/auth";
@@ -33,6 +34,7 @@ export function Overview() {
   const { data, error, loading } = useOverview();
   const { t, locale } = useI18n();
   const { isAdmin } = useAuth();
+  const { untilMs, isPaused, setUntilMs } = useBlockingPause();
   const nf = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const nf1 = useMemo(
     () => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }),
@@ -73,12 +75,12 @@ export function Overview() {
 
   return (
     <div className={styles.page}>
-      <p className={styles.status}>
+      <p className={styles.status} data-paused={isPaused || undefined}>
         <span className={styles.dot} aria-hidden="true" />
-        {t("overview.protectionActive")}
+        {isPaused ? t("overview.protectionPaused") : t("overview.protectionActive")}
       </p>
 
-      {isAdmin && <BlockingPause />}
+      {isAdmin && <BlockingPause untilMs={untilMs} onChange={setUntilMs} />}
 
       <div className={styles.grid}>
         <section className={`${styles.card} ${styles.hero}`}>
