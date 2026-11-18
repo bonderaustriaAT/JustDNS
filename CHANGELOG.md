@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.42.2] - 2026-11-18
+
+- Fixed: **The log and devices pages open faster.** On instances with large block lists, opening
+  "Protokoll" or the devices page could take several seconds, because building the device filter
+  rebuilt every block list in memory first. It now reads only the list names it needs for the filter,
+  so the pages load quickly again. Nothing on the pages changes.
+
 ## [0.42.1] - 2026-11-18
 
 - Fixed: **The overview banner reflects a paused state.** While all blocking is paused for

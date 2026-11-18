@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.42.2] - 2026-11-18
+
+- Behoben: **Protokoll- und Geräte-Seite öffnen schneller.** Auf Instanzen mit großen Blocklisten
+  konnte das Öffnen von „Protokoll" oder der Geräte-Seite mehrere Sekunden dauern, weil für den
+  Geräte-Filter zuerst jede Blockliste komplett im Speicher aufgebaut wurde. Jetzt werden nur noch
+  die benötigten Listennamen für den Filter gelesen, sodass die Seiten wieder zügig laden. An den
+  Seiten selbst ändert sich nichts.
+
 ## [0.42.1] - 2026-11-18
 
 - Behoben: **Die Statuszeile der Übersicht zeigt den Pausen-Zustand.** Solange zum Troubleshooten
