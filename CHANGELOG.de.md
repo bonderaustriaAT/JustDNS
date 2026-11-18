@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.42.0] - 2026-11-18
+
+- Neu: **Zum Troubleshooten alle Blockierung pausieren.** Eine neue Karte auf der Übersicht schaltet
+  für Administratoren jede Blockierung auf einmal ab (Blocklisten, Phishing und NRD-Erkennung,
+  CNAME-Uncloaking), wahlweise für eine Minute, fünf Minuten oder eine eigene Dauer in Stunden.
+  Während sie läuft, zeigt die Karte einen Ring-Countdown und einen Fortsetzen-Knopf, sodass ein
+  Name, den eine Liste sperren würde, normal auflöst, während du einen Fehlalarm suchst. Die Pause
+  läuft von selbst aus und ein Neustart setzt sie zurück, damit der Schutz nie versehentlich aus
+  bleibt.
+- Geändert: **Die Hochverfügbarkeits-Seite zeigt den Cluster als Knotenkarten.** Die gepaarte Ansicht
+  ordnet die Nodes jetzt als responsives Kartenraster an, mit den Cluster-Aktionen in einer
+  Kopfleiste und dem Hauptknoten farblich hervorgehoben, statt einer einzelnen langen Liste. Alles,
+  was die Ansicht vorher konnte, bleibt erhalten.
+
 ## [0.41.0] - 2026-11-18
 
 - Geändert: **Das Cluster-Update auf der System-Seite zeigt den Fortschritt jeder Node.** Während ein

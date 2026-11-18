@@ -15,7 +15,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use justdns_secret::{Sealer, is_sealed};
@@ -646,6 +646,11 @@ struct Inner {
     /// record. The query observer reads it per query, so the switch takes effect
     /// without a restart.
     query_log: Arc<AtomicBool>,
+    /// A troubleshooting pause on all blocking: the Unix-millisecond deadline the
+    /// DNS pipeline compares against per query (`0` means not paused). Runtime
+    /// state, not part of the saved settings: it is never persisted and a restart
+    /// clears it, so a forgotten pause cannot outlive the process.
+    blocking_pause_until: Arc<AtomicU64>,
     /// Run after each change to apply settings the engine owns (router, cache)
     /// that cannot be expressed as a simple atomic flag here.
     on_change: RwLock<Option<OnChange>>,
@@ -709,6 +714,7 @@ impl ConfigStore {
                     BlockResponse::NullIp
                 ))),
                 query_log: Arc::new(AtomicBool::new(settings.query_log)),
+                blocking_pause_until: Arc::new(AtomicU64::new(0)),
                 on_change: RwLock::new(None),
                 settings: RwLock::new(settings),
             }),
@@ -839,6 +845,51 @@ impl ConfigStore {
     pub fn query_log_flag(&self) -> Arc<AtomicBool> {
         self.inner.query_log.clone()
     }
+
+    /// The shared blocking-pause deadline (Unix milliseconds; `0` means not
+    /// paused) for the DNS pipeline to read per query. Runtime-only — never
+    /// persisted and cleared by a restart.
+    pub fn blocking_pause_flag(&self) -> Arc<AtomicU64> {
+        self.inner.blocking_pause_until.clone()
+    }
+
+    /// Arm the troubleshooting pause for `secs` seconds from now, disabling all
+    /// blocking until the deadline. Returns the new deadline in Unix
+    /// milliseconds. A `secs` of 0 clears the pause (same as
+    /// [`resume_blocking`](Self::resume_blocking)).
+    pub fn pause_blocking(&self, secs: u64) -> u64 {
+        let until = if secs == 0 {
+            0
+        } else {
+            now_ms().saturating_add(secs.saturating_mul(1000))
+        };
+        self.inner
+            .blocking_pause_until
+            .store(until, Ordering::Relaxed);
+        until
+    }
+
+    /// Clear the troubleshooting pause at once, so blocking resumes.
+    pub fn resume_blocking(&self) {
+        self.inner.blocking_pause_until.store(0, Ordering::Relaxed);
+    }
+
+    /// The current blocking-pause deadline in Unix milliseconds, or `None` when
+    /// blocking is active — either never paused, or the deadline has passed. An
+    /// expired deadline reads as `None` so callers never show a stale countdown.
+    pub fn blocking_pause_until_ms(&self) -> Option<u64> {
+        let until = self.inner.blocking_pause_until.load(Ordering::Relaxed);
+        (until != 0 && now_ms() < until).then_some(until)
+    }
+}
+
+/// Wall-clock milliseconds since the Unix epoch, for the blocking-pause
+/// deadline. A pre-epoch clock (never, in practice) reads as 0.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// Turn the raw file bytes into plaintext JSON. A sealed file is decrypted; a

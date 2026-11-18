@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.42.0] - 2026-11-18
+
+- New: **Pause all blocking for troubleshooting.** A new card on the overview lets an administrator
+  switch every block off at once (block lists, phishing and NRD detection, CNAME uncloaking) for one
+  minute, five minutes or a custom number of hours. While it runs, the card shows a ring countdown
+  and a resume button, so a name a list would refuse resolves normally while you track down a false
+  positive. The pause expires on its own and a restart clears it, so protection can never stay off
+  by accident.
+- Changed: **The high availability page shows the cluster as node cards.** The paired view now lays
+  the nodes out as a responsive card grid with the cluster actions in a header toolbar and the main
+  node marked with an accent, instead of a single tall list. Everything the view could do before is
+  kept.
+
 ## [0.41.0] - 2026-11-18
 
 - Changed: **The cluster update on the System page shows each node's progress.** While a rolling
