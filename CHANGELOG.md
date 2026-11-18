@@ -3,6 +3,18 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.39.1] - 2026-11-17
+
+- Changed: **The phishing filter in the query log opens a themed menu.** Its choice list (any hit,
+  warned only, blocked only) is now drawn to match the rest of the dark interface, with a coloured
+  dot for each mode and a check on the active choice, in place of the browser's plain system
+  dropdown. It still opens by click or arrow key and reads the same to a screen reader.
+- Changed: **Dependencies brought up to their current releases.** Every Rust and web dependency
+  moved to its latest version, including several major upgrades (the password-hashing, TOTP,
+  certificate and HTTP-client libraries on the Rust side; React, TypeScript, Vite and the build
+  tooling on the web side). Nothing changes in how the app behaves; it builds and the full test
+  suite passes on the new versions.
+
 ## [0.39.0] - 2026-11-17
 
 - Changed: **The query log is redesigned as a focus stream.** Instead of the filter rail on the

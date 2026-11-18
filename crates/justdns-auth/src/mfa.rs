@@ -10,8 +10,7 @@
 //! derived from it and the current 30-second window. Recovery codes are a
 //! fallback for a lost device — each works once.
 
-use argon2::password_hash::rand_core::{OsRng, RngCore};
-use totp_rs::{Algorithm, Secret, TOTP};
+use totp_rs::{Builder, Secret, Totp};
 
 /// How many recovery codes to mint per enrolment.
 pub const RECOVERY_CODE_COUNT: usize = 10;
@@ -22,38 +21,46 @@ const RECOVERY_CODE_LEN: usize = 10;
 /// Build a TOTP verifier from a stored base32 secret. SHA-1, 6 digits, 30-second
 /// step, and a skew of 1 so a code from the adjacent window still passes (clock
 /// drift). `issuer`/`account` only shape the enrolment URI, not the codes.
-fn totp_for(secret: &str, issuer: &str, account: &str) -> Result<TOTP, String> {
-    let bytes = Secret::Encoded(secret.to_owned())
-        .to_bytes()
-        .map_err(|e| format!("bad TOTP secret: {e}"))?;
-    TOTP::new(
-        Algorithm::SHA1,
-        6,
-        1,
-        30,
-        bytes,
-        Some(issuer.to_owned()),
-        account.to_owned(),
-    )
-    .map_err(|e| format!("cannot build TOTP: {e}"))
+fn totp_for(secret: &str, issuer: &str, account: &str) -> Result<Totp, String> {
+    let secret = Secret::try_from_base32(secret).map_err(|e| format!("bad TOTP secret: {e}"))?;
+    // `Builder::new` starts from the RFC 6238 defaults (SHA-1, 6 digits, skew 1,
+    // 30-second step), which is exactly what we want, so only the secret and the
+    // enrolment labels need setting.
+    Builder::new()
+        .with_secret(secret)
+        .with_issuer(Some(issuer))
+        .with_account_name(account)
+        .build()
+        .map_err(|e| format!("cannot build TOTP: {e}"))
+}
+
+/// Seconds since the Unix epoch. totp-rs is built without its `std` feature, so
+/// the current time is passed in explicitly rather than read by the library.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// A fresh random base32 TOTP secret (160 bits), ready to store and to show the
 /// user for manual entry.
 pub fn generate_secret() -> String {
-    Secret::generate_secret().to_encoded().to_string()
+    Secret::generate().to_base32()
 }
 
 /// The `otpauth://` enrolment URI for a secret, which the authenticator app
 /// reads from the QR code. `issuer` labels the account in the app.
 pub fn otpauth_uri(secret: &str, issuer: &str, account: &str) -> Result<String, String> {
-    Ok(totp_for(secret, issuer, account)?.get_url())
+    totp_for(secret, issuer, account)?
+        .to_url()
+        .map_err(|e| format!("cannot build otpauth URL: {e}"))
 }
 
 /// Whether `code` is a valid TOTP for `secret` right now (±1 window).
 pub fn verify_totp(secret: &str, code: &str) -> bool {
     match totp_for(secret, "JustDNS", "user") {
-        Ok(totp) => totp.check_current(code.trim()).unwrap_or(false),
+        Ok(totp) => totp.check(code.trim(), now_unix()).is_some(),
         Err(_) => false,
     }
 }
@@ -105,7 +112,7 @@ fn uniform_index(len: usize) -> usize {
     let limit = (256 / len) * len; // largest multiple of len that fits in a u8 range
     loop {
         let mut byte = [0u8; 1];
-        OsRng.fill_bytes(&mut byte);
+        getrandom::fill(&mut byte).expect("OS randomness unavailable");
         let value = byte[0] as usize;
         if value < limit {
             return value % len;
@@ -138,10 +145,10 @@ mod tests {
     fn a_generated_code_verifies_and_a_wrong_one_does_not() {
         let secret = generate_secret();
         let totp = totp_for(&secret, "JustDNS", "alice").unwrap();
-        let now = totp.generate_current().unwrap();
-        assert!(verify_totp(&secret, &now));
+        let code = totp.generate(now_unix()).to_string();
+        assert!(verify_totp(&secret, &code));
         assert!(!verify_totp(&secret, "000000"));
-        assert!(!verify_totp("not-base32!!", &now));
+        assert!(!verify_totp("not-base32!!", "123456"));
     }
 
     #[test]

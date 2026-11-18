@@ -1020,12 +1020,17 @@ fn count_rules(text: &str) -> usize {
 
 /// Download `url` as text, with a timeout and a size cap.
 fn fetch(url: &str) -> Result<String, String> {
+    // ureq 3 moved timeouts onto the config; a per-request override keeps the
+    // default agent (and its connection pool) instead of building a fresh one.
     let response = ureq::get(url)
-        .timeout(FETCH_TIMEOUT)
+        .config()
+        .timeout_global(Some(FETCH_TIMEOUT))
+        .build()
         .call()
         .map_err(|error| error.to_string())?;
     let mut body = String::new();
     response
+        .into_body()
         .into_reader()
         .take(MAX_LIST_BYTES)
         .read_to_string(&mut body)

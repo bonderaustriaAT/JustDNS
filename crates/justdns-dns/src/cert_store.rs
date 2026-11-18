@@ -20,7 +20,7 @@ use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rcgen::{
-    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, Ia5String, IsCa, KeyPair,
+    BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose, SanType,
 };
 use rustls::ServerConfig;
@@ -559,8 +559,11 @@ fn mint_self_signed(path: &Path, hostname: &str, ips: &[IpAddr]) -> io::Result<(
         .distinguished_name
         .push(DnType::CommonName, hostname);
     leaf_params.subject_alt_names = subject_alt_names(hostname, ips)?;
+    // rcgen 0.14 signs against an `Issuer` (the CA's parameters plus its key)
+    // rather than the CA certificate and key as separate arguments.
+    let ca_issuer = Issuer::from_params(&ca_params, &ca_key);
     let leaf_cert = leaf_params
-        .signed_by(&leaf_key, &ca_cert, &ca_key)
+        .signed_by(&leaf_key, &ca_issuer)
         .map_err(to_io)?;
 
     let chain_pem = format!("{}{}", leaf_cert.pem(), ca_cert.pem());
@@ -577,19 +580,26 @@ fn subject_alt_names(hostname: &str, ips: &[IpAddr]) -> io::Result<Vec<SanType>>
     let mut sans = Vec::new();
     let host = hostname.trim();
     if !host.is_empty() {
-        sans.push(SanType::DnsName(dns_name(host)?));
+        sans.push(dns_name(host)?);
     }
     for ip in ips {
         sans.push(SanType::IpAddress(*ip));
     }
     if sans.is_empty() {
-        sans.push(SanType::DnsName(dns_name("localhost")?));
+        sans.push(dns_name("localhost")?);
     }
     Ok(sans)
 }
 
-fn dns_name(host: &str) -> io::Result<Ia5String> {
-    Ia5String::try_from(host.to_owned()).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))
+/// A DNS-name SAN entry. rcgen 0.14 keeps `Ia5String` private, so the value is
+/// built by `try_into` (inferred from `SanType::DnsName`) rather than naming the
+/// type.
+fn dns_name(host: &str) -> io::Result<SanType> {
+    let name = host
+        .to_owned()
+        .try_into()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    Ok(SanType::DnsName(name))
 }
 
 /// Builds a rustls server config pinned to the `ring` crypto provider.
@@ -826,7 +836,7 @@ mod tests {
         let key = KeyPair::generate().unwrap();
         let mut params = CertificateParams::default();
         params.distinguished_name.push(DnType::CommonName, hostname);
-        params.subject_alt_names = vec![SanType::DnsName(dns_name(hostname).unwrap())];
+        params.subject_alt_names = vec![dns_name(hostname).unwrap()];
         let cert = params.self_signed(&key).unwrap();
         (cert.pem(), key.serialize_pem())
     }

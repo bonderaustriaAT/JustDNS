@@ -94,10 +94,10 @@ impl DohResolver {
     /// A resolver against the given DoH JSON endpoint (e.g.
     /// `https://cloudflare-dns.com/dns-query`).
     pub fn new(endpoint: impl Into<String>, timeout: Duration) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
-            .build();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .build()
+            .into();
         Self {
             agent,
             endpoint: endpoint.into(),
@@ -111,10 +111,10 @@ impl Resolver for DohResolver {
         let body = match self
             .agent
             .get(&url)
-            .set("accept", "application/dns-json")
+            .header("accept", "application/dns-json")
             .call()
         {
-            Ok(response) => match response.into_string() {
+            Ok(mut response) => match response.body_mut().read_to_string() {
                 Ok(body) => body,
                 Err(error) => {
                     debug!(%domain, %error, "DoH response read failed");
@@ -166,11 +166,11 @@ pub struct HttpSiteProbe {
 
 impl HttpSiteProbe {
     pub fn new(timeout: Duration) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
             .user_agent("justdns-harvester/0.1 (+candidate-review)")
-            .build();
+            .build()
+            .into();
         Self { agent }
     }
 }
@@ -180,7 +180,7 @@ impl SiteProbe for HttpSiteProbe {
         let url = format!("https://{domain}/");
         let response = match self.agent.get(&url).call() {
             Ok(response) => response,
-            Err(ureq::Error::Status(code, _)) => {
+            Err(ureq::Error::StatusCode(code)) => {
                 // A 204/404/410 with no site body is beacon-shaped; a 401/403
                 // guarding an endpoint likewise is not a human site.
                 return match code {
@@ -192,12 +192,15 @@ impl SiteProbe for HttpSiteProbe {
         };
 
         let content_type = response
-            .header("content-type")
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
 
         let mut buf = Vec::with_capacity(4096);
         let _ = response
+            .into_body()
             .into_reader()
             .take(PROBE_BODY_LIMIT as u64)
             .read_to_end(&mut buf);

@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-argon2 = { version = "0.5.3", features = ["std"] }
+argon2 = "0.6.0"
 ring = "0.17"
 thiserror = "2"
 

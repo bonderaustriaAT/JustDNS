@@ -1239,13 +1239,16 @@ impl Ha {
             .peer_auth_header()
             .ok_or_else(|| "no sync key set".to_owned())?;
         let response = ureq::get(url)
-            .timeout(PEER_TIMEOUT)
-            .set("X-Ha-Auth", &auth)
-            .set("User-Agent", &format!("justdns/{}", self.version))
+            .config()
+            .timeout_global(Some(PEER_TIMEOUT))
+            .build()
+            .header("X-Ha-Auth", &auth)
+            .header("User-Agent", &format!("justdns/{}", self.version))
             .call()
             .map_err(|error| error.to_string())?;
         let mut sealed = Vec::new();
         response
+            .into_body()
             .into_reader()
             .take(MAX_PEER_BYTES)
             .read_to_end(&mut sealed)
@@ -1267,11 +1270,13 @@ impl Ha {
         let url = endpoint(peer_url, "api/ha/depart");
         let body = serde_json::json!({ "nodeId": node_id, "atMs": at_ms }).to_string();
         ureq::post(&url)
-            .timeout(PEER_TIMEOUT)
-            .set("X-Ha-Auth", &auth)
-            .set("User-Agent", &format!("justdns/{}", self.version))
-            .set("Content-Type", "application/json")
-            .send_string(&body)
+            .config()
+            .timeout_global(Some(PEER_TIMEOUT))
+            .build()
+            .header("X-Ha-Auth", &auth)
+            .header("User-Agent", &format!("justdns/{}", self.version))
+            .header("Content-Type", "application/json")
+            .send(&body)
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
@@ -1292,11 +1297,13 @@ impl Ha {
             .ok_or_else(|| "no sync key set".to_owned())?;
         let url = endpoint(peer_url, path);
         ureq::post(&url)
-            .timeout(PEER_TIMEOUT)
-            .set("X-Ha-Auth", &auth)
-            .set("User-Agent", &format!("justdns/{}", self.version))
-            .set("Content-Type", "application/octet-stream")
-            .send_bytes(&sealed)
+            .config()
+            .timeout_global(Some(PEER_TIMEOUT))
+            .build()
+            .header("X-Ha-Auth", &auth)
+            .header("User-Agent", &format!("justdns/{}", self.version))
+            .header("Content-Type", "application/octet-stream")
+            .send(&sealed[..])
             .map_err(|error| error.to_string())
             .map(|_| ())
     }
