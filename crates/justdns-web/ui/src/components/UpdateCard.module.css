@@ -185,38 +185,6 @@
   }
 }
 
-/* The rolling cluster update's live progress, shown on the System page when this
-   node is the primary of a cluster. */
-.clusterProgress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  background: var(--surface-sunken);
-  border-radius: var(--radius-sm);
-}
-
-.clusterProgressTitle {
-  font-size: var(--step-0);
-}
-
-.clusterNodes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.clusterNode {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  font-size: var(--step--1);
-  color: var(--text-muted);
-}
-
 .done {
   padding: var(--space-3);
   border-radius: var(--radius-sm);
@@ -319,6 +287,43 @@
 .dialogError {
   font-size: var(--step--1);
   color: var(--danger);
+}
+
+/* The standing reminder in the cluster-update dialog: no settings changes until
+   every node is up on the new version. */
+.dialogWarn {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  color: var(--text);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.dialogWarnIcon {
+  flex: none;
+  inline-size: 1rem;
+  block-size: 1rem;
+  margin-block-start: 2px;
+  border-radius: 50%;
+  background: var(--warn);
+  position: relative;
+}
+
+.dialogWarnIcon::after {
+  content: "!";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink);
 }
 
 .dialogActions {

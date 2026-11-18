@@ -352,6 +352,12 @@ const de = {
   "update.updateButton": "Jetzt updaten",
   "update.updateCluster": "Cluster aktualisieren",
   "update.clusterDetails": "Details auf der Hochverfügbarkeit-Seite",
+  "update.cluster.nodesDone": "{done} von {total} Nodes aktuell",
+  "update.cluster.follower": "Follower",
+  "update.cluster.warnDialog":
+    "Während des Rollouts nichts umstellen: Die Nodes starten nacheinander neu. Änderungen an Einstellungen, bis alle wieder auf der neuen Version laufen, können verloren gehen.",
+  "update.cluster.warnRunning":
+    "Rollout läuft: bis alle Nodes auf der neuen Version sind, keine Einstellungen ändern.",
   "update.manageOnPrimary": "Dieser Knoten ist ein Follower – Updates werden vom Hauptknoten aus verwaltet.",
   "update.openRelease": "Auf GitHub ansehen",
   "update.dialogTitle": "Auf {version} updaten",
@@ -1874,6 +1880,12 @@ const en: Catalog = {
   "update.updateButton": "Update now",
   "update.updateCluster": "Update cluster",
   "update.clusterDetails": "Details on the high-availability page",
+  "update.cluster.nodesDone": "{done} of {total} nodes current",
+  "update.cluster.follower": "Follower",
+  "update.cluster.warnDialog":
+    "Don't change anything during the rollout: the nodes restart one after another. Settings changed before every node is back on the new version may be lost.",
+  "update.cluster.warnRunning":
+    "Rollout in progress: don't change settings until every node is on the new version.",
   "update.manageOnPrimary": "This node is a follower — updates are managed from the primary node.",
   "update.openRelease": "View on GitHub",
   "update.dialogTitle": "Update to {version}",
