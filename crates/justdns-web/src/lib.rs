@@ -2473,8 +2473,9 @@ fn clients_view(
 
     // The list catalogue the policy editor draws from: the two built-in objects
     // followed by every block feed, each with its global-default state so the UI
-    // can show what an untouched scope inherits.
-    let resolved = lists.resolved();
+    // can show what an untouched scope inherits. Only the feed metadata is needed
+    // here, so take the cheap catalogue rather than resolving (and parsing) every
+    // feed's domains.
     let mut list_catalog = vec![
         ListObjectRow {
             id: "ads".to_owned(),
@@ -2487,11 +2488,16 @@ fn clients_view(
             global_on: settings.block_malware,
         },
     ];
-    list_catalog.extend(resolved.block_feeds.iter().map(|feed| ListObjectRow {
-        id: feed.id.clone(),
-        label: feed.label.clone(),
-        global_on: feed.enabled,
-    }));
+    list_catalog.extend(
+        lists
+            .block_feed_catalog()
+            .into_iter()
+            .map(|feed| ListObjectRow {
+                id: feed.id,
+                label: feed.label,
+                global_on: feed.enabled,
+            }),
+    );
 
     let mut rows: Vec<ClientRow> = Vec::new();
     // A stored device's row, by target, and a seen unnamed client's row, by the

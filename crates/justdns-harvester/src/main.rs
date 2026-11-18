@@ -46,6 +46,10 @@ struct Config {
     probe_timeout: Duration,
     doh_endpoint: String,
     coverage_urls: Vec<String>,
+    /// Extra operator/protected domains to exclude on top of the built-in ones,
+    /// from `HARVEST_OWN_DOMAINS` (comma or newline separated). These can never be
+    /// proposed, so a new own service is kept out of the report by config alone.
+    own_domains_extra: Vec<String>,
 }
 
 /// The coverage feeds downloaded each run so a candidate an existing list already
@@ -111,6 +115,14 @@ impl Config {
             doh_endpoint: env_var("HARVEST_DOH_ENDPOINT")
                 .unwrap_or_else(|| "https://cloudflare-dns.com/dns-query".into()),
             coverage_urls,
+            own_domains_extra: env_var("HARVEST_OWN_DOMAINS")
+                .map(|raw| {
+                    raw.split([',', '\n'])
+                        .map(|s| s.trim().to_owned())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 }
@@ -310,7 +322,16 @@ fn main() {
     let mut client = ApiClient::new(&cfg.base_url, &cfg.username, &cfg.password, agent.clone());
     let resolver = DohResolver::new(cfg.doh_endpoint.clone(), cfg.probe_timeout);
     let site_probe = HttpSiteProbe::new(cfg.probe_timeout);
-    let sel = SelectConfig::default();
+    let mut sel = SelectConfig::default();
+    for domain in &cfg.own_domains_extra {
+        sel.own_domains.add_list(&format!("{domain}\n"));
+    }
+    if !cfg.own_domains_extra.is_empty() {
+        info!(
+            count = cfg.own_domains_extra.len(),
+            "extra own domains excluded"
+        );
+    }
 
     loop {
         match run_cycle(&cfg, &mut client, &agent, &resolver, &site_probe, &sel) {
