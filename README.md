@@ -2,6 +2,11 @@
 
 **See which companies your devices phone home to, then block them. Self-hosted DNS, no cloud.**
 
+<p align="center">
+  <a href="https://demo.justdns.justfuture.at"><img src="https://img.shields.io/badge/Live_Demo-demo.justdns.justfuture.at-2ea043?style=for-the-badge" alt="Live demo of JustDNS"></a>
+</p>
+<p align="center"><em>Look through almost everything right in your browser. No install, no setup.</em></p>
+
 [![Release](https://img.shields.io/github/v/tag/bonderaustriaAT/JustDNS?label=release&sort=semver&color=2ea043)](https://github.com/bonderaustriaAT/JustDNS/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/bonderaustriaAT/JustDNS/image.yml?branch=main&label=build)](https://github.com/bonderaustriaAT/JustDNS/actions/workflows/image.yml)
 [![Container](https://img.shields.io/badge/container-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/bonderaustriaAT/JustDNS/pkgs/container/justdns)
