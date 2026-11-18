@@ -22,10 +22,10 @@ Format Jahr-Monat-Tag.
   System-Dropdowns des Browsers. Es öffnet weiterhin per Klick oder Pfeiltaste und liest sich für
   einen Screenreader gleich.
 - Geändert: **Abhängigkeiten auf den aktuellen Stand gebracht.** Alle Rust- und Web-Abhängigkeiten
-  sind auf ihre neueste Version gewechselt, darunter mehrere große Versionssprünge (die Bibliotheken
-  für Passwort-Hashing, TOTP, Zertifikate und HTTP-Client auf der Rust-Seite; React, TypeScript,
-  Vite und das Build-Werkzeug auf der Web-Seite). Am Verhalten der App ändert sich nichts; sie baut,
-  und alle Tests laufen mit den neuen Versionen.
+  sind auf ihre neueste Version gewechselt, darunter mehrere große Versionssprünge: Rust-seitig
+  argon2, totp-rs, rcgen, ureq, axum-extra, base64 und x509-parser; Web-seitig React, TypeScript,
+  Vite und @vitejs/plugin-react. Am Verhalten der App ändert sich nichts; sie baut, und alle Tests
+  laufen mit den neuen Versionen.
 
 ## [0.39.0] - 2026-11-17
 
