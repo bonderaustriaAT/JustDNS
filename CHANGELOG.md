@@ -3,7 +3,7 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
-## [0.39.1] - 2026-11-17
+## [0.40.0] - 2026-11-18
 
 - Changed: **The phishing filter in the query log opens a themed menu.** Its choice list (any hit,
   warned only, blocked only) is now drawn to match the rest of the dark interface, with a coloured

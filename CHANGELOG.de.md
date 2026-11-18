@@ -4,7 +4,7 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
-## [0.39.1] - 2026-11-17
+## [0.40.0] - 2026-11-18
 
 - Geändert: **Der Phishing-Filter im Protokoll öffnet jetzt ein eigenes Menü.** Seine Auswahlliste
   (jeder Treffer, nur gewarnt, nur blockiert) ist passend zur dunklen Oberfläche gestaltet, mit
