@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.40.1] - 2026-11-18
+
+- Behoben: **Die NRD-Schalter auf der Phishing-Seite reagieren sofort.** Eine NRD-Liste an- oder
+  auszuschalten kippt den Schalter jetzt sofort und lädt die große Liste im Hintergrund, statt das
+  Bedienelement bis zum Ende des Downloads zu blockieren. Der Server baut die Liste zudem außerhalb
+  des Request-Threads neu auf, sodass die Seite flüssig bleibt.
+- Geändert: **Die NRD-Beschreibungen nennen jetzt Fenster und Größe.** Jede der vier Listen gibt an,
+  welche 7 Tage sie abdeckt und wie groß sie ungefähr ist; die 7-Tage-Liste ist als empfohlene
+  Startwahl markiert.
+
 ## [0.40.0] - 2026-11-18
 
 - Geändert: **Der Phishing-Filter im Protokoll öffnet jetzt ein eigenes Menü.** Seine Auswahlliste

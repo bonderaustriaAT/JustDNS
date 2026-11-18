@@ -183,13 +183,21 @@ export function Phishing() {
     [patch, phishing.brands],
   );
 
-  const togglePreset = useCallback(async (key: string, on: boolean) => {
-    try {
-      const lists = await api.setPreset(key, on);
-      setPresets(lists.presets);
-    } catch {
-      // Leave the catalogue as-is; the row keeps its previous state.
-    }
+  const setRow = (key: string, on: boolean) =>
+    setPresets((rows) =>
+      rows.map((row) => (row.key === key ? { ...row, active: on, enabled: on } : row)),
+    );
+
+  const togglePreset = useCallback((key: string, on: boolean) => {
+    // Flip the row at once so the switch feels instant. The server only sets the
+    // flag and pulls the (large, ~40 MB) feed in the background, so waiting for
+    // the round-trip would freeze the toggle for no reason. On failure we revert
+    // just this row, leaving any other row the user touched meanwhile untouched.
+    setRow(key, on);
+    api
+      .setPreset(key, on)
+      .then((lists) => setPresets(lists.presets))
+      .catch(() => setRow(key, !on));
   }, []);
 
   const nrdPresets = useMemo(() => presets.filter((p) => p.category === "nrd"), [presets]);
@@ -380,8 +388,18 @@ export function Phishing() {
                         {nrdPresets.map((preset) => (
                           <li key={preset.key} className={styles.feed}>
                             <div className={styles.feedText}>
-                              <span className={styles.feedName}>
-                                {t(`phishing.feed.${preset.key}.name` as MessageKey)}
+                              <span className={styles.feedHead}>
+                                <span className={styles.feedName}>
+                                  {t(`phishing.feed.${preset.key}.name` as MessageKey)}
+                                </span>
+                                {preset.recommended && (
+                                  <span
+                                    className={styles.recommendedTag}
+                                    title={t("lists.recommendedHint")}
+                                  >
+                                    {t("lists.recommended")}
+                                  </span>
+                                )}
                               </span>
                               <span className={styles.feedDesc}>
                                 {t(`phishing.feed.${preset.key}.desc` as MessageKey)}
