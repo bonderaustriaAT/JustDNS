@@ -30,7 +30,7 @@ use justdns_auth::{AuthError, Role, SessionState, SessionStore, User, UserStore}
 use justdns_clients::{
     ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
 };
-use justdns_config::{BlockPage, ConfigStore, Settings};
+use justdns_config::{BackupProtocol, BackupSync, BlockPage, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::cert_store::{CertInfo, CertRecord, CertStore};
 use justdns_filter::Blocker;
@@ -55,6 +55,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
+mod backup_sync;
 mod geo_watch;
 mod ha;
 mod ha_crypto;
@@ -525,6 +526,11 @@ pub async fn serve(
         });
     }
 
+    // Scheduled off-box config backup. Reads the live config each tick, so it does
+    // nothing until the admin turns it on; only the primary backs up (a manual run
+    // is allowed anywhere). Its own thread like the checkers above.
+    backup_sync::spawn_scheduler(app_state.clone());
+
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
     axum::serve(listener, router(app_state)).await
@@ -683,6 +689,14 @@ fn router(state: AppState) -> Router {
         .route("/api/blocking/resume", post(blocking_resume))
         .route("/api/backup", post(export_backup))
         .route("/api/backup/restore", post(restore_backup))
+        // Scheduled off-box backup to an SMB/NFS share (admin). Read/update the
+        // config, test the connection, or run a backup on demand.
+        .route(
+            "/api/backup/sync",
+            get(get_backup_sync).put(put_backup_sync),
+        )
+        .route("/api/backup/sync/test", post(test_backup_sync))
+        .route("/api/backup/sync/run", post(run_backup_sync))
         // Self-service: a signed-in user manages their own password and MFA.
         .route("/api/account", get(get_account))
         .route("/api/account/password", put(change_own_password))
@@ -825,8 +839,7 @@ fn required_role(method: &Method, path: &str) -> Role {
     if path == "/api/users"
         || path.starts_with("/api/users/")
         || path == "/api/audit"
-        || path == "/api/backup"
-        || path == "/api/backup/restore"
+        || path.starts_with("/api/backup")
         || path.starts_with("/api/logs/")
         || path == "/api/diag"
         || path.starts_with("/api/update")
@@ -3627,6 +3640,186 @@ async fn reports_download(
         .into_response())
 }
 
+/// The auto-backup configuration and status as the UI reads it: the share target
+/// and schedule, the two secrets replaced by a "is one stored" flag (they are
+/// write-only), and the last run's status.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupSyncView {
+    enabled: bool,
+    protocol: BackupProtocol,
+    host: String,
+    share: String,
+    path: String,
+    username: String,
+    domain: String,
+    /// Whether a share password is stored (the value itself never leaves the box).
+    has_password: bool,
+    /// Whether a backup password is stored.
+    has_backup_password: bool,
+    interval_hours: u32,
+    keep: u32,
+    last_run_ms: u64,
+    last_ok: bool,
+    last_error: String,
+}
+
+impl From<BackupSync> for BackupSyncView {
+    fn from(b: BackupSync) -> Self {
+        Self {
+            enabled: b.enabled,
+            protocol: b.protocol,
+            host: b.host,
+            share: b.share,
+            path: b.path,
+            username: b.username,
+            domain: b.domain,
+            has_password: !b.password.is_empty(),
+            has_backup_password: !b.backup_password.is_empty(),
+            interval_hours: b.interval_hours,
+            keep: b.keep,
+            last_run_ms: b.last_run_ms,
+            last_ok: b.last_ok,
+            last_error: b.last_error,
+        }
+    }
+}
+
+/// The auto-backup settings a save carries. An empty (or omitted) `password` /
+/// `backup_password` leaves the stored secret unchanged, so the UI never has to
+/// receive a secret just to echo it back — the write-only pattern the metrics
+/// token uses for downloads.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupSyncInput {
+    enabled: bool,
+    protocol: BackupProtocol,
+    #[serde(default)]
+    host: String,
+    #[serde(default)]
+    share: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    domain: String,
+    #[serde(default)]
+    backup_password: Option<String>,
+    interval_hours: u32,
+    keep: u32,
+}
+
+/// Read the auto-backup configuration and last-run status (secrets blanked).
+async fn get_backup_sync(State(state): State<AppState>) -> Json<BackupSyncView> {
+    Json(state.config.get().backup_sync.into())
+}
+
+/// Update the auto-backup configuration. Status fields and any secret left blank
+/// are preserved. Returns the stored value (secrets blanked).
+async fn put_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(input): Json<BackupSyncInput>,
+) -> Result<Json<BackupSyncView>, (StatusCode, String)> {
+    let mut settings = state.config.get();
+    {
+        let b = &mut settings.backup_sync;
+        b.enabled = input.enabled;
+        b.protocol = input.protocol;
+        b.host = input.host.trim().to_owned();
+        b.share = input.share.trim().to_owned();
+        b.path = input.path.trim().to_owned();
+        b.username = input.username.trim().to_owned();
+        b.domain = input.domain.trim().to_owned();
+        b.interval_hours = input.interval_hours.clamp(1, 24 * 30);
+        b.keep = input.keep.clamp(1, 365);
+        // An empty secret means "keep the stored one"; a non-empty one replaces it.
+        if let Some(password) = input.password.filter(|value| !value.is_empty()) {
+            b.password = password;
+        }
+        if let Some(backup_password) = input.backup_password.filter(|value| !value.is_empty()) {
+            b.backup_password = backup_password;
+        }
+        // last_run_ms / last_ok / last_error are status the scheduler owns — the
+        // snapshot above already carries them, so they are left untouched.
+    }
+    let view: BackupSyncView = settings.backup_sync.clone().into();
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "backup.sync.update"),
+    );
+    Ok(Json(view))
+}
+
+/// Test the auto-backup share by writing and deleting a probe file.
+async fn test_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let cfg = state.config.get().backup_sync;
+    let result = tokio::task::spawn_blocking(move || backup_sync::test_connection(&cfg))
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    match result {
+        Ok(()) => {
+            record(
+                &state,
+                AuditEntry::success(&identity.username, "backup.sync.test"),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            record(
+                &state,
+                AuditEntry::failure(&identity.username, "backup.sync.test").detail(error.clone()),
+            );
+            Err((StatusCode::BAD_REQUEST, error))
+        }
+    }
+}
+
+/// Run an auto-backup on demand, recording the outcome as the scheduler would.
+async fn run_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let worker = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let outcome = backup_sync::run_once(&worker);
+        backup_sync::record_result(
+            &worker,
+            outcome.is_ok(),
+            outcome.clone().err().unwrap_or_default(),
+        );
+        outcome
+    })
+    .await
+    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    match result {
+        Ok(()) => {
+            record(
+                &state,
+                AuditEntry::success(&identity.username, "backup.sync.run"),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            record(
+                &state,
+                AuditEntry::failure(&identity.username, "backup.sync.run").detail(error.clone()),
+            );
+            Err((StatusCode::BAD_REQUEST, error))
+        }
+    }
+}
+
 /// Assemble the full configuration backup from the live stores. Shared by the
 /// download endpoint and the pre-update safety backup.
 fn build_backup(state: &AppState) -> Backup {
@@ -3754,6 +3947,19 @@ fn ha_collections(state: &AppState) -> BTreeMap<String, ha::Collection> {
         "blockPage",
         "blockPage",
         serde_json::to_value(&settings.block_page),
+    );
+    // The cluster's primary (managing) node designation also travels as its OWN
+    // collection entry, with its own last-writer-wins timestamp, for the same
+    // reason as the block page: it stays inside the settings blob too (an older
+    // peer still reads it there), but a peer that understands the separate entry
+    // applies that one (see `ha_apply`). Changing any *other* setting on one node
+    // therefore can never clear the chosen primary on another through the shared
+    // blob's single timestamp — only an explicit primary change (or a node
+    // leaving) moves it, so once a primary is set the cluster remembers it.
+    put(
+        "cluster",
+        "cluster",
+        serde_json::to_value(&settings.cluster),
     );
     put("settings", "settings", serde_json::to_value(settings));
 
@@ -3998,6 +4204,19 @@ fn ha_apply(
             block_page.server_ipv4 = local.block_page.server_ipv4;
             block_page.server_ipv6 = local.block_page.server_ipv6;
             settings.block_page = block_page;
+        }
+        // The cluster primary designation travels as its own entry with an
+        // independent timestamp (like the block page), so an unrelated settings
+        // change on a peer cannot clear the chosen primary through the shared
+        // blob. Prefer that entry when present; an older peer that only carries the
+        // designation inside the settings blob falls through to the value
+        // deserialised above.
+        if let Some(cluster_value) = collections
+            .get("cluster")
+            .and_then(|entities| entities.get("cluster"))
+        {
+            settings.cluster =
+                serde_json::from_value(cluster_value.clone()).map_err(|error| error.to_string())?;
         }
         state
             .config
@@ -5550,6 +5769,9 @@ async fn get_settings(identity: Identity, State(config): State<ConfigStore>) -> 
 fn redact_settings_secrets(settings: &mut Settings) {
     settings.notifications.webhook_url = String::new();
     settings.metrics_token = String::new();
+    // The auto-backup share and backup passwords are write-only secrets too.
+    settings.backup_sync.password = String::new();
+    settings.backup_sync.backup_password = String::new();
 }
 
 /// Replace the settings. The new values take effect at once (IPv6 live); a
@@ -5561,6 +5783,11 @@ async fn put_settings(
     Json(mut settings): Json<Settings>,
 ) -> Result<Json<Settings>, (StatusCode, String)> {
     sanitize_phishing(&mut settings.phishing);
+    // The auto-backup config (share credentials, schedule and status) is managed
+    // only through its own `/api/backup/sync` endpoints; the general settings save
+    // does not carry it (the UI omits it), so keep the stored value instead of
+    // letting an omitted field reset it to defaults.
+    settings.backup_sync = state.config.get().backup_sync;
     state
         .config
         .set(settings)
@@ -8773,6 +9000,63 @@ mod tests {
 
         ha_apply(&node, &collections).unwrap();
         assert!(node.config.get().block_page.enabled);
+    }
+
+    #[tokio::test]
+    async fn ha_primary_survives_unrelated_settings_change_on_peer() {
+        // The chosen primary travels as its own "cluster" entry with an independent
+        // timestamp. A peer that changed some *other* setting (so its settings blob
+        // is newer and happens to carry an empty primary) must not clear this node's
+        // primary designation: `ha_apply` applies the separate "cluster" entry.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+        let mut local = node.config.get();
+        local.cluster.primary_node_id = "primary-node-xyz".into();
+        node.config.set(local).unwrap();
+
+        // An incoming snapshot whose settings blob disagrees (primary cleared) but
+        // whose own "cluster" entry keeps it — the shape a peer produces after an
+        // unrelated settings save.
+        let mut collections = ha_collections(&node);
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] = serde_json::Value::String(String::new())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-node-xyz",
+            "the separate cluster entry must win over the settings blob"
+        );
+    }
+
+    #[tokio::test]
+    async fn ha_primary_falls_back_to_settings_blob_for_old_peer() {
+        // A peer too old to emit a separate "cluster" entry carries the primary only
+        // inside its settings blob. `ha_apply` must still adopt it from there.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+
+        let mut collections = ha_collections(&node);
+        collections.remove("cluster");
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] =
+                    serde_json::Value::String("primary-from-blob".into())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-from-blob"
+        );
     }
 
     #[tokio::test]

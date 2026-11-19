@@ -3,6 +3,23 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.43.0] - 2026-11-19
+
+- New: **Scheduled backup to a network share.** A new card under "Sicherung" stores your setup as an
+  encrypted file on a Samba or NFS share on a schedule, with no mount needed. Status and metrics sit
+  up top (last backup, interval, retention), with "Back up now" and "Test connection" below; target
+  and access tuck behind an expander. The backup uses the same format as the manual download and is
+  encrypted with your backup password; older copies are pruned to the configured count. In a cluster
+  the schedule runs on the primary node only. Both SMB (Samba) and NFS are supported; for NFS the
+  "Share" is the export path and access is granted by the node's IP.
+- Fixed: **A primary node stays set once chosen.** An unrelated settings change on another node could
+  clear the cluster's primary assignment, so the high-availability page would offer "make primary"
+  again. The assignment is now synced as its own entry and survives other nodes' settings changes.
+- Fixed: **A daily report no longer crashes the node.** On memory-capped containers a large report
+  could OOM-kill the node, because DuckDB sized itself to the whole host's memory rather than the
+  container limit. DuckDB now gets a fitting memory limit and a place to spill, so large reports run
+  through.
+
 ## [0.42.2] - 2026-11-18
 
 - Fixed: **The log and devices pages open faster.** On instances with large block lists, opening

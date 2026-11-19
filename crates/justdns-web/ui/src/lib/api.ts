@@ -594,6 +594,48 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   spikeWindowMins: 10,
 };
 
+/// Which network file protocol the scheduled off-box backup speaks. Matches the
+/// Rust `BackupProtocol` (lowercase on the wire).
+export type BackupProtocol = "smb" | "nfs";
+
+/// The auto-backup configuration and last-run status as the server reports it.
+/// The two secrets never leave the box: `hasPassword` / `hasBackupPassword` say
+/// whether one is stored. Matches the Rust `BackupSyncView`.
+export interface BackupSyncInfo {
+  enabled: boolean;
+  protocol: BackupProtocol;
+  host: string;
+  share: string;
+  path: string;
+  username: string;
+  domain: string;
+  hasPassword: boolean;
+  hasBackupPassword: boolean;
+  intervalHours: number;
+  keep: number;
+  /** When the last scheduled or manual run happened (Unix ms), 0 if never. */
+  lastRunMs: number;
+  lastOk: boolean;
+  lastError: string;
+}
+
+/// The writable auto-backup settings. An empty (or omitted) `password` /
+/// `backupPassword` keeps the stored secret unchanged. Matches the Rust
+/// `BackupSyncInput`.
+export interface BackupSyncInput {
+  enabled: boolean;
+  protocol: BackupProtocol;
+  host: string;
+  share: string;
+  path: string;
+  username: string;
+  password?: string;
+  domain: string;
+  backupPassword?: string;
+  intervalHours: number;
+  keep: number;
+}
+
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
 
 /** The DNSSEC verdict recorded for a forwarded query when validation is on:
@@ -1653,6 +1695,15 @@ export const api = {
    *  server refuses a file that is not a JustDNS backup or a wrong password. */
   restoreBackup: (file: string, password?: string) =>
     sendJson<void>("POST", "/api/backup/restore", { file, password }),
+  /** The scheduled off-box backup configuration and last-run status (admin). */
+  backupSync: (signal?: AbortSignal) => getJson<BackupSyncInfo>("/api/backup/sync", signal),
+  /** Save the auto-backup configuration; a blank secret keeps the stored one. */
+  saveBackupSync: (input: BackupSyncInput) =>
+    sendJson<BackupSyncInfo>("PUT", "/api/backup/sync", input),
+  /** Test the share by writing and deleting a probe file. */
+  testBackupSync: () => sendJson<void>("POST", "/api/backup/sync/test"),
+  /** Run an auto-backup right now. */
+  runBackupSync: () => sendJson<void>("POST", "/api/backup/sync/run"),
   /** The encrypted client-DNS status (DoT/DoH flags, hostname, selected certs). */
   tls: (signal?: AbortSignal) => getJson<TlsStatus>("/api/tls", signal),
   /** Set the DoT/DoH flags, hostname and selected certificate ids. Applied live. */

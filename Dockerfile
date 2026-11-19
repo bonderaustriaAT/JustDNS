@@ -25,7 +25,10 @@ FROM rust:1-slim-bookworm AS chef
 # g++ builds DuckDB's bundled C++ during the dependency cook below; mold is a much
 # faster linker, which shortens the final link of the large DuckDB-backed binary —
 # the slow tail of every warm build, where the deps are already cached.
-RUN apt-get update && apt-get install -y g++ mold && rm -rf /var/lib/apt/lists/*
+# g++/mold as above; clang + libnfs-dev let the optional `nfs` feature compile
+# (libnfs-sys runs bindgen against libnfs's headers and links libnfs). The
+# matching libnfs.so is copied into the runtime stage below.
+RUN apt-get update && apt-get install -y g++ mold clang libnfs-dev && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
 # Link with mold instead of GNU ld. Set after cargo-chef is installed (so its own,
 # already-built binary is unaffected); the planner and build stages inherit it.
@@ -48,7 +51,9 @@ RUN cargo chef cook --release --recipe-path recipe.json
 # to compile, so it is deliberately absent here and does not invalidate caches.)
 COPY . .
 COPY --from=ui /ui/dist crates/justdns-web/ui/dist
-RUN cargo build --release --locked --bin justdns \
+# `--features nfs` compiles the in-process NFS backup transport (libnfs); the
+# SMB transport shells out to smbclient and needs no build feature.
+RUN cargo build --release --locked --features nfs --bin justdns \
     && cp target/release/justdns /usr/local/bin/justdns
 
 # Fetch the offline GeoIP databases (DB-IP Lite, CC BY 4.0) so the dashboard can
@@ -90,10 +95,19 @@ RUN set -eu; \
 # system certificate store is needed for DoT/DoH upstreams. curl is added only
 # so the container HEALTHCHECK below can probe the web endpoint.
 FROM debian:13.7-slim AS runtime
+# curl for the container healthcheck; smbclient for the scheduled off-box backup,
+# which uploads to a Samba/SMB share via the smbclient CLI (no mount needed).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl smbclient \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
+# The NFS transport links libnfs.so.13 dynamically. The build stage is Debian 12
+# (libnfs.so.13), the runtime is Debian 13 (which ships libnfs.so.14, a different
+# SONAME), so we carry the exact shared object the binary was linked against from
+# the build stage rather than apt-installing a mismatched one. libnfs13 depends
+# only on libc6, which is forward-compatible, so it loads cleanly here.
+COPY --from=build /usr/lib/x86_64-linux-gnu/libnfs.so.13* /usr/lib/x86_64-linux-gnu/
+RUN ldconfig
 # The bundled offline GeoIP databases; the binary's defaults point here. Copied
 # as a directory so a download that failed above (leaving one or both files out)
 # still builds — the binary just finds no database and leaves the feature off.
