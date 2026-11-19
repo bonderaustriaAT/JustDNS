@@ -4,6 +4,24 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.43.0] - 2026-11-19
+
+- Neu: **Automatisches Backup auf ein Netzlaufwerk.** Eine neue Karte unter „Sicherung" legt deine
+  Einrichtung regelmäßig als verschlüsselte Datei auf einer Samba- oder NFS-Freigabe ab, ganz ohne
+  Mount. Oben stehen Status und Kennzahlen (letztes Backup, Intervall, Aufbewahrung), darunter
+  „Jetzt sichern" und „Verbindung testen"; Ziel und Zugang verstecken sich hinter einem Aufklapper.
+  Die Sicherung nutzt dasselbe Format wie der manuelle Download und wird mit deinem Backup-Passwort
+  verschlüsselt, alte Stände werden auf die eingestellte Anzahl zurückgeschnitten. Im Cluster läuft
+  der Zeitplan nur auf der Hauptnode. SMB ist sofort nutzbar, NFS folgt in Kürze.
+- Behoben: **Eine einmal gesetzte Hauptnode bleibt gesetzt.** Bisher konnte eine unabhängige
+  Einstellungsänderung auf einer anderen Node die Hauptnode-Zuweisung im Cluster wieder entfernen,
+  sodass auf der Hochverfügbarkeits-Seite erneut „zur Hauptnode machen" erschien. Die Zuweisung wird
+  jetzt als eigener Eintrag synchronisiert und überlebt fremde Einstellungsänderungen.
+- Behoben: **Ein Tagesreport bringt die Node nicht mehr zum Absturz.** Auf speicherbegrenzten
+  Containern konnte ein großer Report die Node per OOM abschießen, weil DuckDB sich am gesamten
+  Host-Speicher statt am Container-Limit orientierte. DuckDB bekommt jetzt ein passendes
+  Speicherlimit und einen Platz zum Auslagern, sodass auch große Reports durchlaufen.
+
 ## [0.42.2] - 2026-11-18
 
 - Behoben: **Protokoll- und Geräte-Seite öffnen schneller.** Auf Instanzen mit großen Blocklisten

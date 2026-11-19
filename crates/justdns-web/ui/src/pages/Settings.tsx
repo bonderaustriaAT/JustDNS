@@ -12,7 +12,15 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { InfoHint } from "../components/InfoHint";
 import { Toggle } from "../components/Toggle";
 import { WriteGuard } from "../components/WriteGuard";
-import { ApiError, api, type CertListItem, type TlsSettings, type TlsStatus } from "../lib/api";
+import {
+  ApiError,
+  api,
+  type BackupProtocol,
+  type BackupSyncInput,
+  type CertListItem,
+  type TlsSettings,
+  type TlsStatus,
+} from "../lib/api";
 import { bytesToBase64, looksEncrypted } from "../lib/backupFile";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
@@ -313,6 +321,376 @@ function BackupSection() {
         />
       ) : null}
     </>
+  );
+}
+
+/** The network protocols the scheduled backup can speak, in segment order. */
+const BACKUP_PROTOCOLS: BackupProtocol[] = ["smb", "nfs"];
+
+/** The scheduled off-box backup card (status first): a metrics row up top, then
+ *  the run/test actions, with target and access tucked behind an expander. It
+ *  reads and writes its own `/api/backup/sync` endpoint rather than the shared
+ *  settings store, since the two secrets are write-only and never round-trip. */
+function AutoBackupSection() {
+  const { t, locale } = useI18n();
+
+  const [form, setForm] = useState({
+    enabled: false,
+    protocol: "smb" as BackupProtocol,
+    host: "",
+    share: "",
+    path: "",
+    username: "",
+    domain: "",
+    intervalHours: 24,
+    keep: 14,
+  });
+  // Secret drafts: empty keeps whatever is stored on the box.
+  const [pw, setPw] = useState("");
+  const [bpw, setBpw] = useState("");
+  const [meta, setMeta] = useState({
+    hasPassword: false,
+    hasBackupPassword: false,
+    lastRunMs: 0,
+    lastOk: false,
+    lastError: "",
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [testState, setTestState] = useState<"idle" | "busy" | "ok" | "error">("idle");
+  const [testError, setTestError] = useState("");
+  const [runState, setRunState] = useState<"idle" | "busy" | "ok" | "error">("idle");
+  const [runError, setRunError] = useState("");
+  // True once an editable field changed since the last save, so blur and the
+  // action buttons only write (and audit) when something actually moved.
+  const dirty = useRef(false);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .backupSync(ctrl.signal)
+      .then((info) => {
+        setForm({
+          enabled: info.enabled,
+          protocol: info.protocol,
+          host: info.host,
+          share: info.share,
+          path: info.path,
+          username: info.username,
+          domain: info.domain,
+          intervalHours: info.intervalHours,
+          keep: info.keep,
+        });
+        setMeta({
+          hasPassword: info.hasPassword,
+          hasBackupPassword: info.hasBackupPassword,
+          lastRunMs: info.lastRunMs,
+          lastOk: info.lastOk,
+          lastError: info.lastError,
+        });
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+    return () => ctrl.abort();
+  }, []);
+
+  async function persist(next = form) {
+    const input: BackupSyncInput = {
+      enabled: next.enabled,
+      protocol: next.protocol,
+      host: next.host.trim(),
+      share: next.share.trim(),
+      path: next.path.trim(),
+      username: next.username,
+      domain: next.domain,
+      intervalHours: next.intervalHours,
+      keep: next.keep,
+      password: pw ? pw : undefined,
+      backupPassword: bpw ? bpw : undefined,
+    };
+    const info = await api.saveBackupSync(input);
+    setMeta({
+      hasPassword: info.hasPassword,
+      hasBackupPassword: info.hasBackupPassword,
+      lastRunMs: info.lastRunMs,
+      lastOk: info.lastOk,
+      lastError: info.lastError,
+    });
+    if (pw) setPw("");
+    if (bpw) setBpw("");
+    dirty.current = false;
+    return info;
+  }
+
+  // Toggle and the protocol segment save at once; text and number fields save on
+  // blur (below) so typing is not interrupted.
+  function patchNow(p: Partial<typeof form>) {
+    const next = { ...form, ...p };
+    setForm(next);
+    void persist(next).catch(() => {});
+  }
+
+  function flush() {
+    if (dirty.current) void persist().catch(() => {});
+  }
+
+  async function test() {
+    setTestState("busy");
+    setTestError("");
+    try {
+      if (dirty.current) await persist();
+      await api.testBackupSync();
+      setTestState("ok");
+    } catch (error) {
+      setTestState("error");
+      setTestError(error instanceof ApiError ? error.message : "");
+    }
+  }
+
+  async function run() {
+    setRunState("busy");
+    setRunError("");
+    try {
+      if (dirty.current) await persist();
+      await api.runBackupSync();
+      const info = await api.backupSync();
+      setMeta({
+        hasPassword: info.hasPassword,
+        hasBackupPassword: info.hasBackupPassword,
+        lastRunMs: info.lastRunMs,
+        lastOk: info.lastOk,
+        lastError: info.lastError,
+      });
+      setRunState("ok");
+    } catch (error) {
+      setRunState("error");
+      setRunError(error instanceof ApiError ? error.message : "");
+    }
+  }
+
+  const lastText =
+    meta.lastRunMs === 0
+      ? t("settings.autoBackupNever")
+      : new Date(meta.lastRunMs).toLocaleString(locale, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+  const lastTone = meta.lastRunMs === 0 ? "none" : meta.lastOk ? "ok" : "bad";
+  const canRun = form.host.trim() !== "" && form.share.trim() !== "";
+  const needsBackupPassword = form.enabled && !meta.hasBackupPassword && bpw === "";
+
+  const textInput = (
+    labelKey: MessageKey,
+    value: string,
+    onChange: (v: string) => void,
+    opts: { placeholderKey?: MessageKey; secret?: boolean; stored?: boolean; hintKey?: MessageKey } = {},
+  ) => (
+    <label className={styles.abField}>
+      <span className={styles.abFieldLabel}>{t(labelKey)}</span>
+      <input
+        type={opts.secret ? "password" : "text"}
+        className={styles.customInput}
+        value={value}
+        autoComplete={opts.secret ? "new-password" : "off"}
+        placeholder={
+          opts.secret && opts.stored
+            ? t("settings.autoBackupSecretStored")
+            : opts.placeholderKey
+              ? t(opts.placeholderKey)
+              : ""
+        }
+        aria-label={t(labelKey)}
+        onChange={(event) => {
+          dirty.current = true;
+          onChange(event.target.value);
+        }}
+        onBlur={flush}
+      />
+      {opts.hintKey ? <span className={styles.pwHint}>{t(opts.hintKey)}</span> : null}
+    </label>
+  );
+
+  const numberInput = (labelKey: MessageKey, value: number, onChange: (v: number) => void) => (
+    <label className={styles.abField}>
+      <span className={styles.abFieldLabel}>{t(labelKey)}</span>
+      <input
+        type="number"
+        min={1}
+        className={styles.customInput}
+        value={value}
+        aria-label={t(labelKey)}
+        onChange={(event) => {
+          dirty.current = true;
+          onChange(Math.max(1, Math.floor(Number(event.target.value) || 1)));
+        }}
+        onBlur={flush}
+      />
+    </label>
+  );
+
+  return (
+    <div className={styles.autoBackup}>
+      <div className={styles.abHead}>
+        <span className={styles.labelLine}>
+          <span className={styles.label}>{t("settings.autoBackupLabel")}</span>
+          <InfoHint label={t("settings.autoBackupLabel")} text={t("settings.autoBackupDesc")} />
+        </span>
+        <Toggle
+          label={t("settings.autoBackupLabel")}
+          checked={form.enabled}
+          disabled={!loaded}
+          onChange={(next) => patchNow({ enabled: next })}
+        />
+      </div>
+
+      <div className={styles.abMetrics}>
+        <div className={styles.abTile}>
+          <span className={styles.abTileLabel}>{t("settings.autoBackupMetricLast")}</span>
+          <span className={styles.abTileValue} data-tone={lastTone}>
+            {lastText}
+          </span>
+        </div>
+        <div className={styles.abTile}>
+          <span className={styles.abTileLabel}>{t("settings.autoBackupMetricInterval")}</span>
+          <span className={styles.abTileValue}>
+            {t("settings.autoBackupEveryHours", { h: form.intervalHours })}
+          </span>
+        </div>
+        <div className={styles.abTile}>
+          <span className={styles.abTileLabel}>{t("settings.autoBackupMetricKeep")}</span>
+          <span className={styles.abTileValue}>
+            {form.keep} {t("settings.autoBackupKeepUnit")}
+          </span>
+        </div>
+      </div>
+
+      {meta.lastError ? (
+        <p className={styles.actionError}>
+          {t("settings.autoBackupLastError", { error: meta.lastError })}
+        </p>
+      ) : null}
+      {needsBackupPassword ? (
+        <p className={styles.abWarn}>{t("settings.autoBackupNeedsPassword")}</p>
+      ) : null}
+
+      <div className={styles.abActions}>
+        <button
+          type="button"
+          className={styles.actionButton}
+          onClick={run}
+          disabled={runState === "busy" || !canRun}
+        >
+          {runState === "busy" ? t("settings.autoBackupRunBusy") : t("settings.autoBackupRun")}
+        </button>
+        {runState === "ok" ? (
+          <span className={styles.actionDone}>{t("settings.autoBackupRunOk")}</span>
+        ) : null}
+        {runState === "error" ? (
+          <span className={styles.actionError}>
+            {runError || t("settings.autoBackupRunError")}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className={styles.actionButton}
+          onClick={test}
+          disabled={testState === "busy" || !canRun}
+        >
+          {testState === "busy" ? t("settings.autoBackupTestBusy") : t("settings.autoBackupTest")}
+        </button>
+        {testState === "ok" ? (
+          <span className={styles.actionDone}>{t("settings.autoBackupTestOk")}</span>
+        ) : null}
+        {testState === "error" ? (
+          <span className={styles.actionError}>
+            {testError || t("settings.autoBackupTestError")}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          className={styles.abEditToggle}
+          onClick={() => setEditing((open) => !open)}
+          aria-expanded={editing}
+        >
+          {editing ? t("settings.autoBackupEditClose") : t("settings.autoBackupEdit")}
+        </button>
+      </div>
+
+      {editing ? (
+        <div className={styles.abConfig}>
+          <div className={styles.abField}>
+            <span className={styles.abFieldLabel}>{t("settings.autoBackupProtocol")}</span>
+            <div
+              className={styles.profileSwitch}
+              role="group"
+              aria-label={t("settings.autoBackupProtocol")}
+            >
+              {BACKUP_PROTOCOLS.map((proto) => (
+                <button
+                  key={proto}
+                  type="button"
+                  className={styles.profileButton}
+                  data-active={form.protocol === proto || undefined}
+                  aria-pressed={form.protocol === proto}
+                  onClick={() => patchNow({ protocol: proto })}
+                >
+                  {t(`settings.autoBackupProto.${proto}` as MessageKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.protocol === "nfs" ? (
+            <p className={styles.abWarn}>{t("settings.autoBackupNfsHint")}</p>
+          ) : null}
+
+          <div className={styles.abGrid}>
+            {textInput("settings.autoBackupHost", form.host, (v) => setForm({ ...form, host: v }), {
+              placeholderKey: "settings.autoBackupHostPlaceholder",
+            })}
+            {textInput(
+              "settings.autoBackupShare",
+              form.share,
+              (v) => setForm({ ...form, share: v }),
+              { placeholderKey: "settings.autoBackupSharePlaceholder" },
+            )}
+            {textInput("settings.autoBackupPath", form.path, (v) => setForm({ ...form, path: v }), {
+              placeholderKey: "settings.autoBackupPathPlaceholder",
+            })}
+            {form.protocol === "smb"
+              ? textInput(
+                  "settings.autoBackupUsername",
+                  form.username,
+                  (v) => setForm({ ...form, username: v }),
+                  { placeholderKey: "settings.autoBackupUsernamePlaceholder" },
+                )
+              : null}
+            {form.protocol === "smb"
+              ? textInput("settings.autoBackupPassword", pw, setPw, {
+                  secret: true,
+                  stored: meta.hasPassword,
+                })
+              : null}
+            {form.protocol === "smb"
+              ? textInput(
+                  "settings.autoBackupDomain",
+                  form.domain,
+                  (v) => setForm({ ...form, domain: v }),
+                  { placeholderKey: "settings.autoBackupDomainPlaceholder" },
+                )
+              : null}
+            {textInput("settings.autoBackupBackupPassword", bpw, setBpw, {
+              secret: true,
+              stored: meta.hasBackupPassword,
+              hintKey: "settings.autoBackupBackupPasswordHint",
+            })}
+            {numberInput("settings.autoBackupInterval", form.intervalHours, (v) =>
+              setForm({ ...form, intervalHours: v }),
+            )}
+            {numberInput("settings.autoBackupKeep", form.keep, (v) => setForm({ ...form, keep: v }))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1980,6 +2358,7 @@ export function Settings() {
               description={t("settings.backupDesc")}
             >
               <BackupSection />
+              <AutoBackupSection />
             </Category>
           )}
 

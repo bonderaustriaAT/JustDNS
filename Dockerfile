@@ -90,8 +90,10 @@ RUN set -eu; \
 # system certificate store is needed for DoT/DoH upstreams. curl is added only
 # so the container HEALTHCHECK below can probe the web endpoint.
 FROM debian:13.7-slim AS runtime
+# curl for the container healthcheck; smbclient for the scheduled off-box backup,
+# which uploads to a Samba/SMB share via the smbclient CLI (no mount needed).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl smbclient \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/justdns /usr/local/bin/justdns
 # The bundled offline GeoIP databases; the binary's defaults point here. Copied
