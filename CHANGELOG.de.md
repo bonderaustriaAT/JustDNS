@@ -12,7 +12,8 @@ Format Jahr-Monat-Tag.
   „Jetzt sichern" und „Verbindung testen"; Ziel und Zugang verstecken sich hinter einem Aufklapper.
   Die Sicherung nutzt dasselbe Format wie der manuelle Download und wird mit deinem Backup-Passwort
   verschlüsselt, alte Stände werden auf die eingestellte Anzahl zurückgeschnitten. Im Cluster läuft
-  der Zeitplan nur auf der Hauptnode. SMB ist sofort nutzbar, NFS folgt in Kürze.
+  der Zeitplan nur auf der Hauptnode. SMB (Samba) und NFS werden beide unterstützt; bei NFS ist die
+  „Freigabe" der Export-Pfad, und der Zugriff läuft über die IP der Node.
 - Behoben: **Eine einmal gesetzte Hauptnode bleibt gesetzt.** Bisher konnte eine unabhängige
   Einstellungsänderung auf einer anderen Node die Hauptnode-Zuweisung im Cluster wieder entfernen,
   sodass auf der Hochverfügbarkeits-Seite erneut „zur Hauptnode machen" erschien. Die Zuweisung wird

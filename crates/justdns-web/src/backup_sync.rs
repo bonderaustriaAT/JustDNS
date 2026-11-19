@@ -4,7 +4,8 @@
 //! Scheduled off-box backups: JustDNS itself connects to an SMB share and drops a
 //! password-encrypted copy of the whole configuration there on a fixed interval,
 //! keeping the newest few. Everything runs in userspace without mounting anything
-//! (the container is unprivileged): SMB shells out to `smbclient`.
+//! (the container is unprivileged): SMB shells out to `smbclient`, NFS talks to
+//! the server in-process through libnfs (behind the `nfs` build feature).
 //!
 //! The backup artefact is the very same one the manual download produces
 //! ([`crate::build_backup`] + `seal_backup`), so there is only one backup format;
@@ -18,6 +19,15 @@ use std::time::Duration;
 
 use justdns_config::{BackupProtocol, BackupSync};
 use tracing::{info, warn};
+
+#[cfg(feature = "nfs")]
+use libnfs::Nfs;
+#[cfg(feature = "nfs")]
+use nix::fcntl::OFlag;
+#[cfg(feature = "nfs")]
+use nix::sys::stat::Mode;
+#[cfg(feature = "nfs")]
+use std::path::Path;
 
 use crate::AppState;
 
@@ -148,6 +158,104 @@ impl BackupTransport for SmbTransport {
     }
 }
 
+/// NFS transport: talks to the NFS server in-process via libnfs, so nothing is
+/// mounted and no privilege is needed. `share` is the export path (e.g.
+/// `/volume1/backups`), `path` an optional subfolder inside it. A fresh context
+/// is opened per operation, mirroring the stateless SMB shell-outs. Compiled only
+/// with the `nfs` feature; otherwise [`transport_for`] returns a clear error.
+#[cfg(feature = "nfs")]
+struct NfsTransport {
+    host: String,
+    export: String,
+    path: String,
+}
+
+#[cfg(feature = "nfs")]
+impl NfsTransport {
+    /// Connect and mount the export, ready for one file operation.
+    fn mount(&self) -> Result<Nfs, String> {
+        let nfs = Nfs::new().map_err(|error| format!("NFS-Kontext: {error}"))?;
+        nfs.mount(&self.host, &self.export).map_err(|error| {
+            format!(
+                "NFS-Mount {}:{} fehlgeschlagen: {error}",
+                self.host, self.export
+            )
+        })?;
+        Ok(nfs)
+    }
+
+    /// The export-relative directory the backups live in (`/` or `/subfolder`).
+    fn dir(&self) -> String {
+        let sub = self.path.trim_matches('/');
+        if sub.is_empty() {
+            "/".to_owned()
+        } else {
+            format!("/{sub}")
+        }
+    }
+
+    /// The export-relative path of one backup file.
+    fn file_path(&self, name: &str) -> String {
+        let sub = self.path.trim_matches('/');
+        if sub.is_empty() {
+            format!("/{name}")
+        } else {
+            format!("/{sub}/{name}")
+        }
+    }
+}
+
+#[cfg(feature = "nfs")]
+impl BackupTransport for NfsTransport {
+    fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let mut nfs = self.mount()?;
+        let file = nfs
+            .create(
+                Path::new(&self.file_path(name)),
+                // O_WRONLY so the handle is writable (nfs_create does not force an
+                // access mode), O_TRUNC to overwrite a same-named leftover.
+                OFlag::O_WRONLY | OFlag::O_TRUNC,
+                Mode::from_bits_truncate(0o644),
+            )
+            .map_err(|error| format!("NFS: {name} lie\u{df} sich nicht anlegen: {error}"))?;
+        // pwrite may write fewer bytes than asked, so advance until all are out.
+        let mut written = 0usize;
+        while written < bytes.len() {
+            let n = file
+                .pwrite(&bytes[written..], written as u64)
+                .map_err(|error| format!("NFS: Schreiben fehlgeschlagen: {error}"))?;
+            if n <= 0 {
+                return Err("NFS: Schreiben lieferte keine Bytes".to_owned());
+            }
+            written += n as usize;
+        }
+        Ok(())
+    }
+
+    fn list(&self) -> Result<Vec<String>, String> {
+        let mut nfs = self.mount()?;
+        let dir = nfs
+            .opendir(Path::new(&self.dir()))
+            .map_err(|error| format!("NFS: Ordner lie\u{df} sich nicht lesen: {error}"))?;
+        let mut names = Vec::new();
+        for entry in dir {
+            let entry = entry.map_err(|error| format!("NFS: Eintrag unlesbar: {error}"))?;
+            if let Some(file) = entry.path.file_name().and_then(|s| s.to_str()) {
+                if file.starts_with(BACKUP_PREFIX) && file.ends_with(BACKUP_SUFFIX) {
+                    names.push(file.to_owned());
+                }
+            }
+        }
+        Ok(names)
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        let nfs = self.mount()?;
+        nfs.unlink(Path::new(&self.file_path(name)))
+            .map_err(|error| format!("NFS: {name} lie\u{df} sich nicht l\u{f6}schen: {error}"))
+    }
+}
+
 /// Remove `secret` from `text` so a password can never reach a log or an error
 /// shown in the UI. A no-op when the secret is empty.
 fn scrub(text: &str, secret: &str) -> String {
@@ -177,11 +285,25 @@ fn transport_for(cfg: &BackupSync) -> Result<Box<dyn BackupTransport>, String> {
             password: cfg.password.clone(),
             domain: cfg.domain.trim().to_owned(),
         })),
-        BackupProtocol::Nfs => Err(
-            "NFS-Backups folgen in K\u{fc}rze \u{2014} bitte vorerst Samba (SMB) w\u{e4}hlen"
-                .to_owned(),
-        ),
+        BackupProtocol::Nfs => nfs_transport(cfg),
     }
+}
+
+/// The NFS transport, when the `nfs` feature is compiled in.
+#[cfg(feature = "nfs")]
+fn nfs_transport(cfg: &BackupSync) -> Result<Box<dyn BackupTransport>, String> {
+    Ok(Box::new(NfsTransport {
+        host: cfg.host.trim().to_owned(),
+        export: cfg.share.trim().to_owned(),
+        path: cfg.path.trim().to_owned(),
+    }))
+}
+
+/// Without the `nfs` feature the binding is not linked, so NFS is unavailable and
+/// the caller gets a clear error instead.
+#[cfg(not(feature = "nfs"))]
+fn nfs_transport(_cfg: &BackupSync) -> Result<Box<dyn BackupTransport>, String> {
+    Err("NFS ist in diesem Build nicht verf\u{fc}gbar".to_owned())
 }
 
 /// The dated file name for a backup taken at `now_ms` (UTC), chronologically
@@ -242,7 +364,7 @@ pub fn run_once(state: &AppState) -> Result<(), String> {
 
     let mut backup = crate::build_backup(state);
     // Strip the write-only secrets even though the file is sealed, exactly as the
-    // manual download does — the backup password alone must never reveal them.
+    // manual download does; the backup password alone must never reveal them.
     crate::redact_settings_secrets(&mut backup.settings);
     let json = serde_json::to_vec(&backup).map_err(|error| error.to_string())?;
     let sealed = justdns_secret::seal_backup(&cfg.backup_password, &json);
@@ -266,7 +388,7 @@ pub fn run_once(state: &AppState) -> Result<(), String> {
 }
 
 /// Verify the configuration by writing a tiny probe file to the share and removing
-/// it again — the "test connection" action. The probe name is not a backup name,
+/// it again (the "test connection" action). The probe name is not a backup name,
 /// so it is never listed or pruned as one.
 pub fn test_connection(cfg: &BackupSync) -> Result<(), String> {
     let transport = transport_for(cfg)?;

@@ -390,11 +390,16 @@ function AutoBackupSection() {
         });
         setLoaded(true);
       })
-      .catch(() => setLoaded(true));
+      // Leave `loaded` false on failure so the card stays disabled rather than
+      // offering defaults that a save would write over the real stored config.
+      .catch(() => {});
     return () => ctrl.abort();
   }, []);
 
   async function persist(next = form) {
+    // Never persist before a successful load, or an edit would clobber the
+    // stored target with the empty defaults shown while unloaded.
+    if (!loaded) return;
     const input: BackupSyncInput = {
       enabled: next.enabled,
       protocol: next.protocol,

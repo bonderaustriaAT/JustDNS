@@ -1060,7 +1060,8 @@ const de = {
   "settings.autoBackupProtocol": "Protokoll",
   "settings.autoBackupProto.smb": "Samba",
   "settings.autoBackupProto.nfs": "NFS",
-  "settings.autoBackupNfsHint": "NFS-Backups folgen in Kürze. Bitte vorerst Samba (SMB) wählen.",
+  "settings.autoBackupNfsHint":
+    "Bei NFS ist „Freigabe“ der Export-Pfad (z. B. /volume1/backups). Der NFS-Server regelt den Zugriff über die IP der Node; Benutzer und Passwort entfallen.",
   "settings.autoBackupHost": "Host",
   "settings.autoBackupHostPlaceholder": "z. B. 192.168.20.10",
   "settings.autoBackupShare": "Freigabe",
@@ -1075,7 +1076,7 @@ const de = {
   "settings.autoBackupBackupPassword": "Backup-Passwort",
   "settings.autoBackupBackupPasswordHint":
     "Verschlüsselt die Sicherung. Ohne dieses Passwort keine Wiederherstellung.",
-  "settings.autoBackupSecretStored": "gespeichert — leer lassen zum Behalten",
+  "settings.autoBackupSecretStored": "gespeichert, leer lassen zum Behalten",
   "settings.autoBackupInterval": "Intervall (Stunden)",
   "settings.autoBackupKeep": "Aufbewahrung (Stände)",
   "settings.autoBackupTest": "Verbindung testen",
@@ -2645,7 +2646,8 @@ const en: Catalog = {
   "settings.autoBackupProtocol": "Protocol",
   "settings.autoBackupProto.smb": "Samba",
   "settings.autoBackupProto.nfs": "NFS",
-  "settings.autoBackupNfsHint": "NFS backups are coming soon. Please choose Samba (SMB) for now.",
+  "settings.autoBackupNfsHint":
+    'For NFS, "Share" is the export path (e.g. /volume1/backups). The NFS server grants access by the node\'s IP; user and password do not apply.',
   "settings.autoBackupHost": "Host",
   "settings.autoBackupHostPlaceholder": "e.g. 192.168.20.10",
   "settings.autoBackupShare": "Share",
@@ -2660,7 +2662,7 @@ const en: Catalog = {
   "settings.autoBackupBackupPassword": "Backup password",
   "settings.autoBackupBackupPasswordHint":
     "Encrypts the backup. Without this password there is no restore.",
-  "settings.autoBackupSecretStored": "stored — leave empty to keep",
+  "settings.autoBackupSecretStored": "stored, leave empty to keep",
   "settings.autoBackupInterval": "Interval (hours)",
   "settings.autoBackupKeep": "Retention (copies)",
   "settings.autoBackupTest": "Test connection",

@@ -10,7 +10,8 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
   up top (last backup, interval, retention), with "Back up now" and "Test connection" below; target
   and access tuck behind an expander. The backup uses the same format as the manual download and is
   encrypted with your backup password; older copies are pruned to the configured count. In a cluster
-  the schedule runs on the primary node only. SMB works right away, NFS follows shortly.
+  the schedule runs on the primary node only. Both SMB (Samba) and NFS are supported; for NFS the
+  "Share" is the export path and access is granted by the node's IP.
 - Fixed: **A primary node stays set once chosen.** An unrelated settings change on another node could
   clear the cluster's primary assignment, so the high-availability page would offer "make primary"
   again. The assignment is now synced as its own entry and survives other nodes' settings changes.
