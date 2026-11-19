@@ -3,6 +3,20 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.43.1] - 2026-11-19
+
+- Fixed: **A scheduled backup no longer OOM-kills the node.** On a memory-capped node the backup
+  built, sealed and uploaded the whole configuration while holding several full copies in memory at
+  once, which could push a tight node over its limit and restart it. The backup now frees each copy
+  as soon as it is done and streams the sealed file from disk to the share (SMB and NFS), so it stays
+  within a small, steady footprint.
+- Fixed: **An interrupted backup can no longer loop the node.** If a run was cut short before it
+  finished, the next start treated the backup as still due and tried again at once. The run time is
+  now recorded before the upload, so an interrupted backup waits for the next interval instead of
+  retrying in a loop.
+- New: **"Save connection" button.** Creating a backup connection now has an explicit save button,
+  instead of only saving each field as you leave it.
+
 ## [0.43.0] - 2026-11-19
 
 - New: **Scheduled backup to a network share.** A new card under "Sicherung" stores your setup as an

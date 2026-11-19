@@ -13,7 +13,7 @@
 //! travel across the cluster sealed, inside [`justdns_config::Settings`].
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ use nix::fcntl::OFlag;
 #[cfg(feature = "nfs")]
 use nix::sys::stat::Mode;
 #[cfg(feature = "nfs")]
-use std::path::Path;
+use std::io::Read;
 
 use crate::AppState;
 
@@ -45,8 +45,10 @@ const SCHEDULER_TICK: Duration = Duration::from_secs(600);
 /// A place the scheduler can put a backup, list what is already there and delete
 /// old ones. Implemented per protocol; every method works without mounting.
 trait BackupTransport {
-    /// Upload `bytes` as `name` (a bare file name) into the configured folder.
-    fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String>;
+    /// Upload the local file at `local` as `name` (a bare file name) into the
+    /// configured folder. The caller stages the bytes to disk first so the
+    /// transport can stream from the file instead of holding them in memory.
+    fn put(&self, name: &str, local: &Path) -> Result<(), String>;
     /// The backup files already in the folder (names only).
     fn list(&self) -> Result<Vec<String>, String>;
     /// Delete one file by name.
@@ -130,18 +132,9 @@ impl SmbTransport {
 }
 
 impl BackupTransport for SmbTransport {
-    fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
-        let tmp = unique_temp_path(name);
-        {
-            let mut file = std::fs::File::create(&tmp)
-                .map_err(|error| format!("Temp-Datei lie\u{df} sich nicht anlegen: {error}"))?;
-            file.write_all(bytes)
-                .map_err(|error| format!("Temp-Datei lie\u{df} sich nicht schreiben: {error}"))?;
-        }
-        let local = tmp.to_string_lossy().replace('\\', "/");
-        let result = self.run(&format!("put \"{local}\" \"{name}\""));
-        let _ = std::fs::remove_file(&tmp);
-        result.map(|_| ())
+    fn put(&self, name: &str, local: &Path) -> Result<(), String> {
+        let local = local.to_string_lossy().replace('\\', "/");
+        self.run(&format!("put \"{local}\" \"{name}\"")).map(|_| ())
     }
 
     fn list(&self) -> Result<Vec<String>, String> {
@@ -207,7 +200,9 @@ impl NfsTransport {
 
 #[cfg(feature = "nfs")]
 impl BackupTransport for NfsTransport {
-    fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
+    fn put(&self, name: &str, local: &Path) -> Result<(), String> {
+        let mut src = std::fs::File::open(local)
+            .map_err(|error| format!("NFS: Quelldatei nicht lesbar: {error}"))?;
         let mut nfs = self.mount()?;
         let file = nfs
             .create(
@@ -218,16 +213,30 @@ impl BackupTransport for NfsTransport {
                 Mode::from_bits_truncate(0o644),
             )
             .map_err(|error| format!("NFS: {name} lie\u{df} sich nicht anlegen: {error}"))?;
-        // pwrite may write fewer bytes than asked, so advance until all are out.
-        let mut written = 0usize;
-        while written < bytes.len() {
-            let n = file
-                .pwrite(&bytes[written..], written as u64)
-                .map_err(|error| format!("NFS: Schreiben fehlgeschlagen: {error}"))?;
-            if n <= 0 {
-                return Err("NFS: Schreiben lieferte keine Bytes".to_owned());
+        // Stream the file in 1 MiB chunks so a large backup is never held in memory
+        // as a whole; a full in-memory copy on a tight node can push the resolver
+        // into OOM.
+        let mut buf = vec![0u8; 1 << 20];
+        let mut offset = 0u64;
+        loop {
+            let read = src
+                .read(&mut buf)
+                .map_err(|error| format!("NFS: Lesen der Quelldatei fehlgeschlagen: {error}"))?;
+            if read == 0 {
+                break;
             }
-            written += n as usize;
+            // pwrite may write fewer bytes than asked, so advance until all are out.
+            let mut written = 0usize;
+            while written < read {
+                let n = file
+                    .pwrite(&buf[written..read], offset + written as u64)
+                    .map_err(|error| format!("NFS: Schreiben fehlgeschlagen: {error}"))?;
+                if n <= 0 {
+                    return Err("NFS: Schreiben lieferte keine Bytes".to_owned());
+                }
+                written += n as usize;
+            }
+            offset += read as u64;
         }
         Ok(())
     }
@@ -362,15 +371,35 @@ pub fn run_once(state: &AppState) -> Result<(), String> {
     }
     let transport = transport_for(&cfg)?;
 
-    let mut backup = crate::build_backup(state);
-    // Strip the write-only secrets even though the file is sealed, exactly as the
-    // manual download does; the backup password alone must never reveal them.
-    crate::redact_settings_secrets(&mut backup.settings);
-    let json = serde_json::to_vec(&backup).map_err(|error| error.to_string())?;
+    // Build and seal in a tight scope so the plaintext config (which can be large
+    // on a node with many list entries) is freed as soon as it is sealed, and never
+    // held alongside the sealed copy longer than needed. Keeping several full copies
+    // of the config in memory at once is what can push a tight node into OOM.
+    let json = {
+        let mut backup = crate::build_backup(state);
+        // Strip the write-only secrets even though the file is sealed, exactly as
+        // the manual download does; the backup password alone must never reveal them.
+        crate::redact_settings_secrets(&mut backup.settings);
+        serde_json::to_vec(&backup).map_err(|error| error.to_string())?
+    };
     let sealed = justdns_secret::seal_backup(&cfg.backup_password, &json);
+    drop(json);
 
+    // Stage the sealed bytes to a local temp file and upload from there, so the
+    // transport streams from disk instead of holding yet another in-memory copy
+    // during the (slow) upload.
     let name = backup_filename(crate::now_ms());
-    transport.put(&name, &sealed)?;
+    let tmp = unique_temp_path(&name);
+    {
+        let mut file = std::fs::File::create(&tmp)
+            .map_err(|error| format!("Temp-Datei lie\u{df} sich nicht anlegen: {error}"))?;
+        file.write_all(&sealed)
+            .map_err(|error| format!("Temp-Datei lie\u{df} sich nicht schreiben: {error}"))?;
+    }
+    drop(sealed);
+    let put = transport.put(&name, &tmp);
+    let _ = std::fs::remove_file(&tmp);
+    put?;
 
     // Pruning is best-effort: a failed list or delete must not fail an otherwise
     // successful upload, so a transient share error just leaves the extra copies.
@@ -393,7 +422,12 @@ pub fn run_once(state: &AppState) -> Result<(), String> {
 pub fn test_connection(cfg: &BackupSync) -> Result<(), String> {
     let transport = transport_for(cfg)?;
     let probe = format!("justdns-writetest-{}.tmp", crate::now_ms());
-    transport.put(&probe, b"justdns connectivity probe")?;
+    let tmp = unique_temp_path(&probe);
+    std::fs::write(&tmp, b"justdns connectivity probe")
+        .map_err(|error| format!("Probe-Datei lie\u{df} sich nicht anlegen: {error}"))?;
+    let put = transport.put(&probe, &tmp);
+    let _ = std::fs::remove_file(&tmp);
+    put?;
     transport.delete(&probe)
 }
 
@@ -406,6 +440,19 @@ pub fn record_result(state: &AppState, ok: bool, error: String) {
     settings.backup_sync.last_error = error;
     if let Err(error) = state.config.set(settings) {
         warn!(%error, "config backup: could not persist run status");
+    }
+}
+
+/// Persist only the attempt time, before a run starts its heavy build and upload.
+/// If the process is killed mid-backup (for example an OOM kill on a tight node),
+/// `last_run_ms` is already advanced, so the scheduler does not treat the backup as
+/// due again on the next start and loop. The outcome fields stay as they were and
+/// are set correctly by [`record_result`] once a run actually finishes.
+fn mark_attempt(state: &AppState) {
+    let mut settings = state.config.get();
+    settings.backup_sync.last_run_ms = crate::now_ms();
+    if let Err(error) = state.config.set(settings) {
+        warn!(%error, "config backup: could not persist attempt time");
     }
 }
 
@@ -425,6 +472,9 @@ pub fn spawn_scheduler(state: AppState) {
                 let due = cfg.last_run_ms == 0
                     || crate::now_ms().saturating_sub(cfg.last_run_ms) >= interval_ms;
                 if due {
+                    // Record the attempt before the heavy run, so a crash mid-backup
+                    // cannot leave the backup "due" and make the next start loop.
+                    mark_attempt(&state);
                     match run_once(&state) {
                         Ok(()) => {
                             record_result(&state, true, String::new());

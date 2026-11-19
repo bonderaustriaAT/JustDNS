@@ -1087,6 +1087,10 @@ const de = {
   "settings.autoBackupRunBusy": "Sichere …",
   "settings.autoBackupRunOk": "Gesichert",
   "settings.autoBackupRunError": "Fehlgeschlagen",
+  "settings.autoBackupSave": "Verbindung speichern",
+  "settings.autoBackupSaveBusy": "Speichere …",
+  "settings.autoBackupSaveOk": "Gespeichert",
+  "settings.autoBackupSaveError": "Fehlgeschlagen",
 
   "settings.logDesc": "Was über aufgelöste Anfragen gespeichert wird.",
   "settings.queryLogLabel": "Anfrageprotokoll",
@@ -2673,6 +2677,10 @@ const en: Catalog = {
   "settings.autoBackupRunBusy": "Backing up …",
   "settings.autoBackupRunOk": "Backed up",
   "settings.autoBackupRunError": "Failed",
+  "settings.autoBackupSave": "Save connection",
+  "settings.autoBackupSaveBusy": "Saving …",
+  "settings.autoBackupSaveOk": "Saved",
+  "settings.autoBackupSaveError": "Failed",
 
   "settings.logDesc": "What is stored about resolved queries.",
   "settings.queryLogLabel": "Query log",

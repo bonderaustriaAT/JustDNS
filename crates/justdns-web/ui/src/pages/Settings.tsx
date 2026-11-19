@@ -361,6 +361,8 @@ function AutoBackupSection() {
   const [testError, setTestError] = useState("");
   const [runState, setRunState] = useState<"idle" | "busy" | "ok" | "error">("idle");
   const [runError, setRunError] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "busy" | "ok" | "error">("idle");
+  const [saveError, setSaveError] = useState("");
   // True once an editable field changed since the last save, so blur and the
   // action buttons only write (and audit) when something actually moved.
   const dirty = useRef(false);
@@ -470,6 +472,21 @@ function AutoBackupSection() {
     } catch (error) {
       setRunState("error");
       setRunError(error instanceof ApiError ? error.message : "");
+    }
+  }
+
+  // Explicit "save connection": the fields also persist on blur, but creating a
+  // connection reads oddly without a clear save affordance, so this writes the
+  // whole form on demand and shows the outcome.
+  async function save() {
+    setSaveState("busy");
+    setSaveError("");
+    try {
+      await persist();
+      setSaveState("ok");
+    } catch (error) {
+      setSaveState("error");
+      setSaveError(error instanceof ApiError ? error.message : "");
     }
   }
 
@@ -692,6 +709,27 @@ function AutoBackupSection() {
               setForm({ ...form, intervalHours: v }),
             )}
             {numberInput("settings.autoBackupKeep", form.keep, (v) => setForm({ ...form, keep: v }))}
+          </div>
+
+          <div className={styles.abActions}>
+            <button
+              type="button"
+              className={styles.actionButton}
+              onClick={save}
+              disabled={saveState === "busy" || !loaded}
+            >
+              {saveState === "busy"
+                ? t("settings.autoBackupSaveBusy")
+                : t("settings.autoBackupSave")}
+            </button>
+            {saveState === "ok" ? (
+              <span className={styles.actionDone}>{t("settings.autoBackupSaveOk")}</span>
+            ) : null}
+            {saveState === "error" ? (
+              <span className={styles.actionError}>
+                {saveError || t("settings.autoBackupSaveError")}
+              </span>
+            ) : null}
           </div>
         </div>
       ) : null}
