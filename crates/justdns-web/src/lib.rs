@@ -3755,6 +3755,15 @@ fn ha_collections(state: &AppState) -> BTreeMap<String, ha::Collection> {
         "blockPage",
         serde_json::to_value(&settings.block_page),
     );
+    // The cluster's primary (managing) node designation also travels as its OWN
+    // collection entry, with its own last-writer-wins timestamp, for the same
+    // reason as the block page: it stays inside the settings blob too (an older
+    // peer still reads it there), but a peer that understands the separate entry
+    // applies that one (see `ha_apply`). Changing any *other* setting on one node
+    // therefore can never clear the chosen primary on another through the shared
+    // blob's single timestamp — only an explicit primary change (or a node
+    // leaving) moves it, so once a primary is set the cluster remembers it.
+    put("cluster", "cluster", serde_json::to_value(&settings.cluster));
     put("settings", "settings", serde_json::to_value(settings));
 
     // The certificate store is shared across the cluster: one entry per stored
@@ -3998,6 +4007,19 @@ fn ha_apply(
             block_page.server_ipv4 = local.block_page.server_ipv4;
             block_page.server_ipv6 = local.block_page.server_ipv6;
             settings.block_page = block_page;
+        }
+        // The cluster primary designation travels as its own entry with an
+        // independent timestamp (like the block page), so an unrelated settings
+        // change on a peer cannot clear the chosen primary through the shared
+        // blob. Prefer that entry when present; an older peer that only carries the
+        // designation inside the settings blob falls through to the value
+        // deserialised above.
+        if let Some(cluster_value) = collections
+            .get("cluster")
+            .and_then(|entities| entities.get("cluster"))
+        {
+            settings.cluster = serde_json::from_value(cluster_value.clone())
+                .map_err(|error| error.to_string())?;
         }
         state
             .config
@@ -8773,6 +8795,63 @@ mod tests {
 
         ha_apply(&node, &collections).unwrap();
         assert!(node.config.get().block_page.enabled);
+    }
+
+    #[tokio::test]
+    async fn ha_primary_survives_unrelated_settings_change_on_peer() {
+        // The chosen primary travels as its own "cluster" entry with an independent
+        // timestamp. A peer that changed some *other* setting (so its settings blob
+        // is newer and happens to carry an empty primary) must not clear this node's
+        // primary designation: `ha_apply` applies the separate "cluster" entry.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+        let mut local = node.config.get();
+        local.cluster.primary_node_id = "primary-node-xyz".into();
+        node.config.set(local).unwrap();
+
+        // An incoming snapshot whose settings blob disagrees (primary cleared) but
+        // whose own "cluster" entry keeps it — the shape a peer produces after an
+        // unrelated settings save.
+        let mut collections = ha_collections(&node);
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] = serde_json::Value::String(String::new())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-node-xyz",
+            "the separate cluster entry must win over the settings blob"
+        );
+    }
+
+    #[tokio::test]
+    async fn ha_primary_falls_back_to_settings_blob_for_old_peer() {
+        // A peer too old to emit a separate "cluster" entry carries the primary only
+        // inside its settings blob. `ha_apply` must still adopt it from there.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+
+        let mut collections = ha_collections(&node);
+        collections.remove("cluster");
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] =
+                    serde_json::Value::String("primary-from-blob".into())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-from-blob"
+        );
     }
 
     #[tokio::test]
