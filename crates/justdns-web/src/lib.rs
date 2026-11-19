@@ -708,6 +708,11 @@ fn router(state: AppState) -> Router {
         .route("/api/certs/{id}/renew", post(renew_cert))
         .route("/api/certs/{id}/ca", get(download_cert_ca))
         .route("/api/cache/clear", post(clear_cache))
+        .route(
+            "/api/blocking/pause",
+            get(blocking_pause_state).post(blocking_pause),
+        )
+        .route("/api/blocking/resume", post(blocking_resume))
         .route("/api/backup", post(export_backup))
         .route("/api/backup/restore", post(restore_backup))
         // Self-service: a signed-in user manages their own password and MFA.
@@ -870,7 +875,11 @@ fn required_role(method: &Method, path: &str) -> Role {
     let is_write = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS);
     if (path == "/api/settings"
         || path.starts_with("/api/tls")
-        || path.starts_with("/api/services"))
+        || path.starts_with("/api/services")
+        // Pausing all blocking disables protection network-wide, so arming or
+        // clearing it is an administrator's call; reading the state stays open so
+        // the countdown shows for any signed-in user.
+        || path.starts_with("/api/blocking"))
         && is_write
     {
         return Role::Admin;
@@ -2543,8 +2552,9 @@ fn clients_view(
 
     // The list catalogue the policy editor draws from: the two built-in objects
     // followed by every block feed, each with its global-default state so the UI
-    // can show what an untouched scope inherits.
-    let resolved = lists.resolved();
+    // can show what an untouched scope inherits. Only the feed metadata is needed
+    // here, so take the cheap catalogue rather than resolving (and parsing) every
+    // feed's domains.
     let mut list_catalog = vec![
         ListObjectRow {
             id: "ads".to_owned(),
@@ -2557,11 +2567,16 @@ fn clients_view(
             global_on: settings.block_malware,
         },
     ];
-    list_catalog.extend(resolved.block_feeds.iter().map(|feed| ListObjectRow {
-        id: feed.id.clone(),
-        label: feed.label.clone(),
-        global_on: feed.enabled,
-    }));
+    list_catalog.extend(
+        lists
+            .block_feed_catalog()
+            .into_iter()
+            .map(|feed| ListObjectRow {
+                id: feed.id,
+                label: feed.label,
+                global_on: feed.enabled,
+            }),
+    );
 
     let mut rows: Vec<ClientRow> = Vec::new();
     // A stored device's row, by target, and a seen unnamed client's row, by the
@@ -2958,6 +2973,69 @@ async fn remove_rewrite(
 async fn clear_cache(State(cache): State<DnsCache>) -> StatusCode {
     cache.clear();
     StatusCode::NO_CONTENT
+}
+
+/// The troubleshooting blocking-pause state: the deadline in Unix milliseconds
+/// while a pause is in force, or `null` when blocking is active. An expired
+/// deadline reports as active, so the UI never shows a stale countdown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlockingState {
+    paused_until_ms: Option<u64>,
+}
+
+/// Read the current blocking-pause state. Open to any signed-in user so the
+/// paused banner and countdown show for everyone, not just admins.
+async fn blocking_pause_state(State(config): State<ConfigStore>) -> Json<BlockingState> {
+    Json(BlockingState {
+        paused_until_ms: config.blocking_pause_until_ms(),
+    })
+}
+
+/// How long to pause all blocking, in seconds.
+#[derive(Deserialize)]
+struct PauseRequest {
+    seconds: u64,
+}
+
+/// Pause all blocking (lists, phishing and CNAME uncloaking) for the requested
+/// span. Admin only and audited. The span is capped so a typo cannot leave the
+/// network unprotected for weeks; the pause also expires on its own and is
+/// cleared by a restart.
+async fn blocking_pause(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(body): Json<PauseRequest>,
+) -> Result<Json<BlockingState>, (StatusCode, String)> {
+    // A full day is plenty for troubleshooting and bounds the blast radius of a
+    // mistaken custom duration. Zero is rejected — resume clears a pause.
+    const MAX_PAUSE_SECS: u64 = 24 * 60 * 60;
+    if body.seconds == 0 || body.seconds > MAX_PAUSE_SECS {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "pause duration must be between 1 second and 24 hours".into(),
+        ));
+    }
+    let until = state.config.pause_blocking(body.seconds);
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "blocking.pause"),
+    );
+    Ok(Json(BlockingState {
+        paused_until_ms: Some(until),
+    }))
+}
+
+/// Clear a blocking pause at once, so protection resumes. Admin only and audited.
+async fn blocking_resume(State(state): State<AppState>, identity: Identity) -> Json<BlockingState> {
+    state.config.resume_blocking();
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "blocking.resume"),
+    );
+    Json(BlockingState {
+        paused_until_ms: None,
+    })
 }
 
 /// The state of the encrypted client-DNS endpoints, for the settings view.

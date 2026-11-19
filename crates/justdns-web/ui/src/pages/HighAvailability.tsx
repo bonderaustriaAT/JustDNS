@@ -719,13 +719,25 @@ function Cluster({
 
   return (
     <div className={styles.summary}>
-      <div className={styles.summaryHead}>
-        <span className={styles.dot} data-health={clusterHealth} aria-hidden="true" />
-        <div>
-          <p className={styles.summaryState}>{t(HEALTH_KEY[clusterHealth])}</p>
-          <p className={styles.summarySub}>{t("ha.clusterSize", { n: nodeCount })}</p>
+      <div className={styles.toolbar}>
+        <div className={styles.summaryHead}>
+          <span className={styles.dot} data-health={clusterHealth} aria-hidden="true" />
+          <div>
+            <p className={styles.summaryState}>{t(HEALTH_KEY[clusterHealth])}</p>
+            <p className={styles.summarySub}>{t("ha.clusterSize", { n: nodeCount })}</p>
+          </div>
+        </div>
+        <div className={styles.toolbarActions}>
+          <button className={styles.buttonPrimary} type="button" onClick={syncNow} disabled={busy}>
+            {t("ha.syncNow")}
+          </button>
+          <button className={styles.buttonDanger} type="button" onClick={() => setLeaving(true)} disabled={busy}>
+            {t("ha.leave")}
+          </button>
         </div>
       </div>
+
+      {synced && <p className={styles.fieldOk}>{t("ha.synced")}</p>}
 
       <ul className={styles.nodeList}>
         <SelfNode status={status} reload={reload} />
@@ -746,17 +758,6 @@ function Cluster({
       <AddNodeGuide status={status} />
 
       {status.isPrimary && status.peers.length > 0 && <ClusterUpdatePanel />}
-
-      {synced && <p className={styles.fieldOk}>{t("ha.synced")}</p>}
-
-      <div className={styles.actions}>
-        <button className={styles.buttonPrimary} type="button" onClick={syncNow} disabled={busy}>
-          {t("ha.syncNow")}
-        </button>
-        <button className={styles.buttonDanger} type="button" onClick={() => setLeaving(true)} disabled={busy}>
-          {t("ha.leave")}
-        </button>
-      </div>
 
       {leaving && (
         <ConfirmDialog
@@ -1006,8 +1007,13 @@ function SelfNode({ status, reload }: { status: HaStatus; reload: () => Promise<
     }
   }
 
+  const isPrimaryNode =
+    status.primaryNodeId != null && status.primaryNodeId === status.nodeId;
   return (
-    <li className={`${styles.nodeCard} ${styles.nodeCardSelf}`}>
+    <li
+      className={`${styles.nodeCard} ${styles.nodeCardSelf}`}
+      data-primary={isPrimaryNode || undefined}
+    >
       <div className={styles.nodeHead}>
         <span className={styles.nodeBadge}>{t("ha.thisNode")}</span>
         <code className={styles.nodeIdCode}>{status.nodeId}</code>
@@ -1076,8 +1082,10 @@ function PeerNode({
   const formatTime = (ms?: number) =>
     ms == null ? t("ha.lastSyncNever") : new Date(ms).toLocaleString(lang);
 
+  const isPrimaryNode =
+    status.primaryNodeId != null && status.primaryNodeId === peer.peerNodeId;
   return (
-    <li className={styles.nodeCard}>
+    <li className={styles.nodeCard} data-primary={isPrimaryNode || undefined}>
       <div className={styles.nodeHead}>
         <span className={styles.dot} data-health={health} aria-hidden="true" />
         <span className={styles.nodeState}>{t(HEALTH_KEY[health])}</span>

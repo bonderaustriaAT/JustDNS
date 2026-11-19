@@ -12,6 +12,17 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Serialise image builds so overlapping release tags never run together. Two runs
+# that build at once both race the shared :buildcache (each exports mode=max and
+# the last writer wins), so one reads a half overwritten cache and rebuilds cold.
+# cancel-in-progress is false, so a running release is never aborted: a newer tag
+# waits for it and then reuses its warm cache. Caveat: if three or more tags pile
+# up within one build window, GitHub supersedes the older pending run, so avoid
+# pushing a burst of release tags while a build is still running.
+concurrency:
+  group: image
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -54,25 +65,21 @@ jobs:
 
       - name: Build and push JustDNS
         # Layer cache makes repeat builds fast: the heavy dependency layer (DuckDB's
-        # bundled C++) is reused, only changed crates rebuild. The primary cache is a
-        # registry image (`:buildcache`) because releases are days apart and the
-        # GitHub Actions cache is evicted after 7 days (and capped at 10 GB) — too
-        # short for this big cache, which is why cold ~17 min builds kept recurring.
-        # The registry cache has no such expiry; the gha cache stays as a fast
-        # in-between-runs secondary. Only a real release tag publishes the image; a
-        # manual run just builds and warms the caches without overwriting :latest.
+        # bundled C++) is reused, only changed crates rebuild. The cache is a registry
+        # image (`:buildcache`), which has no expiry and no size cap. The GitHub Actions
+        # (gha) cache is intentionally not used for this image: its 280 MiB plus
+        # dependency layer filled the 10 GB per repo cap, whose LRU eviction then kept
+        # dropping that very layer (and the sidecar caches below), and exporting it on
+        # every run cost extra time for a cache the registry one already covers. Only a
+        # real release tag publishes the image; a manual run just builds and warms it.
         uses: docker/build-push-action@v6
         with:
           context: .
           build-args: APP_VERSION=${{ github.ref_name }}
           tags: ${{ steps.tags.outputs.tags }}
           push: ${{ github.ref_type == 'tag' }}
-          cache-from: |
-            type=registry,ref=${{ env.IMAGE }}:buildcache
-            type=gha,scope=justdns
-          cache-to: |
-            type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
-            type=gha,scope=justdns,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
       - name: Build and push the updater sidecar
         # Version-neutral; always :latest. Same publish rule as above.

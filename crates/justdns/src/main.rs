@@ -386,6 +386,7 @@ async fn main() -> ExitCode {
             block_null_ip: config_store.block_null_ip_flag(),
             block_page: block_page_target.clone(),
             dnssec_validate: dnssec_validate.clone(),
+            pause_until: config_store.blocking_pause_flag(),
         },
     )
     .with_observer(observer)

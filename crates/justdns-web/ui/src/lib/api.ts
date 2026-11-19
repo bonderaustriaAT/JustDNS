@@ -17,6 +17,12 @@ export interface ActivityBucket {
   count: number;
 }
 
+/** The troubleshooting blocking-pause state. `pausedUntilMs` is the Unix-ms
+ *  deadline while all blocking is paused, or null when protection is active. */
+export interface BlockingState {
+  pausedUntilMs: number | null;
+}
+
 /** One client and how many queries it made over the last 24 hours, with its
  *  device name resolved when one is set. */
 export interface ClientCount {
@@ -1620,6 +1626,16 @@ export const api = {
   removeSchedule: (id: string) => sendJson<SchedulesView>("DELETE", "/api/schedules", { id }),
   /** Drop every entry in the DNS response cache. */
   clearCache: () => sendJson<void>("POST", "/api/cache/clear"),
+  /** The troubleshooting blocking-pause state: the deadline in Unix milliseconds
+   *  while all blocking is paused, or null when protection is active. */
+  blockingState: (signal?: AbortSignal) =>
+    getJson<BlockingState>("/api/blocking/pause", signal),
+  /** Pause all blocking (lists, phishing, NRD and CNAME uncloaking) for `seconds`.
+   *  Admin only; the span is capped at 24 hours and expires on its own. */
+  pauseBlocking: (seconds: number) =>
+    sendJson<BlockingState>("POST", "/api/blocking/pause", { seconds }),
+  /** Clear a blocking pause at once, so protection resumes. Admin only. */
+  resumeBlocking: () => sendJson<BlockingState>("POST", "/api/blocking/resume"),
   /** Download the full configuration backup (settings, lists and rewrites) as a
    *  Blob the caller saves to a file. The file is encrypted with `password`, so
    *  it is never readable in the clear; the password is mandatory. */

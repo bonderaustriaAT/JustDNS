@@ -264,6 +264,19 @@ pub struct ListObject {
     pub enabled: bool,
 }
 
+/// One block feed's catalogue entry: its id, display name and global enabled
+/// flag, without the resolved domain set. Returned by
+/// [`ListStore::block_feed_catalog`] for callers that only list the feeds.
+#[derive(Clone, Debug)]
+pub struct BlockFeedEntry {
+    /// Stable id, referenced by a scope's list delta (the subscription id).
+    pub id: String,
+    /// Display name shown in the dashboard.
+    pub label: String,
+    /// Whether it is on in the global default (the subscription's enabled flag).
+    pub enabled: bool,
+}
+
 /// The user-managed building blocks the policy coordinator folds into the global
 /// and per-scope policies: the merged allow set, the user's own manual block set,
 /// and each block feed as a switchable object. Bundled ads/malware and the config
@@ -413,6 +426,25 @@ impl ListStore {
             block_feeds,
             warn,
         }
+    }
+
+    /// The block-feed catalogue for the dashboard: each block subscription's id,
+    /// name and global enabled flag, with no domain sets. Reads only the
+    /// in-memory subscription metadata, never the cached feed files, so callers
+    /// that just need to list the feeds (the devices view) do not pay for parsing
+    /// every feed's domains. Order matches [`resolved`](Self::resolved).
+    pub fn block_feed_catalog(&self) -> Vec<BlockFeedEntry> {
+        let lists = self.read();
+        lists
+            .subscriptions
+            .iter()
+            .filter(|sub| sub.kind == ListKind::Block)
+            .map(|sub| BlockFeedEntry {
+                id: sub.id.clone(),
+                label: sub.name.clone(),
+                enabled: sub.enabled,
+            })
+            .collect()
     }
 
     /// Build the domain set a catalogue preset would contribute, **without**
@@ -1127,6 +1159,34 @@ mod tests {
         assert!(
             blocker.blocks("doubleclick.net"),
             "removing it restores the block"
+        );
+    }
+
+    #[test]
+    fn block_feed_catalog_lists_block_feeds_without_resolving_domains() {
+        let (_dir, store, _blocker) = store();
+        let block_id = store
+            .add_subscription(
+                "Ads feed",
+                "https://example.invalid/ads.txt",
+                ListKind::Block,
+            )
+            .unwrap();
+        // A warn feed must not appear: the catalogue is block feeds only.
+        store
+            .add_subscription("NRD", "https://example.invalid/nrd.txt", ListKind::Warn)
+            .unwrap();
+
+        let catalog = store.block_feed_catalog();
+        assert_eq!(catalog.len(), 1, "only the block feed is listed");
+        assert_eq!(catalog[0].id, block_id);
+        assert_eq!(catalog[0].label, "Ads feed");
+        assert!(catalog[0].enabled, "a fresh feed is on by default");
+
+        store.set_subscription_enabled(&block_id, false).unwrap();
+        assert!(
+            !store.block_feed_catalog()[0].enabled,
+            "the catalogue reflects the disabled flag",
         );
     }
 

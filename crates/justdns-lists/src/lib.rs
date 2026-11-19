@@ -17,8 +17,8 @@ mod store;
 
 pub use presets::{Preset, preset, presets};
 pub use store::{
-    ListEntry, ListError, ListObject, ListStore, ListsView, PresetView, RefreshOutcome,
-    ResolvedLists, Subscription, UserLists,
+    BlockFeedEntry, ListEntry, ListError, ListObject, ListStore, ListsView, PresetView,
+    RefreshOutcome, ResolvedLists, Subscription, UserLists,
 };
 
 use serde::{Deserialize, Serialize};
