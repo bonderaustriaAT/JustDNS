@@ -543,7 +543,7 @@ export function Shell({ children }: { children: ReactNode }) {
               {isAdmin && <NavRow to="/audit" icon="audit" label={t("nav.audit")} />}
               {isAdmin && <NavRow to="/system" icon="system" label={t("nav.systemLogs")} />}
               {isAdmin && <NavRow to="/berichte" icon="reports" label={t("nav.reports")} />}
-              {isAdmin && <NavRow to="/ha" icon="ha" label={t("nav.ha")} />}
+              {(isAdmin || demo) && <NavRow to="/ha" icon="ha" label={t("nav.ha")} />}
             </NavSection>
           </nav>
         </div>

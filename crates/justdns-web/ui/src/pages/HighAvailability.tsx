@@ -15,6 +15,7 @@ import {
   CLUSTER_PHASE_KEY,
   useClusterUpdate,
 } from "../lib/useClusterUpdate";
+import { useAuth } from "../state/auth";
 import styles from "./HighAvailability.module.css";
 
 /** How often the status refreshes while the page is open, so a sync that runs on
@@ -72,6 +73,10 @@ function useHaStatus() {
 
 export function HighAvailability() {
   const { lang } = useI18n();
+  // The public demo node opens this page to an anonymous read-only viewer, so the
+  // roster shows but every managing control is withheld (the server refuses the
+  // writes too). Everywhere else only an admin reaches this route.
+  const { demo } = useAuth();
   const { status, error, reload } = useHaStatus();
 
   if (error && !status) {
@@ -94,7 +99,7 @@ export function HighAvailability() {
     <div className={styles.page}>
       <Header nodeId={status.nodeId} />
       {status.paired ? (
-        <Cluster status={status} lang={lang} reload={reload} />
+        <Cluster status={status} lang={lang} reload={reload} readOnly={demo} />
       ) : (
         <Wizard status={status} reload={reload} />
       )}
@@ -661,10 +666,13 @@ function Cluster({
   status,
   lang,
   reload,
+  readOnly = false,
 }: {
   status: HaStatus;
   lang: string;
   reload: () => Promise<void>;
+  /** The public demo view: show the roster, hide every managing control. */
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
@@ -727,20 +735,22 @@ function Cluster({
             <p className={styles.summarySub}>{t("ha.clusterSize", { n: nodeCount })}</p>
           </div>
         </div>
-        <div className={styles.toolbarActions}>
-          <button className={styles.buttonPrimary} type="button" onClick={syncNow} disabled={busy}>
-            {t("ha.syncNow")}
-          </button>
-          <button className={styles.buttonDanger} type="button" onClick={() => setLeaving(true)} disabled={busy}>
-            {t("ha.leave")}
-          </button>
-        </div>
+        {!readOnly && (
+          <div className={styles.toolbarActions}>
+            <button className={styles.buttonPrimary} type="button" onClick={syncNow} disabled={busy}>
+              {t("ha.syncNow")}
+            </button>
+            <button className={styles.buttonDanger} type="button" onClick={() => setLeaving(true)} disabled={busy}>
+              {t("ha.leave")}
+            </button>
+          </div>
+        )}
       </div>
 
       {synced && <p className={styles.fieldOk}>{t("ha.synced")}</p>}
 
       <ul className={styles.nodeList}>
-        <SelfNode status={status} reload={reload} />
+        <SelfNode status={status} reload={reload} readOnly={readOnly} />
         {status.peers.map((peer) => (
           <PeerNode
             key={peer.peerNodeId ?? peer.url}
@@ -751,13 +761,14 @@ function Cluster({
             onRemove={setPendingRemove}
             status={status}
             reload={reload}
+            readOnly={readOnly}
           />
         ))}
       </ul>
 
-      <AddNodeGuide status={status} />
+      {!readOnly && <AddNodeGuide status={status} />}
 
-      {status.isPrimary && status.peers.length > 0 && <ClusterUpdatePanel />}
+      {!readOnly && status.isPrimary && status.peers.length > 0 && <ClusterUpdatePanel />}
 
       {leaving && (
         <ConfirmDialog
@@ -989,7 +1000,15 @@ function NodeManage({
 }
 
 /** This node's own card in the cluster list, with an editable advertised address. */
-function SelfNode({ status, reload }: { status: HaStatus; reload: () => Promise<void> }) {
+function SelfNode({
+  status,
+  reload,
+  readOnly = false,
+}: {
+  status: HaStatus;
+  reload: () => Promise<void>;
+  readOnly?: boolean;
+}) {
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(status.selfUrl ?? "");
@@ -1039,9 +1058,11 @@ function SelfNode({ status, reload }: { status: HaStatus; reload: () => Promise<
             <dt>{t("ha.selfAddress")}</dt>
             <dd>
               {status.selfUrl ?? t("ha.selfAddressUnset")}{" "}
-              <button type="button" className={styles.linkButton} onClick={() => setEditing(true)}>
-                {t("ha.editAddress")}
-              </button>
+              {!readOnly && (
+                <button type="button" className={styles.linkButton} onClick={() => setEditing(true)}>
+                  {t("ha.editAddress")}
+                </button>
+              )}
             </dd>
           </div>
           <div>
@@ -1054,7 +1075,7 @@ function SelfNode({ status, reload }: { status: HaStatus; reload: () => Promise<
           </div>
         </dl>
       )}
-      <NodeManage nodeId={status.nodeId} status={status} reload={reload} />
+      {!readOnly && <NodeManage nodeId={status.nodeId} status={status} reload={reload} />}
     </li>
   );
 }
@@ -1069,6 +1090,7 @@ function PeerNode({
   onRemove,
   status,
   reload,
+  readOnly = false,
 }: {
   peer: HaPeer;
   health: Health;
@@ -1077,6 +1099,7 @@ function PeerNode({
   onRemove: (peer: HaPeer) => void;
   status: HaStatus;
   reload: () => Promise<void>;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   const formatTime = (ms?: number) =>
@@ -1090,7 +1113,7 @@ function PeerNode({
         <span className={styles.dot} data-health={health} aria-hidden="true" />
         <span className={styles.nodeState}>{t(HEALTH_KEY[health])}</span>
         {peer.peerNodeId && <code className={styles.nodeIdCode}>{peer.peerNodeId}</code>}
-        {peer.peerNodeId && (
+        {!readOnly && peer.peerNodeId && (
           <button
             type="button"
             className={styles.removeButton}
@@ -1122,7 +1145,9 @@ function PeerNode({
         </div>
       </dl>
       {peer.lastError && <p className={styles.fieldError}>{t("ha.lastError")}: {peer.lastError}</p>}
-      {peer.peerNodeId && <NodeManage nodeId={peer.peerNodeId} status={status} reload={reload} />}
+      {!readOnly && peer.peerNodeId && (
+        <NodeManage nodeId={peer.peerNodeId} status={status} reload={reload} />
+      )}
     </li>
   );
 }

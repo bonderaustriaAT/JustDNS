@@ -79,7 +79,7 @@ export function App() {
           <Route path="/berichte" element={isAdmin ? <Reports /> : <Navigate to="/" replace />} />
           <Route
             path="/ha"
-            element={isAdmin ? <HighAvailability /> : <Navigate to="/" replace />}
+            element={isAdmin || demo ? <HighAvailability /> : <Navigate to="/" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
