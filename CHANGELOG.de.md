@@ -4,6 +4,21 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.43.1] - 2026-11-19
+
+- Behoben: **Ein geplantes Backup schießt die Node nicht mehr per OOM ab.** Auf einer
+  speicherbegrenzten Node baute, versiegelte und lud das Backup die komplette Konfiguration hoch und
+  hielt dabei mehrere Vollkopien gleichzeitig im Speicher, was eine knapp ausgestattete Node über ihr
+  Limit treiben und neu starten konnte. Das Backup gibt jede Kopie jetzt sofort wieder frei und
+  streamt die versiegelte Datei von der Platte zur Freigabe (SMB und NFS), sodass der Speicherbedarf
+  klein und gleichmäßig bleibt.
+- Behoben: **Ein unterbrochenes Backup bringt die Node nicht mehr in eine Schleife.** Wurde ein Lauf
+  vor dem Ende abgebrochen, hielt der nächste Start das Backup weiter für fällig und versuchte es
+  sofort erneut. Die Laufzeit wird jetzt vor dem Upload festgehalten, sodass ein unterbrochenes
+  Backup auf das nächste Intervall wartet statt in einer Schleife zu wiederholen.
+- Neu: **Knopf „Verbindung speichern".** Beim Anlegen einer Backup-Verbindung gibt es jetzt einen
+  eigenen Speicherknopf, statt die Felder nur beim Verlassen zu sichern.
+
 ## [0.43.0] - 2026-11-19
 
 - Neu: **Automatisches Backup auf ein Netzlaufwerk.** Eine neue Karte unter „Sicherung" legt deine
