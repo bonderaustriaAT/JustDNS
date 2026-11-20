@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.45.0] - 2026-11-20
+
+- New: **Privacy module.** An opt-in module that stays dormant until you switch it on, so a node that
+  leaves it off needs no extra resources. It is off by default; enable it under Settings, Modules. It
+  adds two things to the Privacy page. The **surveillance graph** draws who on your network talks to
+  which tracker company as a force-directed map, and lets you cut a single device off from a company
+  with one tap. **DNS chaff** sends a steady trickle of plausible decoy lookups to the upstreams so
+  your real query stream is harder to profile from the outside; a single slider sets the rate. The
+  decoys never appear in the DNS query log, which keeps showing only what your devices really asked
+  for; they have their own separate log under the module.
+
 ## [0.44.0] - 2026-11-20
 
 - New: **Release channels (stable and beta).** Each node can follow the stable channel (vetted
