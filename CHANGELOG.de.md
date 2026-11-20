@@ -20,6 +20,18 @@ Format Jahr-Monat-Tag.
   den ganzen Scan auf einmal in den Speicher zu laden, damit das Modul auch auf kleinen Nodes keinen
   OOM mehr auslöst.
 
+## [0.44.1] - 2026-11-20
+
+- Behoben: **Ein Beta-Update bleibt nicht mehr still hängen, wenn eine Node einen veralteten
+  Updater-Sidecar hat.** Der Updater-Sidecar ist ein eigenes Image, getrennt von der App, und wird vom
+  Ein-Klick-Update nicht mit aufgefrischt. Dadurch konnte eine Node einen älteren Sidecar behalten, der
+  Vorabversionen (-rc) nicht kennt und sie ohne Rückmeldung als „invalid version" ablehnt. Im Cluster
+  wartete der rollende Update dann auf einen Follower, der nie zurückkam. Der Sidecar meldet jetzt im
+  Heartbeat, was er kann; die App lehnt ein Beta-Update vorab mit einem klaren Hinweis ab, den Sidecar
+  aufzufrischen, und der Beta-Kanal zeigt eine Warnung, wenn der Sidecar zu alt ist. Ein Follower
+  wirft denselben Fehler, sodass der Cluster-Update der Hauptnode in Sekunden abbricht statt erst nach
+  dem Node-Timeout.
+
 ## [0.44.0] - 2026-11-20
 
 - Neu: **Release-Kanäle (Stable und Beta).** Jede Node kann dem Stable-Kanal folgen (geprüfte

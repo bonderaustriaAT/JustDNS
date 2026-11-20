@@ -1323,6 +1323,9 @@ export interface UpdateInfo {
   checkedAtMs?: number;
   error?: string;
   updaterPresent: boolean;
+  /** Whether the running sidecar can pull pre-release (`-rc`) builds. False for an
+   *  older sidecar, so the beta channel warns before a doomed update. */
+  updaterRcCapable: boolean;
   defaultBackupPath: string;
   progress?: UpdateProgress;
   channel: UpdateChannel;

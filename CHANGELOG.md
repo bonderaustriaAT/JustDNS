@@ -17,6 +17,17 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 - The module's background profile now streams the history into the aggregation row by row instead of
   loading the whole scan into memory at once, so the module no longer OOMs a small node.
 
+## [0.44.1] - 2026-11-20
+
+- Fixed: **A beta update no longer stalls silently when a node runs an outdated updater sidecar.** The
+  updater sidecar is a separate image from the app and is not refreshed by a one-click update, so a
+  node could keep an older sidecar that does not understand pre-release (-rc) versions and rejects
+  them as "invalid version" without reporting back. On a cluster that left the rolling update waiting
+  on a follower that would never return. The sidecar now advertises what it supports in its heartbeat;
+  the app refuses a beta update up front with a clear message to refresh the sidecar, and the beta
+  channel shows a warning when the sidecar is too old. A follower raises the same error, so the
+  primary's cluster update aborts in seconds instead of after the node timeout.
+
 ## [0.44.0] - 2026-11-20
 
 - New: **Release channels (stable and beta).** Each node can follow the stable channel (vetted
