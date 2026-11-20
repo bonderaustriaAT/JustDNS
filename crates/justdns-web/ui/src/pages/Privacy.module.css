@@ -671,3 +671,316 @@
   font-size: var(--step--1);
   color: var(--text-muted);
 }
+
+/* --- Privacy module views ------------------------------------------------- */
+
+/* Module tab bar: appears only while the module is on, sitting under the page
+   header. The active tab carries the signal underline. */
+.moduleTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-block-end: 1px solid var(--line);
+  margin-block-end: var(--space-5);
+}
+
+.moduleTab {
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-3) var(--space-3);
+  margin-block-end: -1px;
+  border-block-end: 2px solid transparent;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.moduleTab:hover {
+  color: var(--text);
+}
+
+.moduleTab[data-active] {
+  color: var(--text);
+  border-block-end-color: var(--signal);
+}
+
+.cardHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-block-end: var(--space-4);
+}
+
+.cardTitle {
+  font-size: var(--step-1);
+}
+
+.cardHint {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.label {
+  font-weight: 500;
+}
+
+/* The force-directed graph canvas. */
+.graphWrap {
+  inline-size: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.graphSvg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  cursor: default;
+}
+
+.graphEdge {
+  stroke: var(--line-strong);
+  stroke-opacity: 0.55;
+  transition:
+    stroke-opacity 0.2s ease,
+    stroke 0.2s ease;
+}
+
+.graphEdge[data-dim] {
+  stroke-opacity: 0.1;
+}
+
+.graphEdge[data-blocked] {
+  stroke: var(--signal);
+  stroke-dasharray: 3 3;
+}
+
+.graphNode {
+  cursor: pointer;
+}
+
+.graphNode circle {
+  fill: var(--slate, #64748b);
+  stroke: var(--surface);
+  stroke-width: 1.5;
+  transition:
+    opacity 0.2s ease,
+    fill 0.2s ease;
+}
+
+.graphNode[data-kind="device"] circle {
+  fill: var(--text-muted);
+}
+
+.graphNode[data-cat="advertising"] circle {
+  fill: var(--cat-advertising);
+}
+.graphNode[data-cat="analytics"] circle {
+  fill: var(--cat-analytics);
+}
+.graphNode[data-cat="social"] circle {
+  fill: var(--cat-social);
+}
+.graphNode[data-cat="fingerprinting"] circle {
+  fill: var(--cat-fingerprinting);
+}
+
+.graphNode[data-dim] circle {
+  opacity: 0.2;
+}
+
+.graphNode[data-focus] circle {
+  stroke: var(--signal);
+  stroke-width: 2.5;
+}
+
+.graphLabel {
+  fill: var(--text);
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--surface-sunken);
+  stroke-width: 3;
+}
+
+.graphNode[data-dim] .graphLabel {
+  opacity: 0.2;
+}
+
+.graphDetail {
+  margin-block-start: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.graphDetailHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.graphDetailMeta {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+.graphDecouple {
+  margin-block-start: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.graphDeviceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.graphDeviceList li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-start: 1px solid var(--line);
+}
+
+.graphDeviceName {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphDeviceContacts {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+}
+
+.graphCut {
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--cat-fingerprinting);
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-3);
+  cursor: pointer;
+}
+
+.graphCut:hover:not(:disabled) {
+  border-color: var(--cat-fingerprinting);
+}
+
+.graphCut:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Chaff controls. */
+.chaffStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-block-end: var(--space-5);
+}
+
+.chaffFigure {
+  font-size: var(--step-3);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.chaffSlider {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chaffSliderHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.chaffValue {
+  color: var(--signal-strong);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+}
+
+.range {
+  inline-size: 100%;
+  accent-color: var(--signal);
+}
+
+/* Chaff log. */
+.chaffLog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chaffRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-2);
+  border-block-start: 1px solid var(--line);
+  font-size: var(--step--1);
+}
+
+.chaffRow:first-child {
+  border-block-start: none;
+}
+
+.chaffTime {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.chaffName {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+
+.chaffType {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.chaffAnswered {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex: none;
+}
+
+.chaffAnswered[data-ok] {
+  background: var(--signal);
+}

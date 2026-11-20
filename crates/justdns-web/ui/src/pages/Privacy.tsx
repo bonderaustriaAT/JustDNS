@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   api,
   ApiError,
+  DEFAULT_MODULES,
+  type ChaffStatus,
   type CompanyContact,
   type CompanyDevice,
   type CompanyDomain,
   type DeviceTrackers,
   type GeoWatch,
+  type GraphNode,
   type NetworkReport,
   type ServerSettings,
+  type SurveillanceGraph,
   type TrackerReport,
   type TrackerWindow,
 } from "../lib/api";
@@ -19,7 +23,14 @@ import { countryName, flagEmoji } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import { useAuth } from "../state/auth";
+import { useSettings } from "../state/settings";
 import styles from "./Privacy.module.css";
+
+/** The module tabs the Privacy page gains while the Privacy module is on: the
+ *  existing tracker overview, the surveillance graph, the chaff controls, and
+ *  the chaff's own log. */
+type ModuleTab = "tracker" | "graph" | "chaff" | "chafflog";
+const MODULE_TABS: ModuleTab[] = ["tracker", "graph", "chaff", "chafflog"];
 
 /** The window choices offered in the segmented control, in order. */
 const WINDOWS: TrackerWindow[] = ["day", "week", "month"];
@@ -661,9 +672,483 @@ function ShowMoreToggle({
   );
 }
 
+// --- Privacy module views -------------------------------------------------
+
+/** A laid-out node: the graph node plus its simulated position. */
+interface PlacedNode extends GraphNode {
+  x: number;
+  y: number;
+}
+
+/** The graph canvas in its own coordinate space; the SVG scales to fit. */
+const GRAPH_W = 820;
+const GRAPH_H = 540;
+
+/** A small, dependency-free force layout: repulsion between all nodes, springs
+ *  along the edges, and a pull to the centre. It runs for a fixed number of
+ *  frames (the layout settles quickly) and then stops, so an idle graph costs
+ *  nothing. Positions are seeded deterministically from each id so the same
+ *  snapshot always lays out the same way. */
+function layoutGraph(graph: SurveillanceGraph): PlacedNode[] {
+  const nodes = graph.nodes.map((node, i) => {
+    // Seed on a ring, companies inner and devices outer, with a deterministic
+    // per-id jitter so nothing starts stacked.
+    const seed = hashString(node.id);
+    const ring = node.kind === "company" ? 120 : 220;
+    const angle = (i / Math.max(1, graph.nodes.length)) * Math.PI * 2 + (seed % 100) / 100;
+    return {
+      ...node,
+      x: GRAPH_W / 2 + Math.cos(angle) * ring + ((seed % 40) - 20),
+      y: GRAPH_H / 2 + Math.sin(angle) * ring + ((seed % 30) - 15),
+      vx: 0,
+      vy: 0,
+    };
+  });
+  const index = new Map(nodes.map((n, i) => [n.id, i]));
+  const edges = graph.links
+    .map((l) => ({ a: index.get(l.source), b: index.get(l.target), w: l.contacts }))
+    .filter((e): e is { a: number; b: number; w: number } => e.a !== undefined && e.b !== undefined);
+
+  const FRAMES = 320;
+  for (let frame = 0; frame < FRAMES; frame++) {
+    // Repulsion (O(n^2); the capped node count keeps this cheap).
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        let dx = nodes[i].x - nodes[j].x;
+        let dy = nodes[i].y - nodes[j].y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) {
+          dx = (hashString(nodes[i].id + nodes[j].id) % 10) - 5 || 1;
+          dy = 1;
+          d2 = dx * dx + dy * dy;
+        }
+        const force = 2600 / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * force;
+        const fy = (dy / d) * force;
+        nodes[i].vx += fx;
+        nodes[i].vy += fy;
+        nodes[j].vx -= fx;
+        nodes[j].vy -= fy;
+      }
+    }
+    // Springs along edges, a touch longer for busier ones.
+    for (const e of edges) {
+      const a = nodes[e.a];
+      const b = nodes[e.b];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const rest = 90;
+      const k = 0.015 * ((d - rest) / d);
+      const fx = dx * k;
+      const fy = dy * k;
+      a.vx += fx;
+      a.vy += fy;
+      b.vx -= fx;
+      b.vy -= fy;
+    }
+    // Centre pull + damping + integrate.
+    for (const n of nodes) {
+      n.vx += (GRAPH_W / 2 - n.x) * 0.002;
+      n.vy += (GRAPH_H / 2 - n.y) * 0.002;
+      n.vx *= 0.86;
+      n.vy *= 0.86;
+      n.x += n.vx;
+      n.y += n.vy;
+      n.x = Math.max(28, Math.min(GRAPH_W - 28, n.x));
+      n.y = Math.max(28, Math.min(GRAPH_H - 28, n.y));
+    }
+  }
+  return nodes.map(({ vx: _vx, vy: _vy, ...rest }) => rest);
+}
+
+/** A tiny stable string hash (FNV-1a), for deterministic seeding. */
+function hashString(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return Math.abs(h);
+}
+
+/** Node radius from its contact weight, within sane bounds. */
+function nodeRadius(contacts: number, max: number): number {
+  const base = max > 0 ? contacts / max : 0;
+  return 7 + Math.sqrt(base) * 15;
+}
+
+/** The surveillance graph: who on the network talks to which tracker company,
+ *  as a force-directed map. Clicking a company highlights its reach and offers
+ *  to cut it off for a single device. */
+function SurveillanceGraphView({
+  t,
+  nf,
+  canEdit,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  nf: Intl.NumberFormat;
+  canEdit: boolean;
+}) {
+  const [graph, setGraph] = useState<SurveillanceGraph | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockNote, setBlockNote] = useState<string | null>(null);
+
+  const load = useCallback((signal?: AbortSignal) => {
+    api
+      .privacyGraph(signal)
+      .then((data) => {
+        setGraph(data);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (signal?.aborted) return;
+        setError(err instanceof Error ? err.message : String(err));
+      });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    // The snapshot refreshes in the background every few minutes; re-poll so the
+    // view keeps up without a reload.
+    const timer = window.setInterval(() => load(), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [load]);
+
+  const placed = useMemo(() => (graph ? layoutGraph(graph) : []), [graph]);
+  const maxContacts = useMemo(
+    () => placed.reduce((peak, n) => Math.max(peak, n.contacts), 0),
+    [placed],
+  );
+  const posById = useMemo(() => new Map(placed.map((n) => [n.id, n])), [placed]);
+
+  const focusNode = focus ? (posById.get(focus) ?? null) : null;
+  // Which ids are lit: the focused node and everything one hop away.
+  const lit = useMemo(() => {
+    if (!focus || !graph) return null;
+    const set = new Set<string>([focus]);
+    for (const l of graph.links) {
+      if (l.source === focus) set.add(l.target);
+      if (l.target === focus) set.add(l.source);
+    }
+    return set;
+  }, [focus, graph]);
+
+  // Devices reaching the focused company, for the decouple list.
+  const focusDevices = useMemo(() => {
+    if (!graph || !focusNode || focusNode.kind !== "company") return [];
+    return graph.links
+      .filter((l) => l.target === focusNode.id)
+      .map((l) => ({
+        client: l.source.replace(/^dev:/, ""),
+        label: posById.get(l.source)?.label ?? l.source,
+        contacts: l.contacts,
+      }))
+      .sort((a, b) => b.contacts - a.contacts);
+  }, [graph, focusNode, posById]);
+
+  const decouple = useCallback(
+    (org: string, client: string) => {
+      setBlockBusy(true);
+      setBlockNote(null);
+      api
+        .privacyBlock({ org, client })
+        .then((r) => setBlockNote(t("privacy.module.graph.decoupled", { n: r.added })))
+        .catch((err: unknown) =>
+          setBlockNote(err instanceof Error ? err.message : String(err)),
+        )
+        .finally(() => setBlockBusy(false));
+    },
+    [t],
+  );
+
+  if (error) {
+    return <p className={styles.caption}>{t("privacy.unreachable", { error })}</p>;
+  }
+  if (!graph) {
+    return <p className={styles.caption}>{t("privacy.loading")}</p>;
+  }
+  if (graph.nodes.length === 0) {
+    return (
+      <section className={styles.card}>
+        <p className={styles.caption}>{t("privacy.module.graph.empty")}</p>
+        <p className={styles.captionHint}>{t("privacy.module.graph.emptyHint")}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.graph.title")}</h2>
+        <p className={styles.cardHint}>
+          {t("privacy.module.graph.summary", {
+            devices: graph.deviceCount,
+            companies: graph.companyCount,
+          })}
+        </p>
+      </header>
+      <div className={styles.graphWrap}>
+        <svg
+          className={styles.graphSvg}
+          viewBox={`0 0 ${GRAPH_W} ${GRAPH_H}`}
+          role="img"
+          aria-label={t("privacy.module.graph.title")}
+          onClick={() => {
+            setFocus(null);
+            setBlockNote(null);
+          }}
+        >
+          {graph.links.map((l, i) => {
+            const a = posById.get(l.source);
+            const b = posById.get(l.target);
+            if (!a || !b) return null;
+            const dim = lit ? !(lit.has(l.source) && lit.has(l.target)) : false;
+            return (
+              <line
+                key={i}
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                className={styles.graphEdge}
+                data-dim={dim || undefined}
+                data-blocked={l.blocked > 0 && l.blocked >= l.contacts || undefined}
+                strokeWidth={Math.min(4, 0.6 + Math.log10(l.contacts + 1))}
+              />
+            );
+          })}
+          {placed.map((n) => {
+            const dim = lit ? !lit.has(n.id) : false;
+            return (
+              <g
+                key={n.id}
+                transform={`translate(${n.x} ${n.y})`}
+                className={styles.graphNode}
+                data-kind={n.kind}
+                data-cat={n.kind === "company" ? n.category : undefined}
+                data-dim={dim || undefined}
+                data-focus={focus === n.id || undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFocus((cur) => (cur === n.id ? null : n.id));
+                  setBlockNote(null);
+                }}
+              >
+                <circle r={nodeRadius(n.contacts, maxContacts)} />
+                {(n.kind === "company" || focus === n.id || placed.length <= 28) && (
+                  <text
+                    className={styles.graphLabel}
+                    y={-nodeRadius(n.contacts, maxContacts) - 5}
+                  >
+                    {n.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {focusNode ? (
+        <div className={styles.graphDetail}>
+          <div className={styles.graphDetailHead}>
+            <span
+              className={styles.dot}
+              data-cat={focusNode.kind === "company" ? focusNode.category : undefined}
+              aria-hidden="true"
+            />
+            <strong>{focusNode.label}</strong>
+            <span className={styles.graphDetailMeta}>
+              {focusNode.kind === "company"
+                ? t(`privacy.cat.${focusNode.category}` as MessageKey)
+                : t("privacy.module.graph.device")}
+              {" · "}
+              {t("privacy.module.graph.contacts", { n: nf.format(focusNode.contacts) })}
+            </span>
+          </div>
+          {focusNode.kind === "company" && focusDevices.length > 0 ? (
+            <div className={styles.graphDecouple}>
+              <p className={styles.cardHint}>{t("privacy.module.graph.decoupleHint")}</p>
+              <ul className={styles.graphDeviceList}>
+                {focusDevices.map((d) => (
+                  <li key={d.client}>
+                    <span className={styles.graphDeviceName}>{d.label}</span>
+                    <span className={styles.graphDeviceContacts}>
+                      {nf.format(d.contacts)}
+                    </span>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className={styles.graphCut}
+                        disabled={blockBusy}
+                        onClick={() => decouple(focusNode.label, d.client)}
+                      >
+                        {t("privacy.module.graph.cut")}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {blockNote ? <p className={styles.cardHint}>{blockNote}</p> : null}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className={styles.cardHint}>{t("privacy.module.graph.pickHint")}</p>
+      )}
+    </section>
+  );
+}
+
+/** The chaff controls: the on/off state (from the module switch), a single
+ *  intensity slider, and a live count of decoys sent. */
+function ChaffView({
+  t,
+  nf,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  nf: Intl.NumberFormat;
+}) {
+  const { settings, update } = useSettings();
+  const modules = settings.modules ?? DEFAULT_MODULES;
+  const intensity = modules.privacy.chaffIntensity;
+  const [status, setStatus] = useState<ChaffStatus | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () =>
+      api
+        .privacyChaff(controller.signal)
+        .then(setStatus)
+        .catch(() => {
+          /* transient; the next tick retries */
+        });
+    load();
+    const timer = window.setInterval(load, 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const setIntensity = (value: number) =>
+    update("modules", {
+      ...modules,
+      privacy: { ...modules.privacy, chaffIntensity: value },
+    });
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.chaff.title")}</h2>
+        <p className={styles.cardHint}>{t("privacy.module.chaff.summary")}</p>
+      </header>
+
+      <div className={styles.chaffStat}>
+        <strong className={styles.chaffFigure}>{nf.format(status?.total ?? 0)}</strong>
+        <span className={styles.tileHint}>{t("privacy.module.chaff.sent")}</span>
+      </div>
+
+      <div className={styles.chaffSlider}>
+        <div className={styles.chaffSliderHead}>
+          <span className={styles.label}>{t("privacy.module.chaff.intensity")}</span>
+          <span className={styles.chaffValue}>
+            {t("privacy.module.chaff.perMinute", { n: intensity })}
+          </span>
+        </div>
+        <input
+          type="range"
+          className={styles.range}
+          min={0}
+          max={120}
+          step={1}
+          value={intensity}
+          aria-label={t("privacy.module.chaff.intensity")}
+          onChange={(e) => setIntensity(Number(e.target.value))}
+        />
+        <p className={styles.cardHint}>{t("privacy.module.chaff.intensityHint")}</p>
+      </div>
+    </section>
+  );
+}
+
+/** The chaff's own log: the decoys it has sent, newest first. Deliberately
+ *  separate from the DNS query log, which only ever shows what the network's
+ *  devices really asked for. */
+function ChaffLogView({
+  t,
+  locale,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  locale: string;
+}) {
+  const [status, setStatus] = useState<ChaffStatus | null>(null);
+  const tf = useMemo(
+    () => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    [locale],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () =>
+      api
+        .privacyChaff(controller.signal)
+        .then(setStatus)
+        .catch(() => {
+          /* transient; the next tick retries */
+        });
+    load();
+    const timer = window.setInterval(load, 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const entries = status?.entries ?? [];
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.log.title")}</h2>
+        <p className={styles.cardHint}>{t("privacy.module.log.summary")}</p>
+      </header>
+      {entries.length === 0 ? (
+        <p className={styles.caption}>{t("privacy.module.log.empty")}</p>
+      ) : (
+        <ul className={styles.chaffLog}>
+          {entries.map((e, i) => (
+            <li key={i} className={styles.chaffRow}>
+              <span className={styles.chaffTime}>{tf.format(new Date(e.tsMs))}</span>
+              <span className={styles.chaffName}>{e.name}</span>
+              <span className={styles.chaffType}>{e.recordType}</span>
+              <span
+                className={styles.chaffAnswered}
+                data-ok={e.answered || undefined}
+                aria-hidden="true"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function Privacy() {
   const { t, locale } = useI18n();
   const { isAdmin, canEdit } = useAuth();
+  const { settings } = useSettings();
+  const moduleOn = (settings.modules ?? DEFAULT_MODULES).privacy.enabled;
+  const [moduleTab, setModuleTab] = useState<ModuleTab>("tracker");
   // Watching is a global setting change: admin only, and (on an HA cluster) only
   // on the primary — the same gate `canEdit` applies to the writable node.
   const canWriteGeo = isAdmin && canEdit;
@@ -732,14 +1217,51 @@ export function Privacy() {
         <h1 className={styles.title}>{t("privacy.title")}</h1>
         <p className={styles.intro}>{t("privacy.intro")}</p>
       </div>
-      {windowSwitch}
+      {moduleTab === "tracker" ? windowSwitch : null}
     </header>
   );
+
+  // The module tab bar appears only while the Privacy module is on; off, the
+  // page is exactly the tracker overview it has always been.
+  const tabBar = moduleOn ? (
+    <div className={styles.moduleTabs} role="tablist" aria-label={t("privacy.module.tabsAria")}>
+      {MODULE_TABS.map((tab) => (
+        <button
+          key={tab}
+          type="button"
+          role="tab"
+          aria-selected={moduleTab === tab}
+          className={styles.moduleTab}
+          data-active={moduleTab === tab || undefined}
+          onClick={() => setModuleTab(tab)}
+        >
+          {t(`privacy.module.tab.${tab}` as MessageKey)}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  // The module tabs render their own views and do not depend on the tracker
+  // report, so handle them before the tracker empty-state early return.
+  if (moduleOn && moduleTab !== "tracker") {
+    return (
+      <div className={styles.page}>
+        {header}
+        {tabBar}
+        {moduleTab === "graph" && (
+          <SurveillanceGraphView t={t} nf={nf} canEdit={canEdit} />
+        )}
+        {moduleTab === "chaff" && <ChaffView t={t} nf={nf} />}
+        {moduleTab === "chafflog" && <ChaffLogView t={t} locale={locale} />}
+      </div>
+    );
+  }
 
   if (!report || report.totalContacts === 0) {
     return (
       <div className={styles.page}>
         {header}
+        {tabBar}
         <p className={styles.caption}>
           {error
             ? t("privacy.unreachable", { error })
@@ -774,6 +1296,7 @@ export function Privacy() {
   return (
     <div className={styles.page}>
       {header}
+      {tabBar}
 
       <div className={styles.tiles}>
         <section className={`${styles.tile} ${styles.tileHero}`}>

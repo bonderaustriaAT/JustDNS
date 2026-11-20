@@ -228,7 +228,6 @@ fn next_decoy(state: &mut u64) -> &'static str {
     DECOY_POOL[idx]
 }
 
-
 /// Spawn the chaff generator. It runs for the life of the process on its own
 /// Tokio task but stays parked while the module is off or the intensity is zero,
 /// so it adds no measurable load until an admin opts in. When active it sends
@@ -268,8 +267,10 @@ pub fn spawn_chaff_generator(runtime: PrivacyRuntime, config: ConfigStore, resol
             // metronome an observer could lock onto.
             let base_ms = (60_000 / intensity.max(1)) as u64;
             let jitter = rng % (base_ms / 4 + 1);
-            tokio::time::sleep(Duration::from_millis(base_ms.saturating_sub(base_ms / 8) + jitter))
-                .await;
+            tokio::time::sleep(Duration::from_millis(
+                base_ms.saturating_sub(base_ms / 8) + jitter,
+            ))
+            .await;
         }
     });
 }
