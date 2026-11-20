@@ -157,6 +157,14 @@ impl PartialOrd for Release {
     }
 }
 
+/// Whether a release tag is a pre-release (`vX.Y.Z-rcN`). Only a sidecar new enough
+/// to accept the `-rcN` suffix can pull one, so the app gates a beta update on the
+/// updater advertising `rc` support before it queues a request the sidecar would
+/// silently reject. A tag that does not parse is treated as not a pre-release.
+pub fn is_prerelease(tag: &str) -> bool {
+    Release::parse(tag).is_some_and(|release| release.rc.is_some())
+}
+
 /// The cached result of the most recent check.
 #[derive(Clone, Default)]
 struct Cached {
@@ -210,6 +218,16 @@ struct UpdateRequest<'a> {
     version: &'a str,
     requested_by: &'a str,
     requested_at_ms: u64,
+}
+
+/// The sidecar's heartbeat (`<update>/updater.json`). Besides the timestamp it
+/// lists the capabilities this updater understands, so the app can tell a current
+/// sidecar from an older one. An older sidecar writes only `{"ts":…}`, so `features`
+/// defaults to empty and every capability reads as unsupported.
+#[derive(Deserialize, Default)]
+struct UpdaterHeartbeat {
+    #[serde(default)]
+    features: Vec<String>,
 }
 
 /// Checks GitHub for newer releases and mediates the on-disk update protocol.
@@ -444,6 +462,24 @@ impl UpdateChecker {
             .unwrap_or(false)
     }
 
+    /// Whether the running updater sidecar advertises support for pre-release
+    /// (`-rc`) versions. Read from the heartbeat's `features`. An older sidecar that
+    /// predates this signal writes only a bare heartbeat, so this reads `false` and
+    /// the app refuses to queue a beta update the sidecar would silently reject
+    /// (leaving a cluster rollout waiting on a node that never comes back).
+    pub fn updater_supports_rc(&self) -> bool {
+        if !self.updater_present() {
+            return false;
+        }
+        let heartbeat = self.update_dir().join("updater.json");
+        let Ok(text) = std::fs::read_to_string(heartbeat) else {
+            return false;
+        };
+        serde_json::from_str::<UpdaterHeartbeat>(&text)
+            .map(|beat| beat.features.iter().any(|feature| feature == "rc"))
+            .unwrap_or(false)
+    }
+
     /// The sidecar's latest progress report, if any.
     pub fn progress(&self) -> Option<UpdateProgress> {
         let status = self.update_dir().join("status.json");
@@ -609,6 +645,47 @@ mod tests {
         assert_eq!(checker.channel(), UpdateChannel::Beta);
         checker.set_channel(UpdateChannel::Stable).expect("set");
         assert_eq!(checker.channel(), UpdateChannel::Stable);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn flags_prereleases() {
+        assert!(is_prerelease("v0.45.0-rc1"));
+        assert!(is_prerelease("v1.2.3-rc9"));
+        assert!(!is_prerelease("v0.45.0"));
+        assert!(!is_prerelease("v1.2.3"));
+        assert!(!is_prerelease("latest"));
+    }
+
+    #[test]
+    fn updater_rc_support_reads_the_heartbeat_features() {
+        let dir = std::env::temp_dir().join(format!("justdns-upd-{}", now_ms()));
+        let update_dir = dir.join("update");
+        std::fs::create_dir_all(&update_dir).expect("temp dir");
+        let checker = UpdateChecker {
+            repo: DEFAULT_REPO.to_owned(),
+            current_raw: "v0.44.0".to_owned(),
+            data_dir: dir.clone(),
+            cache: RwLock::new(Cached::default()),
+        };
+        let beat = update_dir.join("updater.json");
+
+        // No heartbeat at all: the sidecar is not present, so rc is unsupported.
+        assert!(!checker.updater_supports_rc());
+
+        // An older sidecar writes a bare heartbeat with no features: rc unsupported.
+        std::fs::write(&beat, format!("{{\"ts\":{}}}", now_ms())).expect("write");
+        assert!(checker.updater_present());
+        assert!(!checker.updater_supports_rc());
+
+        // A current sidecar advertises `rc`: supported.
+        std::fs::write(
+            &beat,
+            format!("{{\"ts\":{},\"features\":[\"rc\"]}}", now_ms()),
+        )
+        .expect("write");
+        assert!(checker.updater_supports_rc());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

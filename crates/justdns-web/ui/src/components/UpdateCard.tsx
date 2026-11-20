@@ -339,6 +339,11 @@ export function UpdateCard() {
             {t("update.channelBetaWarn")}
           </p>
         ) : null}
+        {info.channel === "beta" && info.updaterPresent && !info.updaterRcCapable ? (
+          <p className={styles.channelBlock} role="alert">
+            {t("update.updaterTooOld")}
+          </p>
+        ) : null}
       </div>
 
       {/* Running / done / failed take over the body; otherwise the status. */}

@@ -5580,6 +5580,10 @@ struct UpdateView {
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     updater_present: bool,
+    /// Whether the running sidecar can pull pre-release (`-rc`) versions. `false` for
+    /// an older sidecar, so the beta channel can warn before a doomed update instead
+    /// of leaving the request to fail silently.
+    updater_rc_capable: bool,
     default_backup_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     progress: Option<UpdateProgress>,
@@ -5598,6 +5602,7 @@ fn update_view(checker: &UpdateChecker) -> UpdateView {
         checked_at_ms: check.checked_at_ms,
         error: check.error,
         updater_present: checker.updater_present(),
+        updater_rc_capable: checker.updater_supports_rc(),
         default_backup_path: checker.default_backup_path(),
         progress: checker.progress(),
         channel: check.channel,
@@ -5697,6 +5702,21 @@ fn perform_update(
         return Err((
             StatusCode::CONFLICT,
             "the updater sidecar is not running on this install".to_owned(),
+        ));
+    }
+
+    // A pre-release (-rc) can only be pulled by a sidecar new enough to accept the
+    // suffix; an older one rejects the request as "invalid version" without a word
+    // back, which on a cluster leaves the rollout waiting on a node that never
+    // returns. Refuse up front with an actionable message instead of queuing a
+    // request this sidecar would silently drop. A follower raises the same error,
+    // so the primary's rollout aborts in seconds rather than after the node timeout.
+    if update::is_prerelease(&target) && !checker.updater_supports_rc() {
+        return Err((
+            StatusCode::CONFLICT,
+            "this node's updater sidecar is too old for pre-release (-rc) versions; \
+             refresh the justdns-updater image and recreate the sidecar, then retry"
+                .to_owned(),
         ));
     }
 
