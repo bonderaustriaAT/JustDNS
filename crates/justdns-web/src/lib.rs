@@ -66,7 +66,7 @@ mod syslog;
 mod update;
 use syslog::LogRecord;
 pub use syslog::{LogBuffer, LogLevelControl, RingLayer, RuntimeStatus};
-use update::{UpdateChecker, UpdateProgress};
+use update::{UpdateChannel, UpdateChecker, UpdateProgress};
 
 /// Name of the cookie that carries the session token. HttpOnly and
 /// SameSite=Strict; not marked Secure because the dashboard is served over
@@ -728,6 +728,7 @@ fn router(state: AppState) -> Router {
         // the new version and its predecessor), so there is no cleanup endpoint.
         .route("/api/update", get(get_update).post(start_update))
         .route("/api/update/check", post(check_update))
+        .route("/api/update/channel", put(set_update_channel))
         .route("/api/update/status", get(update_status))
         // High-availability management (admin). The peer-to-peer endpoints
         // (`/api/ha/hello`, `/api/ha/snapshot`) carry their own key auth and live
@@ -5582,6 +5583,8 @@ struct UpdateView {
     default_backup_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     progress: Option<UpdateProgress>,
+    /// The release channel this node follows (`stable` or `beta`).
+    channel: UpdateChannel,
 }
 
 fn update_view(checker: &UpdateChecker) -> UpdateView {
@@ -5597,6 +5600,7 @@ fn update_view(checker: &UpdateChecker) -> UpdateView {
         updater_present: checker.updater_present(),
         default_backup_path: checker.default_backup_path(),
         progress: checker.progress(),
+        channel: check.channel,
     }
 }
 
@@ -5730,6 +5734,37 @@ async fn start_update(
     record(
         &state,
         AuditEntry::success(&identity.username, "update.start").target(&target),
+    );
+    Ok(Json(update_view(&state.update)))
+}
+
+/// The body of `PUT /api/update/channel`: the channel to switch this node to.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetChannel {
+    channel: UpdateChannel,
+}
+
+/// Switch this node's release channel (stable/beta) and refresh against GitHub so
+/// the available-update view reflects the new channel at once. The channel is
+/// per node (stored on the node's own data volume) and never synced across the
+/// cluster, so a single node can run beta. Admin-only.
+async fn set_update_channel(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(body): Json<SetChannel>,
+) -> Result<Json<UpdateView>, (StatusCode, String)> {
+    state
+        .update
+        .set_channel(body.channel)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let checker = state.update.clone();
+    tokio::task::spawn_blocking(move || checker.refresh())
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "update.channel").target(body.channel.as_str()),
     );
     Ok(Json(update_view(&state.update)))
 }

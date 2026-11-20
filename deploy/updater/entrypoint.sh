@@ -35,8 +35,9 @@ EOF
   mv "$tmp" "$UPDATE_DIR/status.json"
 }
 
-# Accept only a plain release version, so nothing odd reaches docker.
-valid_version() { echo "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; }
+# Accept a plain release version or a pre-release (vX.Y.Z-rcN) for the beta
+# channel, so nothing odd reaches docker.
+valid_version() { echo "$1" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'; }
 
 # Pin JUSTDNS_TAG in the env file so the recreate uses the new image.
 set_tag() {

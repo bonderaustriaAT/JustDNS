@@ -1235,6 +1235,10 @@ export interface UpdateProgress {
  *  present (one-click vs. guided fallback), a pre-filled persistent backup path,
  *  and any in-flight progress. Matches the Rust `UpdateView`; optional fields are
  *  omitted when unset, so they are typed optional. */
+/** The release channel a node follows. Stable sees only final releases; beta
+ *  also sees pre-release builds. Chosen per node, never synced across the cluster. */
+export type UpdateChannel = "stable" | "beta";
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion?: string;
@@ -1246,6 +1250,7 @@ export interface UpdateInfo {
   updaterPresent: boolean;
   defaultBackupPath: string;
   progress?: UpdateProgress;
+  channel: UpdateChannel;
 }
 
 /** The lighter `/api/update/status` poll: the running version (so the UI sees
@@ -1825,6 +1830,9 @@ export const api = {
     sendJson<UpdateInfo>("POST", "/api/update", { backupPath, password }),
   /** The light progress poll, used while an update runs and the UI reconnects. */
   updateStatus: (signal?: AbortSignal) => getJson<UpdateStatus>("/api/update/status", signal),
+  /** Switch this node's release channel (stable/beta) and refresh. Per node. */
+  setUpdateChannel: (channel: UpdateChannel) =>
+    sendJson<UpdateInfo>("PUT", "/api/update/channel", { channel }),
 
   // --- High availability (admin only) ---
   /** The current HA status (node id, enablement, pairing, last sync). */
