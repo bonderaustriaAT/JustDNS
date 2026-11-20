@@ -1069,7 +1069,7 @@ const de = {
   "settings.autoBackupProto.smb": "Samba",
   "settings.autoBackupProto.nfs": "NFS",
   "settings.autoBackupNfsHint":
-    "Bei NFS ist „Freigabe“ der Export-Pfad (z. B. /volume1/backups). Der NFS-Server regelt den Zugriff über die IP der Node; Benutzer und Passwort entfallen.",
+    "Bei NFS ist „Freigabe“ der Export-Pfad (z. B. /volume1/backups). Der NFS-Server regelt den Zugriff über die IP der Node; Benutzer und Passwort entfallen. Auf der NAS muss der Export nicht-reservierte Ports erlauben (insecure) und der Node-IP Schreibrechte geben, sonst lehnt der Server mit MNT3ERR_ACCES ab. Lässt sich das nicht setzen, nutze SMB.",
   "settings.autoBackupHost": "Host",
   "settings.autoBackupHostPlaceholder": "z. B. 192.168.20.10",
   "settings.autoBackupShare": "Freigabe",
@@ -2667,7 +2667,7 @@ const en: Catalog = {
   "settings.autoBackupProto.smb": "Samba",
   "settings.autoBackupProto.nfs": "NFS",
   "settings.autoBackupNfsHint":
-    'For NFS, "Share" is the export path (e.g. /volume1/backups). The NFS server grants access by the node\'s IP; user and password do not apply.',
+    'For NFS, "Share" is the export path (e.g. /volume1/backups). The NFS server grants access by the node\'s IP; user and password do not apply. On the NAS the export must allow non-reserved ports (insecure) and give the node\'s IP write access, otherwise the server rejects with MNT3ERR_ACCES. If that cannot be set, use SMB.',
   "settings.autoBackupHost": "Host",
   "settings.autoBackupHostPlaceholder": "e.g. 192.168.20.10",
   "settings.autoBackupShare": "Share",
