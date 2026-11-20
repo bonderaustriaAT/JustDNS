@@ -38,6 +38,54 @@ const CHAFF_LOG_CAP: usize = 500;
 /// stress the upstreams or stand out by volume.
 const MAX_INTENSITY: u32 = 120;
 
+/// A node in the surveillance graph: either a device on the network or a
+/// tracker company it has been seen reaching.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphNode {
+    /// Stable id, prefixed so the two kinds never collide: `dev:<client>` or
+    /// `org:<org>`.
+    pub id: String,
+    /// `"device"` or `"company"`.
+    pub kind: &'static str,
+    /// Display label: the device's name or address, or the company's name.
+    pub label: String,
+    /// For a company node, its tracker category (advertising, analytics, …);
+    /// empty for a device.
+    pub category: String,
+    /// Total contacts attributed to this node, used to size it.
+    pub contacts: u64,
+}
+
+/// A weighted edge: a device reached a company this many times in the window.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphLink {
+    /// Device node id.
+    pub source: String,
+    /// Company node id.
+    pub target: String,
+    pub contacts: u64,
+    pub blocked: u64,
+}
+
+/// A computed snapshot of who-talks-to-whom across the network, rendered as a
+/// force-directed graph in the module UI. Built in the background while the
+/// module is on, then read straight from cache by the API so the view opens
+/// instantly.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurveillanceGraph {
+    /// Unix milliseconds the snapshot was computed.
+    pub generated_ms: u64,
+    /// The window it covers, e.g. `"week"`.
+    pub window: String,
+    pub device_count: usize,
+    pub company_count: usize,
+    pub nodes: Vec<GraphNode>,
+    pub links: Vec<GraphLink>,
+}
+
 /// One recorded decoy lookup, shown in the module's own log tab.
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,11 +106,34 @@ pub struct ChaffEntry {
 pub struct PrivacyRuntime {
     chaff_log: Arc<Mutex<VecDeque<ChaffEntry>>>,
     chaff_total: Arc<AtomicU64>,
+    /// The latest surveillance-graph snapshot, or `None` until the first
+    /// background compute. Cleared when the module is turned off.
+    graph: Arc<Mutex<Option<Arc<SurveillanceGraph>>>>,
 }
 
 impl PrivacyRuntime {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Publish a freshly computed graph snapshot for the API to read.
+    pub fn store_graph(&self, snapshot: SurveillanceGraph) {
+        if let Ok(mut slot) = self.graph.lock() {
+            *slot = Some(Arc::new(snapshot));
+        }
+    }
+
+    /// The current graph snapshot, if one has been computed.
+    pub fn graph(&self) -> Option<Arc<SurveillanceGraph>> {
+        self.graph.lock().ok().and_then(|slot| slot.clone())
+    }
+
+    /// Drop the cached graph (e.g. when the module is turned off), so a stale
+    /// profile is not served while the module is inactive.
+    pub fn clear_graph(&self) {
+        if let Ok(mut slot) = self.graph.lock() {
+            *slot = None;
+        }
     }
 
     /// Record a decoy lookup, dropping the oldest once the log is full.

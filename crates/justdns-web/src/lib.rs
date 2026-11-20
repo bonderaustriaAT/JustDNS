@@ -462,6 +462,12 @@ pub async fn serve(
         app_state.config.clone(),
         resolver,
     );
+    spawn_graph_worker(
+        app_state.privacy.clone(),
+        app_state.store.clone(),
+        app_state.clients.clone(),
+        app_state.config.clone(),
+    );
 
     // Fill the block-page server IP from this node's own cluster address when the
     // admin left it blank, so a blocked name points at the right node without
@@ -628,6 +634,8 @@ fn router(state: AppState) -> Router {
         .route("/api/privacy/trackers", get(privacy_trackers))
         .route("/api/privacy/networks", get(privacy_networks))
         .route("/api/privacy/block", post(privacy_block))
+        .route("/api/privacy/graph", get(privacy_graph))
+        .route("/api/privacy/chaff", get(privacy_chaff))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
         .route("/api/phishing/brands", get(phishing_brands))
@@ -6486,6 +6494,173 @@ async fn privacy_trackers(
         companies: network_companies(network, &resolver),
         devices,
     }))
+}
+
+/// The busiest companies the surveillance graph keeps, so a large network still
+/// renders as a legible profile rather than an unreadable hairball.
+const GRAPH_TOP_COMPANIES: usize = 80;
+
+/// How often the background worker recomputes the surveillance graph while the
+/// module is on. The profile shifts slowly, so a few minutes between snapshots
+/// is plenty and keeps the scan off the hot path.
+const GRAPH_REFRESH: Duration = Duration::from_secs(5 * 60);
+
+/// Shape the per-company/per-device tracker aggregation into the bipartite
+/// surveillance graph: one node per device, one per tracker company, and a
+/// weighted edge wherever a device reached a company. The company set is capped
+/// to the busiest few so the view stays readable; devices follow from the kept
+/// edges. Pure and node-local — it reads nothing but the rows handed in.
+fn build_surveillance_graph(
+    rows: &[justdns_store::TrackerScanRow],
+    resolver: &ClientResolver,
+    window: String,
+) -> privacy_module::SurveillanceGraph {
+    let mut network: HashMap<&'static str, OrgAgg> = HashMap::new();
+    for row in rows {
+        let Some(tracker) = justdns_filter::classify_tracker(&row.name) else {
+            continue;
+        };
+        let org = network.entry(tracker.org).or_default();
+        org.totals.add(tracker.category, row.count, row.blocked);
+        org.devices.entry(row.client.clone()).or_default().add(
+            tracker.category,
+            row.count,
+            row.blocked,
+        );
+    }
+
+    let mut orgs: Vec<(&'static str, OrgAgg)> = network.into_iter().collect();
+    orgs.sort_by(|a, b| {
+        b.1.totals
+            .contacts
+            .cmp(&a.1.totals.contacts)
+            .then_with(|| a.0.cmp(b.0))
+    });
+    orgs.truncate(GRAPH_TOP_COMPANIES);
+
+    let mut nodes: Vec<privacy_module::GraphNode> = Vec::new();
+    let mut links: Vec<privacy_module::GraphLink> = Vec::new();
+    let mut device_totals: HashMap<String, u64> = HashMap::new();
+
+    for (org, agg) in &orgs {
+        nodes.push(privacy_module::GraphNode {
+            id: format!("org:{org}"),
+            kind: "company",
+            label: org.to_string(),
+            category: agg.totals.category.to_string(),
+            contacts: agg.totals.contacts,
+        });
+        for (client, a) in &agg.devices {
+            *device_totals.entry(client.clone()).or_default() += a.contacts;
+            links.push(privacy_module::GraphLink {
+                source: format!("dev:{client}"),
+                target: format!("org:{org}"),
+                contacts: a.contacts,
+                blocked: a.blocked,
+            });
+        }
+    }
+
+    let company_count = orgs.len();
+    let device_count = device_totals.len();
+    for (client, contacts) in device_totals {
+        let label = client
+            .parse()
+            .ok()
+            .and_then(|ip| resolver.name_for(ip).map(str::to_owned))
+            .unwrap_or_else(|| client.clone());
+        nodes.push(privacy_module::GraphNode {
+            id: format!("dev:{client}"),
+            kind: "device",
+            label,
+            category: String::new(),
+            contacts,
+        });
+    }
+
+    privacy_module::SurveillanceGraph {
+        generated_ms: now_ms(),
+        window,
+        device_count,
+        company_count,
+        nodes,
+        links,
+    }
+}
+
+/// Recompute the surveillance graph in the background while the module is on,
+/// caching each snapshot so the API serves it instantly. Parks on a cheap sleep
+/// while the module is off (and drops any stale snapshot), so a node that never
+/// opts in does no scanning.
+fn spawn_graph_worker(
+    runtime: privacy_module::PrivacyRuntime,
+    store: Store,
+    clients: ClientStore,
+    config: ConfigStore,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(25)).await;
+        loop {
+            if !config.get().modules.privacy.enabled {
+                runtime.clear_graph();
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+            let to_ms = now_ms() as i64;
+            let from_ms = to_ms - 7 * MS_PER_DAY;
+            let scan_store = store.clone();
+            let scanned = tokio::task::spawn_blocking(move || {
+                scan_store.tracker_scan(from_ms, to_ms, TRACKER_SCAN_LIMIT)
+            })
+            .await;
+            if let Ok(Ok(rows)) = scanned {
+                let resolver = ClientResolver::new(clients.view());
+                let graph = build_surveillance_graph(&rows, &resolver, "week".to_string());
+                runtime.store_graph(graph);
+            }
+            tokio::time::sleep(GRAPH_REFRESH).await;
+        }
+    });
+}
+
+/// The cached surveillance graph. Returns an empty graph (never an error) until
+/// the first background snapshot lands, so the UI can render a clean empty state
+/// right after the module is switched on. Readable by any signed-in user.
+async fn privacy_graph(State(state): State<AppState>) -> Json<privacy_module::SurveillanceGraph> {
+    match state.privacy.graph() {
+        Some(graph) => Json((*graph).clone()),
+        None => Json(privacy_module::SurveillanceGraph {
+            generated_ms: 0,
+            window: "week".to_string(),
+            device_count: 0,
+            company_count: 0,
+            nodes: Vec::new(),
+            links: Vec::new(),
+        }),
+    }
+}
+
+/// The chaff status and its own recent log: the live on/off switch and intensity
+/// (from the synced settings) plus the node-local decoy total and the newest
+/// decoy lookups. These never appear in the DNS query log — this is their only
+/// record. Readable by any signed-in user.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChaffStatus {
+    enabled: bool,
+    intensity: u32,
+    total: u64,
+    entries: Vec<privacy_module::ChaffEntry>,
+}
+
+async fn privacy_chaff(State(state): State<AppState>) -> Json<ChaffStatus> {
+    let privacy = state.config.get().modules.privacy;
+    Json(ChaffStatus {
+        enabled: privacy.enabled,
+        intensity: privacy.chaff_intensity,
+        total: state.privacy.chaff_total(),
+        entries: state.privacy.recent_chaff(200),
+    })
 }
 
 /// Block request from the privacy dashboard: a whole company by `org` (every
