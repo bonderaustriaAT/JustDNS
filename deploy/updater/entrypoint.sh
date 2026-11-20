@@ -151,7 +151,13 @@ FEATURES='["rc"]'
 
 echo "justdns-updater watching $UPDATE_DIR (image $IMAGE, service $SERVICE)"
 while true; do
-  printf '{"ts":%s,"features":%s}\n' "$(now_ms)" "$FEATURES" > "$UPDATE_DIR/updater.json" 2>/dev/null || true
+  # Write the heartbeat atomically (tmp + rename), like write_status: the app reads
+  # its contents for the feature list, so a reader must never catch a half-written
+  # file and mistake it for a sidecar without the capability.
+  beat_tmp="$UPDATE_DIR/updater.json.tmp"
+  if printf '{"ts":%s,"features":%s}\n' "$(now_ms)" "$FEATURES" > "$beat_tmp" 2>/dev/null; then
+    mv "$beat_tmp" "$UPDATE_DIR/updater.json" 2>/dev/null || true
+  fi
   process_request || true
   sleep "$INTERVAL"
 done
