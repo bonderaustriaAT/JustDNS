@@ -813,6 +813,26 @@ impl DuckReader {
         end_ms: i64,
         limit: usize,
     ) -> Result<Vec<TrackerScanRow>, StoreError> {
+        let mut rows = Vec::new();
+        self.tracker_scan_each(start_ms, end_ms, limit, |row| rows.push(row))?;
+        Ok(rows)
+    }
+
+    /// Stream the same per-client, per-name scan as [`Self::tracker_scan`], handing
+    /// each row to `visit` as it is read instead of collecting them all first. The
+    /// privacy views fold the rows down to a few hundred companies, so visiting one
+    /// at a time keeps a busy node from holding the whole (up to `limit`) result set
+    /// in Rust memory alongside the aggregation — the peak that drove the module OOM.
+    pub fn tracker_scan_each<F>(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+        mut visit: F,
+    ) -> Result<(), StoreError>
+    where
+        F: FnMut(TrackerScanRow),
+    {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut stmt = self.conn.prepare(
             "SELECT client, name, source = 'blocked' AS blocked, COUNT(*) c \
@@ -821,17 +841,18 @@ impl DuckReader {
              GROUP BY client, name, blocked \
              ORDER BY c DESC, name LIMIT ?",
         )?;
-        let rows = stmt
-            .query_map(params![start_ms, end_ms, limit], |row| {
-                Ok(TrackerScanRow {
-                    client: row.get::<_, String>(0)?,
-                    name: row.get::<_, String>(1)?,
-                    blocked: row.get::<_, bool>(2)?,
-                    count: count(row, 3)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+        let rows = stmt.query_map(params![start_ms, end_ms, limit], |row| {
+            Ok(TrackerScanRow {
+                client: row.get::<_, String>(0)?,
+                name: row.get::<_, String>(1)?,
+                blocked: row.get::<_, bool>(2)?,
+                count: count(row, 3)?,
+            })
+        })?;
+        for row in rows {
+            visit(row?);
+        }
+        Ok(())
     }
 
     /// Helper for [`Self::period_report`]: run a `(label, COUNT(*))` top-list query

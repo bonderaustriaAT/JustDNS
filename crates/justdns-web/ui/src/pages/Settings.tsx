@@ -15,9 +15,11 @@ import { WriteGuard } from "../components/WriteGuard";
 import {
   ApiError,
   api,
+  DEFAULT_MODULES,
   type BackupProtocol,
   type BackupSyncInput,
   type CertListItem,
+  type ModulesSettings,
   type TlsSettings,
   type TlsStatus,
 } from "../lib/api";
@@ -737,7 +739,7 @@ function AutoBackupSection() {
   );
 }
 
-type SettingsGroup = "allgemein" | "dns";
+type SettingsGroup = "allgemein" | "module" | "dns";
 
 interface CategoryMeta {
   id: string;
@@ -750,7 +752,7 @@ interface CategoryMeta {
 }
 
 /** The rail groups, in display order. */
-const SETTINGS_GROUPS: SettingsGroup[] = ["allgemein", "dns"];
+const SETTINGS_GROUPS: SettingsGroup[] = ["allgemein", "module", "dns"];
 
 function Category({
   id,
@@ -1969,6 +1971,15 @@ export function Settings() {
         group: "allgemein",
         keywordKey: "settings.cat.benachrichtigungen.kw",
       },
+      // Modules: opt-in feature sets that stay dormant until switched on, so a
+      // node that never enables one carries no added load. Their own group, so
+      // they read as a distinct area, not another protection toggle.
+      {
+        id: "module",
+        titleKey: "settings.cat.module",
+        group: "module",
+        keywordKey: "settings.cat.module.kw",
+      },
       // Upstream hosts the speed profile — the headline resolver choice — so it
       // stays visible even outside expert mode, as the first DNS category.
       {
@@ -2119,6 +2130,68 @@ export function Settings() {
 
         <WriteGuard>
         <div className={styles.sections}>
+          {active === "module" && (
+            <Category
+              id="module"
+              title={t("settings.cat.module")}
+              description={t("settings.moduleDesc")}
+            >
+              <div className={styles.moduleGrid}>
+                {(() => {
+                  const modules: ModulesSettings = settings.modules ?? DEFAULT_MODULES;
+                  const privacyOn = modules.privacy.enabled;
+                  return (
+                    <div className={styles.moduleTile} data-on={privacyOn}>
+                      <div className={styles.moduleTileHead}>
+                        <div className={styles.moduleIdent}>
+                          <span className={styles.moduleIcon} aria-hidden="true">
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" />
+                              <path d="M9 12l2 2 4-4" />
+                            </svg>
+                          </span>
+                          <span className={styles.moduleName}>
+                            {t("settings.module.privacy.name")}
+                          </span>
+                        </div>
+                        <Toggle
+                          label={t("settings.module.privacy.name")}
+                          checked={privacyOn}
+                          onChange={(v) =>
+                            update("modules", {
+                              ...modules,
+                              privacy: { ...modules.privacy, enabled: v },
+                            })
+                          }
+                        />
+                      </div>
+                      <p className={styles.moduleDesc}>{t("settings.module.privacy.desc")}</p>
+                      <div className={styles.moduleFoot}>
+                        <span className={styles.moduleStatus}>
+                          <span className={styles.moduleDot} data-on={privacyOn} />
+                          {privacyOn
+                            ? t("settings.module.stateOn")
+                            : t("settings.module.stateOff")}
+                        </span>
+                        {privacyOn ? (
+                          <NavLink to="/privatsphaere" className={styles.moduleLink}>
+                            {t("settings.module.open")}
+                          </NavLink>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </Category>
+          )}
           {active === "schutz" && (
             <Category
               id="schutz"

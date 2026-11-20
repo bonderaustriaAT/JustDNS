@@ -4,6 +4,22 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.45.0] - 2026-11-20
+
+- Neu: **Privatsphäre-Modul.** Ein optionales Modul, das inaktiv bleibt, bis du es einschaltest,
+  sodass eine Node ohne das Modul keine zusätzliche Leistung braucht. Standardmäßig aus, aktivierbar
+  unter Einstellungen, Module. Es ergänzt die Privatsphäre-Seite um zwei Dinge. Der
+  **Überwachungs-Graph** zeigt als **Heatmap** (Gerät × Firma) und **Rangliste**, wer in deinem
+  Netzwerk wie oft mit welcher Tracker-Firma spricht, und trennt ein einzelnes Gerät per Tipp von
+  einer Firma; die Ansicht bleibt auch bei vielen Geräten und Firmen lesbar. **DNS-Chaff** sendet
+  einen stetigen Strom unauffälliger Schein-Abfragen an die Upstreams, damit dein echter Abfrage-Strom
+  von außen schwerer zu profilieren ist; ein einzelner Regler stellt die Rate. Die Schein-Abfragen
+  tauchen nie im DNS-Protokoll auf, das weiter nur zeigt, was deine Geräte wirklich abgefragt haben;
+  sie haben ein eigenes Protokoll im Modul.
+- Das Hintergrund-Profil des Moduls streamt den Verlauf jetzt zeilenweise in die Auswertung, statt
+  den ganzen Scan auf einmal in den Speicher zu laden, damit das Modul auch auf kleinen Nodes keinen
+  OOM mehr auslöst.
+
 ## [0.44.1] - 2026-11-20
 
 - Behoben: **Ein Beta-Update bleibt nicht mehr still hängen, wenn eine Node einen veralteten

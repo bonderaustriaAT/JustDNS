@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   api,
   ApiError,
+  DEFAULT_MODULES,
+  type ChaffStatus,
   type CompanyContact,
   type CompanyDevice,
   type CompanyDomain,
@@ -10,6 +12,7 @@ import {
   type GeoWatch,
   type NetworkReport,
   type ServerSettings,
+  type SurveillanceGraph,
   type TrackerReport,
   type TrackerWindow,
 } from "../lib/api";
@@ -19,7 +22,14 @@ import { countryName, flagEmoji } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
 import type { MessageKey } from "../lib/messages";
 import { useAuth } from "../state/auth";
+import { useSettings } from "../state/settings";
 import styles from "./Privacy.module.css";
+
+/** The module tabs the Privacy page gains while the Privacy module is on: the
+ *  existing tracker overview, the surveillance graph, the chaff controls, and
+ *  the chaff's own log. */
+type ModuleTab = "tracker" | "graph" | "chaff" | "chafflog";
+const MODULE_TABS: ModuleTab[] = ["tracker", "graph", "chaff", "chafflog"];
 
 /** The window choices offered in the segmented control, in order. */
 const WINDOWS: TrackerWindow[] = ["day", "week", "month"];
@@ -661,9 +671,462 @@ function ShowMoreToggle({
   );
 }
 
+// --- Privacy module views -------------------------------------------------
+
+/** A tracker company in the ranking and the heatmap: its node id, display name,
+ *  category and total contacts over the window. */
+interface CompanyRow {
+  id: string;
+  label: string;
+  category: string;
+  contacts: number;
+}
+
+/** A device row in the heatmap: its node id, name and total contacts. */
+interface DeviceRow {
+  id: string;
+  label: string;
+  contacts: number;
+}
+
+/** How many of the busiest companies the heatmap shows as columns. The ranking
+ *  below it lists every company the snapshot kept. */
+const HEATMAP_COLUMNS = 12;
+
+/** The four tracker categories, in display order, for the colour legend. */
+const CATEGORIES = ["advertising", "analytics", "social", "fingerprinting"] as const;
+
+/** The surveillance graph: who on the network talks to which tracker company,
+ *  as a force-directed map. Clicking a company highlights its reach and offers
+ *  to cut it off for a single device. */
+function SurveillanceGraphView({
+  t,
+  nf,
+  canEdit,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  nf: Intl.NumberFormat;
+  canEdit: boolean;
+}) {
+  const [graph, setGraph] = useState<SurveillanceGraph | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockNote, setBlockNote] = useState<string | null>(null);
+
+  const load = useCallback((signal?: AbortSignal) => {
+    api
+      .privacyGraph(signal)
+      .then((data) => {
+        setGraph(data);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (signal?.aborted) return;
+        setError(err instanceof Error ? err.message : String(err));
+      });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    load(controller.signal);
+    // The snapshot refreshes in the background every few minutes; re-poll so the
+    // view keeps up without a reload.
+    const timer = window.setInterval(() => load(), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [load]);
+
+  // Companies (busiest first) and devices (busiest first) read straight from the
+  // snapshot's nodes; the per-cell contacts come from the device→company links.
+  const companies = useMemo<CompanyRow[]>(() => {
+    if (!graph) return [];
+    return graph.nodes
+      .filter((n) => n.kind === "company")
+      .map((n) => ({ id: n.id, label: n.label, category: n.category, contacts: n.contacts }))
+      .sort((a, b) => b.contacts - a.contacts || a.label.localeCompare(b.label));
+  }, [graph]);
+
+  const devices = useMemo<DeviceRow[]>(() => {
+    if (!graph) return [];
+    return graph.nodes
+      .filter((n) => n.kind === "device")
+      .map((n) => ({ id: n.id, label: n.label, contacts: n.contacts }))
+      .sort((a, b) => b.contacts - a.contacts || a.label.localeCompare(b.label));
+  }, [graph]);
+
+  // Heatmap cell lookup: "<deviceId>|<companyId>" → contacts + blocked.
+  const cells = useMemo(() => {
+    const m = new Map<string, { contacts: number; blocked: number }>();
+    if (graph) {
+      for (const l of graph.links) {
+        m.set(`${l.source}|${l.target}`, { contacts: l.contacts, blocked: l.blocked });
+      }
+    }
+    return m;
+  }, [graph]);
+
+  const columns = useMemo(() => companies.slice(0, HEATMAP_COLUMNS), [companies]);
+  const maxCell = useMemo(() => {
+    let peak = 0;
+    for (const v of cells.values()) if (v.contacts > peak) peak = v.contacts;
+    return peak;
+  }, [cells]);
+  const maxCompany = companies.length > 0 ? companies[0].contacts : 0;
+
+  const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
+  const focusCompany = focus ? (companyById.get(focus) ?? null) : null;
+
+  // Devices reaching the focused company, for the decouple list.
+  const focusDevices = useMemo(() => {
+    if (!graph || !focusCompany) return [];
+    const labels = new Map(devices.map((d) => [d.id, d.label]));
+    return graph.links
+      .filter((l) => l.target === focusCompany.id)
+      .map((l) => ({
+        client: l.source.replace(/^dev:/, ""),
+        label: labels.get(l.source) ?? l.source,
+        contacts: l.contacts,
+      }))
+      .sort((a, b) => b.contacts - a.contacts);
+  }, [graph, focusCompany, devices]);
+
+  const decouple = useCallback(
+    (org: string, client: string) => {
+      setBlockBusy(true);
+      setBlockNote(null);
+      api
+        .privacyBlock({ org, client })
+        .then((r) => setBlockNote(t("privacy.module.graph.decoupled", { n: r.added })))
+        .catch((err: unknown) =>
+          setBlockNote(err instanceof Error ? err.message : String(err)),
+        )
+        .finally(() => setBlockBusy(false));
+    },
+    [t],
+  );
+
+  if (error) {
+    return <p className={styles.caption}>{t("privacy.unreachable", { error })}</p>;
+  }
+  if (!graph) {
+    return <p className={styles.caption}>{t("privacy.loading")}</p>;
+  }
+  if (graph.nodes.length === 0) {
+    return (
+      <section className={styles.card}>
+        <p className={styles.caption}>{t("privacy.module.graph.empty")}</p>
+        <p className={styles.captionHint}>{t("privacy.module.graph.emptyHint")}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.graph.title")}</h2>
+        <p className={styles.cardHint}>
+          {t("privacy.module.graph.summary", {
+            devices: graph.deviceCount,
+            companies: graph.companyCount,
+          })}
+        </p>
+      </header>
+      <div className={styles.legend}>
+        {CATEGORIES.map((c) => (
+          <span key={c} className={styles.legendItem}>
+            <span className={styles.dot} data-cat={c} aria-hidden="true" />
+            {t(`privacy.cat.${c}` as MessageKey)}
+          </span>
+        ))}
+      </div>
+
+      <div className={styles.rankSection}>
+        <h3 className={styles.subTitle}>{t("privacy.module.graph.rankTitle")}</h3>
+        <ul className={styles.rankList}>
+          {companies.map((c) => {
+            const pct = maxCompany > 0 ? Math.max(2, (c.contacts / maxCompany) * 100) : 0;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className={styles.rankRow}
+                  data-active={focus === c.id || undefined}
+                  aria-pressed={focus === c.id}
+                  onClick={() => {
+                    setFocus((cur) => (cur === c.id ? null : c.id));
+                    setBlockNote(null);
+                  }}
+                >
+                  <span className={styles.rankName}>{c.label}</span>
+                  <span className={styles.rankTrack}>
+                    <span
+                      className={styles.rankBar}
+                      data-cat={c.category}
+                      style={{ inlineSize: `${pct}%` }}
+                    />
+                  </span>
+                  <span className={styles.rankValue}>{nf.format(c.contacts)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div className={styles.heatSection}>
+        <h3 className={styles.subTitle}>{t("privacy.module.graph.heatTitle")}</h3>
+        <p className={styles.cardHint}>{t("privacy.module.graph.heatHint")}</p>
+        <div className={styles.heatScroll}>
+          <table className={styles.heat}>
+            <thead>
+              <tr>
+                <td className={styles.heatCorner} />
+                {columns.map((c) => (
+                  <th key={c.id} scope="col" className={styles.heatColHead}>
+                    <button
+                      type="button"
+                      className={styles.heatColBtn}
+                      data-active={focus === c.id || undefined}
+                      aria-pressed={focus === c.id}
+                      onClick={() => {
+                        setFocus((cur) => (cur === c.id ? null : c.id));
+                        setBlockNote(null);
+                      }}
+                    >
+                      <span className={styles.dot} data-cat={c.category} aria-hidden="true" />
+                      <span className={styles.heatColName}>{c.label}</span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {devices.map((d) => (
+                <tr key={d.id}>
+                  <th scope="row" className={styles.heatRowHead}>
+                    {d.label}
+                  </th>
+                  {columns.map((c) => {
+                    const v = cells.get(`${d.id}|${c.id}`)?.contacts ?? 0;
+                    const op = v > 0 && maxCell > 0 ? 0.14 + 0.86 * (v / maxCell) : 0;
+                    return (
+                      <td
+                        key={c.id}
+                        className={styles.heatCell}
+                        title={
+                          v > 0
+                            ? t("privacy.module.graph.cellTitle", {
+                                device: d.label,
+                                company: c.label,
+                                n: nf.format(v),
+                              })
+                            : undefined
+                        }
+                      >
+                        {v > 0 ? (
+                          <span
+                            className={styles.heatFill}
+                            data-cat={c.category}
+                            style={{ opacity: op }}
+                          />
+                        ) : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {focusCompany ? (
+        <div className={styles.graphDetail}>
+          <div className={styles.graphDetailHead}>
+            <span className={styles.dot} data-cat={focusCompany.category} aria-hidden="true" />
+            <strong>{focusCompany.label}</strong>
+            <span className={styles.graphDetailMeta}>
+              {t(`privacy.cat.${focusCompany.category}` as MessageKey)}
+              {" · "}
+              {t("privacy.module.graph.contacts", { n: nf.format(focusCompany.contacts) })}
+            </span>
+          </div>
+          {focusDevices.length > 0 ? (
+            <div className={styles.graphDecouple}>
+              <p className={styles.cardHint}>{t("privacy.module.graph.decoupleHint")}</p>
+              <ul className={styles.graphDeviceList}>
+                {focusDevices.map((d) => (
+                  <li key={d.client}>
+                    <span className={styles.graphDeviceName}>{d.label}</span>
+                    <span className={styles.graphDeviceContacts}>{nf.format(d.contacts)}</span>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className={styles.graphCut}
+                        disabled={blockBusy}
+                        onClick={() => decouple(focusCompany.label, d.client)}
+                      >
+                        {t("privacy.module.graph.cut")}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {blockNote ? <p className={styles.cardHint}>{blockNote}</p> : null}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className={styles.cardHint}>{t("privacy.module.graph.pickHint")}</p>
+      )}
+    </section>
+  );
+}
+
+/** The chaff controls: the on/off state (from the module switch), a single
+ *  intensity slider, and a live count of decoys sent. */
+function ChaffView({
+  t,
+  nf,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  nf: Intl.NumberFormat;
+}) {
+  const { settings, update } = useSettings();
+  const modules = settings.modules ?? DEFAULT_MODULES;
+  const intensity = modules.privacy.chaffIntensity;
+  const [status, setStatus] = useState<ChaffStatus | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () =>
+      api
+        .privacyChaff(controller.signal)
+        .then(setStatus)
+        .catch(() => {
+          /* transient; the next tick retries */
+        });
+    load();
+    const timer = window.setInterval(load, 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const setIntensity = (value: number) =>
+    update("modules", {
+      ...modules,
+      privacy: { ...modules.privacy, chaffIntensity: value },
+    });
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.chaff.title")}</h2>
+        <p className={styles.cardHint}>{t("privacy.module.chaff.summary")}</p>
+      </header>
+
+      <div className={styles.chaffStat}>
+        <strong className={styles.chaffFigure}>{nf.format(status?.total ?? 0)}</strong>
+        <span className={styles.tileHint}>{t("privacy.module.chaff.sent")}</span>
+      </div>
+
+      <div className={styles.chaffSlider}>
+        <div className={styles.chaffSliderHead}>
+          <span className={styles.label}>{t("privacy.module.chaff.intensity")}</span>
+          <span className={styles.chaffValue}>
+            {t("privacy.module.chaff.perMinute", { n: intensity })}
+          </span>
+        </div>
+        <input
+          type="range"
+          className={styles.range}
+          min={0}
+          max={120}
+          step={1}
+          value={intensity}
+          aria-label={t("privacy.module.chaff.intensity")}
+          onChange={(e) => setIntensity(Number(e.target.value))}
+        />
+        <p className={styles.cardHint}>{t("privacy.module.chaff.intensityHint")}</p>
+      </div>
+    </section>
+  );
+}
+
+/** The chaff's own log: the decoys it has sent, newest first. Deliberately
+ *  separate from the DNS query log, which only ever shows what the network's
+ *  devices really asked for. */
+function ChaffLogView({
+  t,
+  locale,
+}: {
+  t: (k: MessageKey, v?: Record<string, string | number>) => string;
+  locale: string;
+}) {
+  const [status, setStatus] = useState<ChaffStatus | null>(null);
+  const tf = useMemo(
+    () => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    [locale],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = () =>
+      api
+        .privacyChaff(controller.signal)
+        .then(setStatus)
+        .catch(() => {
+          /* transient; the next tick retries */
+        });
+    load();
+    const timer = window.setInterval(load, 5_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const entries = status?.entries ?? [];
+
+  return (
+    <section className={styles.card}>
+      <header className={styles.cardHead}>
+        <h2 className={styles.cardTitle}>{t("privacy.module.log.title")}</h2>
+        <p className={styles.cardHint}>{t("privacy.module.log.summary")}</p>
+      </header>
+      {entries.length === 0 ? (
+        <p className={styles.caption}>{t("privacy.module.log.empty")}</p>
+      ) : (
+        <ul className={styles.chaffLog}>
+          {entries.map((e, i) => (
+            <li key={i} className={styles.chaffRow}>
+              <span className={styles.chaffTime}>{tf.format(new Date(e.tsMs))}</span>
+              <span className={styles.chaffName}>{e.name}</span>
+              <span className={styles.chaffType}>{e.recordType}</span>
+              <span
+                className={styles.chaffAnswered}
+                data-ok={e.answered || undefined}
+                aria-hidden="true"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function Privacy() {
   const { t, locale } = useI18n();
   const { isAdmin, canEdit } = useAuth();
+  const { settings } = useSettings();
+  const moduleOn = (settings.modules ?? DEFAULT_MODULES).privacy.enabled;
+  const [moduleTab, setModuleTab] = useState<ModuleTab>("tracker");
   // Watching is a global setting change: admin only, and (on an HA cluster) only
   // on the primary — the same gate `canEdit` applies to the writable node.
   const canWriteGeo = isAdmin && canEdit;
@@ -732,14 +1195,51 @@ export function Privacy() {
         <h1 className={styles.title}>{t("privacy.title")}</h1>
         <p className={styles.intro}>{t("privacy.intro")}</p>
       </div>
-      {windowSwitch}
+      {moduleTab === "tracker" ? windowSwitch : null}
     </header>
   );
+
+  // The module tab bar appears only while the Privacy module is on; off, the
+  // page is exactly the tracker overview it has always been.
+  const tabBar = moduleOn ? (
+    <div className={styles.moduleTabs} role="tablist" aria-label={t("privacy.module.tabsAria")}>
+      {MODULE_TABS.map((tab) => (
+        <button
+          key={tab}
+          type="button"
+          role="tab"
+          aria-selected={moduleTab === tab}
+          className={styles.moduleTab}
+          data-active={moduleTab === tab || undefined}
+          onClick={() => setModuleTab(tab)}
+        >
+          {t(`privacy.module.tab.${tab}` as MessageKey)}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  // The module tabs render their own views and do not depend on the tracker
+  // report, so handle them before the tracker empty-state early return.
+  if (moduleOn && moduleTab !== "tracker") {
+    return (
+      <div className={styles.page}>
+        {header}
+        {tabBar}
+        {moduleTab === "graph" && (
+          <SurveillanceGraphView t={t} nf={nf} canEdit={canEdit} />
+        )}
+        {moduleTab === "chaff" && <ChaffView t={t} nf={nf} />}
+        {moduleTab === "chafflog" && <ChaffLogView t={t} locale={locale} />}
+      </div>
+    );
+  }
 
   if (!report || report.totalContacts === 0) {
     return (
       <div className={styles.page}>
         {header}
+        {tabBar}
         <p className={styles.caption}>
           {error
             ? t("privacy.unreachable", { error })
@@ -774,6 +1274,7 @@ export function Privacy() {
   return (
     <div className={styles.page}>
       {header}
+      {tabBar}
 
       <div className={styles.tiles}>
         <section className={`${styles.tile} ${styles.tileHero}`}>
