@@ -143,9 +143,15 @@ process_request() {
   fi
 }
 
+# Features this updater understands, advertised in every heartbeat so the app can
+# tell an older sidecar apart from a current one. `rc` means valid_version accepts
+# a `-rcN` pre-release; without it the app knows not to queue a beta update this
+# sidecar would reject. Append new capability names here as they are added.
+FEATURES='["rc"]'
+
 echo "justdns-updater watching $UPDATE_DIR (image $IMAGE, service $SERVICE)"
 while true; do
-  printf '{"ts":%s}\n' "$(now_ms)" > "$UPDATE_DIR/updater.json" 2>/dev/null || true
+  printf '{"ts":%s,"features":%s}\n' "$(now_ms)" "$FEATURES" > "$UPDATE_DIR/updater.json" 2>/dev/null || true
   process_request || true
   sleep "$INTERVAL"
 done

@@ -409,3 +409,14 @@
   color: var(--text-muted);
   line-height: 1.5;
 }
+
+.channelBlock {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}

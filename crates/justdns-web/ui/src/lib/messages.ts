@@ -349,6 +349,8 @@ const de = {
   "update.channelActive": "Aktiv",
   "update.channelBetaWarn":
     "Beta bezieht Vorabversionen vor dem Stable-Release. Nur auf Test-Nodes verwenden.",
+  "update.updaterTooOld":
+    "Der Updater-Sidecar auf diesem Node ist zu alt für Beta-Versionen (-rc) und lehnt sie ab. Bitte das Image justdns-updater neu ziehen und den Sidecar neu starten, sonst schlägt die Aktualisierung fehl.",
   "update.checking": "Suche nach Updates …",
   "update.upToDate": "JustDNS ist aktuell.",
   "update.currentIs": "Läuft: Version {version}",
@@ -1954,6 +1956,8 @@ const en: Catalog = {
   "update.channelActive": "Active",
   "update.channelBetaWarn":
     "Beta pulls pre-release builds ahead of the stable release. Use on test nodes only.",
+  "update.updaterTooOld":
+    "This node's updater sidecar is too old for beta (-rc) versions and rejects them. Pull a fresh justdns-updater image and restart the sidecar, otherwise the update will fail.",
   "update.checking": "Checking for updates …",
   "update.upToDate": "JustDNS is up to date.",
   "update.currentIs": "Running: version {version}",
