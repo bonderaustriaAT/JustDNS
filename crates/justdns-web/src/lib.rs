@@ -61,6 +61,7 @@ mod ha;
 mod ha_crypto;
 mod metrics;
 mod notify;
+mod privacy_module;
 mod reports;
 mod syslog;
 mod update;
@@ -254,6 +255,11 @@ struct AppState {
     /// the database paths come from the binary's environment, never the synced
     /// settings, so a bring-your-own path on one node never leaks to the cluster.
     geo: Option<Arc<GeoDb>>,
+    /// Runtime outputs of the opt-in Privacy module (the chaff log and its
+    /// counters). Inert until an admin enables the module in settings; the
+    /// background generator reads the live switch from the config, so this holds
+    /// only what the API reads back, never the on/off state itself.
+    privacy: privacy_module::PrivacyRuntime,
 }
 
 impl FromRef<AppState> for Store {
@@ -387,6 +393,7 @@ pub async fn serve(
     log_level: Arc<LogLevelControl>,
     metrics_token: Option<Arc<str>>,
     geo: Option<Arc<GeoDb>>,
+    resolver: justdns_dns::router::SharedRouter,
 ) -> std::io::Result<()> {
     // The update checker reads GitHub (public tags) and mediates the on-disk
     // protocol the updater sidecar watches. The periodic check runs on its own
@@ -442,7 +449,19 @@ pub async fn serve(
         reports,
         cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
         geo,
+        privacy: privacy_module::PrivacyRuntime::new(),
     };
+
+    // Privacy module: the chaff generator runs for the life of the process but
+    // parks on a cheap sleep while the module is off, so a node that never opts
+    // in carries no added load. It resolves decoys over the same upstream pool
+    // as real traffic (indistinguishable on the wire) while bypassing the
+    // pipeline, so the decoys never reach the query log or the counters.
+    privacy_module::spawn_chaff_generator(
+        app_state.privacy.clone(),
+        app_state.config.clone(),
+        resolver,
+    );
 
     // Fill the block-page server IP from this node's own cluster address when the
     // admin left it blank, so a blocked name points at the right node without
@@ -7812,6 +7831,7 @@ mod tests {
             reports: test_reports(),
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
             geo: None,
+            privacy: privacy_module::PrivacyRuntime::new(),
         }
     }
 

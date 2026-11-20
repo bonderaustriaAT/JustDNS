@@ -268,6 +268,23 @@ impl SharedRouter {
     pub fn current(&self) -> Arc<Router<UpstreamClient>> {
         self.inner.load_full()
     }
+
+    /// Resolve a plain hostname over the live upstreams, for background traffic
+    /// that has no `Name` of its own to pass (such as the privacy module's decoy
+    /// lookups). Goes through the same pool as real queries but bypasses the
+    /// pipeline, so it is never logged or counted. Returns whether the upstream
+    /// answered; an unparseable host answers `false` without sending anything.
+    pub async fn resolve_host(&self, host: &str, want_aaaa: bool) -> bool {
+        let Ok(name) = Name::from_ascii(host) else {
+            return false;
+        };
+        let record_type = if want_aaaa {
+            RecordType::AAAA
+        } else {
+            RecordType::A
+        };
+        self.resolve(name, record_type).await.is_ok()
+    }
 }
 
 impl Resolve for SharedRouter {
