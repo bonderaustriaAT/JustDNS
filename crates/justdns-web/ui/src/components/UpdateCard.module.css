@@ -342,3 +342,70 @@
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
 }
+
+/* Release channel picker: two selectable cards (stable / beta). The active one
+   is marked with an accent border and a small badge; beta adds a warning line. */
+.channel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.channelLabel {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+.channelCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+.channelCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  text-align: left;
+  font: inherit;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.channelCard:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+.channelCard:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.channelActive {
+  border: 2px solid var(--signal);
+  padding: calc(var(--space-3) - 1px);
+}
+.channelName {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--step-0);
+  font-weight: 600;
+  color: var(--text);
+}
+.channelBadge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--signal);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-2);
+}
+.channelDesc {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.channelWarn {
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  line-height: 1.5;
+}

@@ -341,6 +341,14 @@ const de = {
 
   // In-app update (System page card + global banner).
   "update.cardTitle": "Update",
+  "update.channelLabel": "Update-Kanal",
+  "update.channelStable": "Stable",
+  "update.channelStableDesc": "Nur geprüfte Releases. Standard für alle Nodes.",
+  "update.channelBeta": "Beta",
+  "update.channelBetaDesc": "Vorabversionen zum Testen. Kann instabil sein.",
+  "update.channelActive": "Aktiv",
+  "update.channelBetaWarn":
+    "Beta bezieht Vorabversionen vor dem Stable-Release. Nur auf Test-Nodes verwenden.",
   "update.checking": "Suche nach Updates …",
   "update.upToDate": "JustDNS ist aktuell.",
   "update.currentIs": "Läuft: Version {version}",
@@ -1938,6 +1946,14 @@ const en: Catalog = {
 
   // In-app update (System page card + global banner).
   "update.cardTitle": "Update",
+  "update.channelLabel": "Update channel",
+  "update.channelStable": "Stable",
+  "update.channelStableDesc": "Vetted releases only. Default for every node.",
+  "update.channelBeta": "Beta",
+  "update.channelBetaDesc": "Pre-release builds for testing. May be unstable.",
+  "update.channelActive": "Active",
+  "update.channelBetaWarn":
+    "Beta pulls pre-release builds ahead of the stable release. Use on test nodes only.",
   "update.checking": "Checking for updates …",
   "update.upToDate": "JustDNS is up to date.",
   "update.currentIs": "Running: version {version}",

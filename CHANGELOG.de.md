@@ -4,6 +4,13 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.44.0] - 2026-11-20
+
+- Neu: **Release-Kanäle (Stable und Beta).** Jede Node kann dem Stable-Kanal folgen (geprüfte
+  Releases, Standard) oder dem Beta-Kanal, der zusätzlich Vorabversionen zum Testen bezieht. Der
+  Kanal gilt pro Node und wird nicht im Cluster gesynct, sodass eine einzelne Node einen Build testen
+  kann, bevor er alle erreicht. Einstellbar unter System, Update.
+
 ## [0.43.2] - 2026-11-20
 
 - Behoben: **Das Speichern der Auto-Backup-Verbindung schießt die Node nicht mehr per OOM ab.** Jeder

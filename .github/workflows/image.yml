@@ -54,16 +54,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Work out the image tags
-        # A normal release tag publishes :latest and :vX.Y.Z. A pre-release tag
-        # (vX.Y.Z-rc…, i.e. any tag with a '-') publishes only :vX.Y.Z and never
-        # moves :latest, so the auto-updater does not roll a release candidate out
-        # to every install — it can be pulled by its exact version for a canary.
+        # A normal release tag publishes :latest and :vX.Y.Z (the stable channel).
+        # A pre-release tag (vX.Y.Z-rc…, i.e. any tag with a '-') publishes :vX.Y.Z
+        # and the moving :beta tag, and never moves :latest — so a node on the beta
+        # channel pulls :beta while stable installs are untouched.
         # A manual run only warms the cache (push is disabled below).
         id: tags
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             case "${{ github.ref_name }}" in
-              *-*) TAGS="$IMAGE:${{ github.ref_name }}" ;;
+              *-*) TAGS="$IMAGE:${{ github.ref_name }},$IMAGE:beta" ;;
               *)   TAGS="$IMAGE:latest,$IMAGE:${{ github.ref_name }}" ;;
             esac
           else

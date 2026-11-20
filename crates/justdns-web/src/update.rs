@@ -70,6 +70,93 @@ pub(crate) fn version_at_least(candidate: &str, baseline: &str) -> Option<bool> 
     Some(Semver::parse(candidate)? >= Semver::parse(baseline)?)
 }
 
+/// The release channel a node follows. `Stable` sees only final releases; `Beta`
+/// also sees pre-release tags (`vX.Y.Z-rcN`), so a canary can be rolled out to a
+/// test node without moving every install. Chosen per node and never synced
+/// across the cluster. Defaults to `Stable`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Beta,
+}
+
+impl UpdateChannel {
+    /// The on-disk / API spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpdateChannel::Stable => "stable",
+            UpdateChannel::Beta => "beta",
+        }
+    }
+
+    /// Parse the on-disk / API spelling, case-insensitively.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "stable" => Some(UpdateChannel::Stable),
+            "beta" => Some(UpdateChannel::Beta),
+            _ => None,
+        }
+    }
+}
+
+/// A release version that may be a pre-release: the `major.minor.patch` core plus
+/// an optional `rcN` number. Ordered so a final release outranks its own release
+/// candidates (`0.43.2` > `0.43.2-rc2` > `0.43.2-rc1`) and a newer core always
+/// wins, which is what the channel-aware "is something newer available" check
+/// needs. Unlike [`Semver`] it accepts the `-rcN` suffix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Release {
+    core: Semver,
+    /// `None` for a final release, `Some(n)` for `-rcN`. A final sorts above every
+    /// rc of the same core.
+    rc: Option<u64>,
+}
+
+impl Release {
+    /// Parse `v1.2.3` or `v1.2.3-rcN`. `None` for anything else (an unknown
+    /// suffix, a non-numeric rc, or not three dotted integers).
+    fn parse(tag: &str) -> Option<Self> {
+        let core = tag.strip_prefix('v').unwrap_or(tag);
+        let (core, rc) = match core.split_once('-') {
+            Some((core, suffix)) => (core, Some(suffix.strip_prefix("rc")?.parse().ok()?)),
+            None => (core, None),
+        };
+        Some(Self {
+            core: Semver::parse(core)?,
+            rc,
+        })
+    }
+
+    /// Whether this version belongs to `channel`: stable excludes pre-releases,
+    /// beta accepts them.
+    fn in_channel(&self, channel: UpdateChannel) -> bool {
+        channel == UpdateChannel::Beta || self.rc.is_none()
+    }
+}
+
+impl Ord for Release {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        self.core
+            .cmp(&other.core)
+            .then_with(|| match (self.rc, other.rc) {
+                (None, None) => Ordering::Equal,
+                // A final release is newer than any release candidate of the same core.
+                (None, Some(_)) => Ordering::Greater,
+                (Some(_), None) => Ordering::Less,
+                (Some(a), Some(b)) => a.cmp(&b),
+            })
+    }
+}
+
+impl PartialOrd for Release {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// The cached result of the most recent check.
 #[derive(Clone, Default)]
 struct Cached {
@@ -94,6 +181,8 @@ pub struct UpdateCheck {
     pub release_url: Option<String>,
     pub checked_at_ms: Option<u64>,
     pub error: Option<String>,
+    /// The channel this node follows; what `latest` was selected from.
+    pub channel: UpdateChannel,
 }
 
 /// Progress reported by the updater sidecar through `<update>/status.json`.
@@ -128,7 +217,6 @@ struct UpdateRequest<'a> {
 pub struct UpdateChecker {
     repo: String,
     current_raw: String,
-    current: Option<Semver>,
     data_dir: PathBuf,
     cache: RwLock<Cached>,
 }
@@ -147,12 +235,41 @@ impl UpdateChecker {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR));
         Self {
-            current: Semver::parse(version),
             current_raw: version.to_owned(),
             repo,
             data_dir,
             cache: RwLock::new(Cached::default()),
         }
+    }
+
+    /// The release channel this node follows, read from `<data>/update/channel`.
+    /// Falls back to the `JUSTDNS_UPDATE_CHANNEL` environment variable, then to
+    /// `Stable`. Deliberately per node (stored on the node's own data volume) and
+    /// never synced across the cluster, so a single node can run beta.
+    pub fn channel(&self) -> UpdateChannel {
+        if let Ok(text) = std::fs::read_to_string(self.channel_path()) {
+            if let Some(channel) = UpdateChannel::parse(&text) {
+                return channel;
+            }
+        }
+        std::env::var("JUSTDNS_UPDATE_CHANNEL")
+            .ok()
+            .and_then(|value| UpdateChannel::parse(&value))
+            .unwrap_or_default()
+    }
+
+    /// Set this node's channel and persist it to the data volume (atomic replace).
+    pub fn set_channel(&self, channel: UpdateChannel) -> std::io::Result<()> {
+        let dir = self.update_dir();
+        std::fs::create_dir_all(&dir)?;
+        let tmp = dir.join("channel.tmp");
+        std::fs::write(&tmp, channel.as_str())?;
+        std::fs::rename(tmp, self.channel_path())
+    }
+
+    /// Where this node's channel choice is stored.
+    fn channel_path(&self) -> PathBuf {
+        self.update_dir().join("channel")
     }
 
     /// The running version string, as reported to the UI.
@@ -206,9 +323,11 @@ impl UpdateChecker {
     }
 
     fn view(&self, cached: Cached) -> UpdateCheck {
+        // Compare with pre-release awareness so a beta node running vX.Y.Z-rcN also
+        // sees the final vX.Y.Z (and a later rc) as newer.
         let update_available = match (
-            self.current,
-            cached.latest.as_deref().and_then(Semver::parse),
+            Release::parse(&self.current_raw),
+            cached.latest.as_deref().and_then(Release::parse),
         ) {
             (Some(current), Some(latest)) => latest > current,
             _ => false,
@@ -221,6 +340,7 @@ impl UpdateChecker {
             release_url: cached.release_url,
             checked_at_ms: cached.checked_at_ms,
             error: cached.error,
+            channel: self.channel(),
         }
     }
 
@@ -229,7 +349,7 @@ impl UpdateChecker {
     /// never on the async runtime. Always records a timestamp; on failure it keeps
     /// the previous `latest`/`notes` and just stores the error.
     pub fn refresh(&self) -> UpdateCheck {
-        match self.fetch_latest() {
+        match self.fetch_latest(self.channel()) {
             Ok((tag, notes)) => {
                 let mut cache = self.cache.write().expect("update cache not poisoned");
                 cache.release_url = Some(format!("https://github.com/{}/tree/{tag}", self.repo));
@@ -248,8 +368,9 @@ impl UpdateChecker {
         self.snapshot()
     }
 
-    /// Fetch the highest release tag and the changelog section for it.
-    fn fetch_latest(&self) -> Result<(String, Option<String>), String> {
+    /// Fetch the highest release tag for `channel` and the changelog section for
+    /// it. Stable considers only final releases; beta also considers `-rcN` tags.
+    fn fetch_latest(&self, channel: UpdateChannel) -> Result<(String, Option<String>), String> {
         let tags_url = format!(
             "https://api.github.com/repos/{}/tags?per_page=100",
             self.repo
@@ -259,7 +380,8 @@ impl UpdateChecker {
             serde_json::from_str(&body).map_err(|error| format!("bad tags response: {error}"))?;
         let latest = tags
             .iter()
-            .filter_map(|tag| Semver::parse(&tag.name).map(|parsed| (parsed, &tag.name)))
+            .filter_map(|tag| Release::parse(&tag.name).map(|parsed| (parsed, &tag.name)))
+            .filter(|(parsed, _)| parsed.in_channel(channel))
             .max_by_key(|(parsed, _)| *parsed)
             .map(|(_, name)| name.clone())
             .ok_or_else(|| "no release tags found".to_owned())?;
@@ -440,6 +562,54 @@ mod tests {
         assert!(section.contains("In-app update"));
         assert!(!section.contains("Real logos"));
         assert!(changelog_section(changelog, "v9.9.9").is_none());
+    }
+
+    #[test]
+    fn release_orders_finals_above_their_candidates() {
+        let p = |s| Release::parse(s).expect("parses");
+        // A final outranks any rc of the same core.
+        assert!(p("v0.43.2") > p("v0.43.2-rc1"));
+        assert!(p("v0.43.2") > p("v0.43.2-rc9"));
+        // Later rc outranks an earlier one.
+        assert!(p("v0.43.2-rc2") > p("v0.43.2-rc1"));
+        // A newer core always wins, rc or not.
+        assert!(p("v0.44.0-rc1") > p("v0.43.2"));
+        assert!(p("v0.43.3") > p("v0.43.2-rc5"));
+        // Rejects junk suffixes.
+        assert!(Release::parse("v0.43.2-beta").is_none());
+        assert!(Release::parse("v0.43.2-rc").is_none());
+        assert!(Release::parse("latest").is_none());
+    }
+
+    #[test]
+    fn channel_admits_prereleases_only_on_beta() {
+        let rc = Release::parse("v0.43.2-rc1").expect("parses");
+        let fin = Release::parse("v0.43.2").expect("parses");
+        assert!(!rc.in_channel(UpdateChannel::Stable));
+        assert!(rc.in_channel(UpdateChannel::Beta));
+        assert!(fin.in_channel(UpdateChannel::Stable));
+        assert!(fin.in_channel(UpdateChannel::Beta));
+    }
+
+    #[test]
+    fn channel_persists_per_node_and_defaults_to_stable() {
+        // Build a checker on a private temp data dir directly, so this test touches
+        // no process-wide environment and cannot race other tests.
+        let dir = std::env::temp_dir().join(format!("justdns-chan-{}", now_ms()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let checker = UpdateChecker {
+            repo: DEFAULT_REPO.to_owned(),
+            current_raw: "v0.43.2".to_owned(),
+            data_dir: dir.clone(),
+            cache: RwLock::new(Cached::default()),
+        };
+        // No channel file yet and no env override in the test runner: stable.
+        assert_eq!(checker.channel(), UpdateChannel::Stable);
+        checker.set_channel(UpdateChannel::Beta).expect("set");
+        assert_eq!(checker.channel(), UpdateChannel::Beta);
+        checker.set_channel(UpdateChannel::Stable).expect("set");
+        assert_eq!(checker.channel(), UpdateChannel::Stable);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

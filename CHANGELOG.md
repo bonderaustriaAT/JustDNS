@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.44.0] - 2026-11-20
+
+- New: **Release channels (stable and beta).** Each node can follow the stable channel (vetted
+  releases, the default) or the beta channel, which also pulls pre-release builds for testing. The
+  channel is per node and is never synced across the cluster, so a single node can trial a build
+  before it reaches everyone. Set it under System, Update.
+
 ## [0.43.2] - 2026-11-20
 
 - Fixed: **Saving the auto-backup connection no longer OOM-kills the node.** Every settings save
