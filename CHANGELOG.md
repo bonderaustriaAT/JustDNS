@@ -3,6 +3,15 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.43.2] - 2026-11-20
+
+- Fixed: **Saving the auto-backup connection no longer OOM-kills the node.** Every settings save
+  rebuilt the full blocking and phishing sets from the enabled feeds (millions of domains), even when
+  the change had nothing to do with DNS, such as saving the backup target or recording a backup run.
+  On a memory-capped node that rebuild could spike over the limit and restart the resolver. A save
+  that touches only the backup target, the alert webhook or the metrics token now skips the rebuild
+  entirely.
+
 ## [0.43.1] - 2026-11-19
 
 - Fixed: **A scheduled backup no longer OOM-kills the node.** On a memory-capped node the backup

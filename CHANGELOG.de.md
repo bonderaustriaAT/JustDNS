@@ -4,6 +4,15 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.43.2] - 2026-11-20
+
+- Behoben: **Das Speichern der Auto-Backup-Verbindung schießt die Node nicht mehr per OOM ab.** Jeder
+  Einstellungs-Speichervorgang baute die kompletten Block- und Phishing-Sets aus den aktiven Feeds
+  (Millionen Domains) neu auf, auch wenn die Änderung nichts mit DNS zu tun hatte, etwa das Speichern
+  des Backup-Ziels oder das Festhalten eines Backup-Laufs. Auf einer speicherbegrenzten Node konnte
+  dieser Rebuild über das Limit schießen und den Resolver neu starten. Ein Speichern, das nur
+  Backup-Ziel, Alarm-Webhook oder Metrics-Token betrifft, überspringt den Rebuild jetzt komplett.
+
 ## [0.43.1] - 2026-11-19
 
 - Behoben: **Ein geplantes Backup schießt die Node nicht mehr per OOM ab.** Auf einer
