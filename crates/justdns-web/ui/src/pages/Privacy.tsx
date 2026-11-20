@@ -10,7 +10,6 @@ import {
   type CompanyDomain,
   type DeviceTrackers,
   type GeoWatch,
-  type GraphNode,
   type NetworkReport,
   type ServerSettings,
   type SurveillanceGraph,
@@ -674,110 +673,28 @@ function ShowMoreToggle({
 
 // --- Privacy module views -------------------------------------------------
 
-/** A laid-out node: the graph node plus its simulated position. */
-interface PlacedNode extends GraphNode {
-  x: number;
-  y: number;
+/** A tracker company in the ranking and the heatmap: its node id, display name,
+ *  category and total contacts over the window. */
+interface CompanyRow {
+  id: string;
+  label: string;
+  category: string;
+  contacts: number;
 }
 
-/** The graph canvas in its own coordinate space; the SVG scales to fit. */
-const GRAPH_W = 820;
-const GRAPH_H = 540;
-
-/** A small, dependency-free force layout: repulsion between all nodes, springs
- *  along the edges, and a pull to the centre. It runs for a fixed number of
- *  frames (the layout settles quickly) and then stops, so an idle graph costs
- *  nothing. Positions are seeded deterministically from each id so the same
- *  snapshot always lays out the same way. */
-function layoutGraph(graph: SurveillanceGraph): PlacedNode[] {
-  const nodes = graph.nodes.map((node, i) => {
-    // Seed on a ring, companies inner and devices outer, with a deterministic
-    // per-id jitter so nothing starts stacked.
-    const seed = hashString(node.id);
-    const ring = node.kind === "company" ? 120 : 220;
-    const angle = (i / Math.max(1, graph.nodes.length)) * Math.PI * 2 + (seed % 100) / 100;
-    return {
-      ...node,
-      x: GRAPH_W / 2 + Math.cos(angle) * ring + ((seed % 40) - 20),
-      y: GRAPH_H / 2 + Math.sin(angle) * ring + ((seed % 30) - 15),
-      vx: 0,
-      vy: 0,
-    };
-  });
-  const index = new Map(nodes.map((n, i) => [n.id, i]));
-  const edges = graph.links
-    .map((l) => ({ a: index.get(l.source), b: index.get(l.target), w: l.contacts }))
-    .filter((e): e is { a: number; b: number; w: number } => e.a !== undefined && e.b !== undefined);
-
-  const FRAMES = 320;
-  for (let frame = 0; frame < FRAMES; frame++) {
-    // Repulsion (O(n^2); the capped node count keeps this cheap).
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        let dx = nodes[i].x - nodes[j].x;
-        let dy = nodes[i].y - nodes[j].y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 0.01) {
-          dx = (hashString(nodes[i].id + nodes[j].id) % 10) - 5 || 1;
-          dy = 1;
-          d2 = dx * dx + dy * dy;
-        }
-        const force = 2600 / d2;
-        const d = Math.sqrt(d2);
-        const fx = (dx / d) * force;
-        const fy = (dy / d) * force;
-        nodes[i].vx += fx;
-        nodes[i].vy += fy;
-        nodes[j].vx -= fx;
-        nodes[j].vy -= fy;
-      }
-    }
-    // Springs along edges, a touch longer for busier ones.
-    for (const e of edges) {
-      const a = nodes[e.a];
-      const b = nodes[e.b];
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const d = Math.sqrt(dx * dx + dy * dy) || 1;
-      const rest = 90;
-      const k = 0.015 * ((d - rest) / d);
-      const fx = dx * k;
-      const fy = dy * k;
-      a.vx += fx;
-      a.vy += fy;
-      b.vx -= fx;
-      b.vy -= fy;
-    }
-    // Centre pull + damping + integrate.
-    for (const n of nodes) {
-      n.vx += (GRAPH_W / 2 - n.x) * 0.002;
-      n.vy += (GRAPH_H / 2 - n.y) * 0.002;
-      n.vx *= 0.86;
-      n.vy *= 0.86;
-      n.x += n.vx;
-      n.y += n.vy;
-      n.x = Math.max(28, Math.min(GRAPH_W - 28, n.x));
-      n.y = Math.max(28, Math.min(GRAPH_H - 28, n.y));
-    }
-  }
-  return nodes.map(({ vx: _vx, vy: _vy, ...rest }) => rest);
+/** A device row in the heatmap: its node id, name and total contacts. */
+interface DeviceRow {
+  id: string;
+  label: string;
+  contacts: number;
 }
 
-/** A tiny stable string hash (FNV-1a), for deterministic seeding. */
-function hashString(s: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return Math.abs(h);
-}
+/** How many of the busiest companies the heatmap shows as columns. The ranking
+ *  below it lists every company the snapshot kept. */
+const HEATMAP_COLUMNS = 12;
 
-/** Node radius from its contact weight, within sane bounds. */
-function nodeRadius(contacts: number, max: number): number {
-  const base = max > 0 ? contacts / max : 0;
-  return 7 + Math.sqrt(base) * 15;
-}
+/** The four tracker categories, in display order, for the colour legend. */
+const CATEGORIES = ["advertising", "analytics", "social", "fingerprinting"] as const;
 
 /** The surveillance graph: who on the network talks to which tracker company,
  *  as a force-directed map. Clicking a company highlights its reach and offers
@@ -822,37 +739,59 @@ function SurveillanceGraphView({
     };
   }, [load]);
 
-  const placed = useMemo(() => (graph ? layoutGraph(graph) : []), [graph]);
-  const maxContacts = useMemo(
-    () => placed.reduce((peak, n) => Math.max(peak, n.contacts), 0),
-    [placed],
-  );
-  const posById = useMemo(() => new Map(placed.map((n) => [n.id, n])), [placed]);
+  // Companies (busiest first) and devices (busiest first) read straight from the
+  // snapshot's nodes; the per-cell contacts come from the device→company links.
+  const companies = useMemo<CompanyRow[]>(() => {
+    if (!graph) return [];
+    return graph.nodes
+      .filter((n) => n.kind === "company")
+      .map((n) => ({ id: n.id, label: n.label, category: n.category, contacts: n.contacts }))
+      .sort((a, b) => b.contacts - a.contacts || a.label.localeCompare(b.label));
+  }, [graph]);
 
-  const focusNode = focus ? (posById.get(focus) ?? null) : null;
-  // Which ids are lit: the focused node and everything one hop away.
-  const lit = useMemo(() => {
-    if (!focus || !graph) return null;
-    const set = new Set<string>([focus]);
-    for (const l of graph.links) {
-      if (l.source === focus) set.add(l.target);
-      if (l.target === focus) set.add(l.source);
+  const devices = useMemo<DeviceRow[]>(() => {
+    if (!graph) return [];
+    return graph.nodes
+      .filter((n) => n.kind === "device")
+      .map((n) => ({ id: n.id, label: n.label, contacts: n.contacts }))
+      .sort((a, b) => b.contacts - a.contacts || a.label.localeCompare(b.label));
+  }, [graph]);
+
+  // Heatmap cell lookup: "<deviceId>|<companyId>" → contacts + blocked.
+  const cells = useMemo(() => {
+    const m = new Map<string, { contacts: number; blocked: number }>();
+    if (graph) {
+      for (const l of graph.links) {
+        m.set(`${l.source}|${l.target}`, { contacts: l.contacts, blocked: l.blocked });
+      }
     }
-    return set;
-  }, [focus, graph]);
+    return m;
+  }, [graph]);
+
+  const columns = useMemo(() => companies.slice(0, HEATMAP_COLUMNS), [companies]);
+  const maxCell = useMemo(() => {
+    let peak = 0;
+    for (const v of cells.values()) if (v.contacts > peak) peak = v.contacts;
+    return peak;
+  }, [cells]);
+  const maxCompany = companies.length > 0 ? companies[0].contacts : 0;
+
+  const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
+  const focusCompany = focus ? (companyById.get(focus) ?? null) : null;
 
   // Devices reaching the focused company, for the decouple list.
   const focusDevices = useMemo(() => {
-    if (!graph || !focusNode || focusNode.kind !== "company") return [];
+    if (!graph || !focusCompany) return [];
+    const labels = new Map(devices.map((d) => [d.id, d.label]));
     return graph.links
-      .filter((l) => l.target === focusNode.id)
+      .filter((l) => l.target === focusCompany.id)
       .map((l) => ({
         client: l.source.replace(/^dev:/, ""),
-        label: posById.get(l.source)?.label ?? l.source,
+        label: labels.get(l.source) ?? l.source,
         contacts: l.contacts,
       }))
       .sort((a, b) => b.contacts - a.contacts);
-  }, [graph, focusNode, posById]);
+  }, [graph, focusCompany, devices]);
 
   const decouple = useCallback(
     (org: string, client: string) => {
@@ -895,101 +834,140 @@ function SurveillanceGraphView({
           })}
         </p>
       </header>
-      <div className={styles.graphWrap}>
-        <svg
-          className={styles.graphSvg}
-          viewBox={`0 0 ${GRAPH_W} ${GRAPH_H}`}
-          role="img"
-          aria-label={t("privacy.module.graph.title")}
-          onClick={() => {
-            setFocus(null);
-            setBlockNote(null);
-          }}
-        >
-          {graph.links.map((l, i) => {
-            const a = posById.get(l.source);
-            const b = posById.get(l.target);
-            if (!a || !b) return null;
-            const dim = lit ? !(lit.has(l.source) && lit.has(l.target)) : false;
-            return (
-              <line
-                key={i}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                className={styles.graphEdge}
-                data-dim={dim || undefined}
-                data-blocked={l.blocked > 0 && l.blocked >= l.contacts || undefined}
-                strokeWidth={Math.min(4, 0.6 + Math.log10(l.contacts + 1))}
-              />
-            );
-          })}
-          {placed.map((n) => {
-            const dim = lit ? !lit.has(n.id) : false;
-            return (
-              <g
-                key={n.id}
-                transform={`translate(${n.x} ${n.y})`}
-                className={styles.graphNode}
-                data-kind={n.kind}
-                data-cat={n.kind === "company" ? n.category : undefined}
-                data-dim={dim || undefined}
-                data-focus={focus === n.id || undefined}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFocus((cur) => (cur === n.id ? null : n.id));
-                  setBlockNote(null);
-                }}
-              >
-                <circle r={nodeRadius(n.contacts, maxContacts)} />
-                {(n.kind === "company" || focus === n.id || placed.length <= 28) && (
-                  <text
-                    className={styles.graphLabel}
-                    y={-nodeRadius(n.contacts, maxContacts) - 5}
-                  >
-                    {n.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
+      <div className={styles.legend}>
+        {CATEGORIES.map((c) => (
+          <span key={c} className={styles.legendItem}>
+            <span className={styles.dot} data-cat={c} aria-hidden="true" />
+            {t(`privacy.cat.${c}` as MessageKey)}
+          </span>
+        ))}
       </div>
 
-      {focusNode ? (
+      <div className={styles.rankSection}>
+        <h3 className={styles.subTitle}>{t("privacy.module.graph.rankTitle")}</h3>
+        <ul className={styles.rankList}>
+          {companies.map((c) => {
+            const pct = maxCompany > 0 ? Math.max(2, (c.contacts / maxCompany) * 100) : 0;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  className={styles.rankRow}
+                  data-active={focus === c.id || undefined}
+                  aria-pressed={focus === c.id}
+                  onClick={() => {
+                    setFocus((cur) => (cur === c.id ? null : c.id));
+                    setBlockNote(null);
+                  }}
+                >
+                  <span className={styles.rankName}>{c.label}</span>
+                  <span className={styles.rankTrack}>
+                    <span
+                      className={styles.rankBar}
+                      data-cat={c.category}
+                      style={{ inlineSize: `${pct}%` }}
+                    />
+                  </span>
+                  <span className={styles.rankValue}>{nf.format(c.contacts)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      <div className={styles.heatSection}>
+        <h3 className={styles.subTitle}>{t("privacy.module.graph.heatTitle")}</h3>
+        <p className={styles.cardHint}>{t("privacy.module.graph.heatHint")}</p>
+        <div className={styles.heatScroll}>
+          <table className={styles.heat}>
+            <thead>
+              <tr>
+                <td className={styles.heatCorner} />
+                {columns.map((c) => (
+                  <th key={c.id} scope="col" className={styles.heatColHead}>
+                    <button
+                      type="button"
+                      className={styles.heatColBtn}
+                      data-active={focus === c.id || undefined}
+                      aria-pressed={focus === c.id}
+                      onClick={() => {
+                        setFocus((cur) => (cur === c.id ? null : c.id));
+                        setBlockNote(null);
+                      }}
+                    >
+                      <span className={styles.dot} data-cat={c.category} aria-hidden="true" />
+                      <span className={styles.heatColName}>{c.label}</span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {devices.map((d) => (
+                <tr key={d.id}>
+                  <th scope="row" className={styles.heatRowHead}>
+                    {d.label}
+                  </th>
+                  {columns.map((c) => {
+                    const v = cells.get(`${d.id}|${c.id}`)?.contacts ?? 0;
+                    const op = v > 0 && maxCell > 0 ? 0.14 + 0.86 * (v / maxCell) : 0;
+                    return (
+                      <td
+                        key={c.id}
+                        className={styles.heatCell}
+                        title={
+                          v > 0
+                            ? t("privacy.module.graph.cellTitle", {
+                                device: d.label,
+                                company: c.label,
+                                n: nf.format(v),
+                              })
+                            : undefined
+                        }
+                      >
+                        {v > 0 ? (
+                          <span
+                            className={styles.heatFill}
+                            data-cat={c.category}
+                            style={{ opacity: op }}
+                          />
+                        ) : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {focusCompany ? (
         <div className={styles.graphDetail}>
           <div className={styles.graphDetailHead}>
-            <span
-              className={styles.dot}
-              data-cat={focusNode.kind === "company" ? focusNode.category : undefined}
-              aria-hidden="true"
-            />
-            <strong>{focusNode.label}</strong>
+            <span className={styles.dot} data-cat={focusCompany.category} aria-hidden="true" />
+            <strong>{focusCompany.label}</strong>
             <span className={styles.graphDetailMeta}>
-              {focusNode.kind === "company"
-                ? t(`privacy.cat.${focusNode.category}` as MessageKey)
-                : t("privacy.module.graph.device")}
+              {t(`privacy.cat.${focusCompany.category}` as MessageKey)}
               {" · "}
-              {t("privacy.module.graph.contacts", { n: nf.format(focusNode.contacts) })}
+              {t("privacy.module.graph.contacts", { n: nf.format(focusCompany.contacts) })}
             </span>
           </div>
-          {focusNode.kind === "company" && focusDevices.length > 0 ? (
+          {focusDevices.length > 0 ? (
             <div className={styles.graphDecouple}>
               <p className={styles.cardHint}>{t("privacy.module.graph.decoupleHint")}</p>
               <ul className={styles.graphDeviceList}>
                 {focusDevices.map((d) => (
                   <li key={d.client}>
                     <span className={styles.graphDeviceName}>{d.label}</span>
-                    <span className={styles.graphDeviceContacts}>
-                      {nf.format(d.contacts)}
-                    </span>
+                    <span className={styles.graphDeviceContacts}>{nf.format(d.contacts)}</span>
                     {canEdit ? (
                       <button
                         type="button"
                         className={styles.graphCut}
                         disabled={blockBusy}
-                        onClick={() => decouple(focusNode.label, d.client)}
+                        onClick={() => decouple(focusCompany.label, d.client)}
                       >
                         {t("privacy.module.graph.cut")}
                       </button>

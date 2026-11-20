@@ -7,12 +7,15 @@ alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
 - New: **Privacy module.** An opt-in module that stays dormant until you switch it on, so a node that
   leaves it off needs no extra resources. It is off by default; enable it under Settings, Modules. It
-  adds two things to the Privacy page. The **surveillance graph** draws who on your network talks to
-  which tracker company as a force-directed map, and lets you cut a single device off from a company
-  with one tap. **DNS chaff** sends a steady trickle of plausible decoy lookups to the upstreams so
-  your real query stream is harder to profile from the outside; a single slider sets the rate. The
-  decoys never appear in the DNS query log, which keeps showing only what your devices really asked
-  for; they have their own separate log under the module.
+  adds two things to the Privacy page. The **surveillance graph** shows who on your network talks to
+  which tracker company, and how often, as a **heatmap** (device × company) and a **ranking**, and
+  lets you cut a single device off from a company with one tap; the view stays legible even with many
+  devices and companies. **DNS chaff** sends a steady trickle of plausible decoy lookups to the
+  upstreams so your real query stream is harder to profile from the outside; a single slider sets the
+  rate. The decoys never appear in the DNS query log, which keeps showing only what your devices
+  really asked for; they have their own separate log under the module.
+- The module's background profile now streams the history into the aggregation row by row instead of
+  loading the whole scan into memory at once, so the module no longer OOMs a small node.
 
 ## [0.44.0] - 2026-11-20
 

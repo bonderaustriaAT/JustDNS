@@ -730,90 +730,198 @@
   font-weight: 500;
 }
 
-/* The force-directed graph canvas. */
-.graphWrap {
+/* The four tracker categories and their colours, shown above both views. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-block-end: var(--space-4);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.subTitle {
+  font-size: var(--step-0);
+  margin-block: 0 var(--space-3);
+}
+
+/* Company ranking: a clickable row per company with a category-coloured bar
+   sized by its share of the busiest company. */
+.rankSection {
+  margin-block-end: var(--space-5);
+}
+
+.rankList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rankRow {
   inline-size: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
-  overflow: hidden;
-}
-
-.graphSvg {
-  display: block;
-  inline-size: 100%;
-  block-size: auto;
-  cursor: default;
-}
-
-.graphEdge {
-  stroke: var(--line-strong);
-  stroke-opacity: 0.55;
-  transition:
-    stroke-opacity 0.2s ease,
-    stroke 0.2s ease;
-}
-
-.graphEdge[data-dim] {
-  stroke-opacity: 0.1;
-}
-
-.graphEdge[data-blocked] {
-  stroke: var(--signal);
-  stroke-dasharray: 3 3;
-}
-
-.graphNode {
+  display: grid;
+  grid-template-columns: minmax(6rem, 11rem) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  font: inherit;
+  text-align: start;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
   cursor: pointer;
 }
 
-.graphNode circle {
-  fill: var(--slate, #64748b);
-  stroke: var(--surface);
-  stroke-width: 1.5;
-  transition:
-    opacity 0.2s ease,
-    fill 0.2s ease;
+.rankRow:hover {
+  background: var(--surface-sunken);
 }
 
-.graphNode[data-kind="device"] circle {
-  fill: var(--text-muted);
+.rankRow[data-active] {
+  border-color: var(--signal);
+  background: var(--surface-sunken);
 }
 
-.graphNode[data-cat="advertising"] circle {
-  fill: var(--cat-advertising);
-}
-.graphNode[data-cat="analytics"] circle {
-  fill: var(--cat-analytics);
-}
-.graphNode[data-cat="social"] circle {
-  fill: var(--cat-social);
-}
-.graphNode[data-cat="fingerprinting"] circle {
-  fill: var(--cat-fingerprinting);
+.rankName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--step--1);
 }
 
-.graphNode[data-dim] circle {
-  opacity: 0.2;
+.rankTrack {
+  block-size: 0.75rem;
+  background: var(--surface-sunken);
+  border-radius: 999px;
+  overflow: hidden;
 }
 
-.graphNode[data-focus] circle {
-  stroke: var(--signal);
-  stroke-width: 2.5;
+.rankBar {
+  display: block;
+  block-size: 100%;
+  min-inline-size: 2px;
+  border-radius: 999px;
+  background: var(--text-muted);
 }
 
-.graphLabel {
-  fill: var(--text);
-  font-size: 11px;
-  text-anchor: middle;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: var(--surface-sunken);
-  stroke-width: 3;
+.rankValue {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--step--1);
+  color: var(--text-muted);
 }
 
-.graphNode[data-dim] .graphLabel {
-  opacity: 0.2;
+/* Heatmap: devices as rows, the busiest companies as columns, cell strength by
+   this device's contacts to that company. */
+.heatSection {
+  margin-block-end: var(--space-4);
+}
+
+.heatScroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.heat {
+  border-collapse: collapse;
+  inline-size: 100%;
+}
+
+.heatCorner {
+  inline-size: 8rem;
+  min-inline-size: 8rem;
+}
+
+.heatColHead {
+  vertical-align: bottom;
+  padding: var(--space-2) 2px;
+}
+
+.heatColBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  inline-size: 100%;
+  font: inherit;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
+  cursor: pointer;
+}
+
+.heatColBtn:hover,
+.heatColBtn[data-active] {
+  color: var(--text);
+}
+
+.heatColBtn[data-active] .heatColName {
+  color: var(--signal);
+}
+
+.heatColName {
+  font-size: 0.68rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-block-size: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heatRowHead {
+  text-align: start;
+  font-weight: 400;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  padding: var(--space-1) var(--space-3);
+  white-space: nowrap;
+  max-inline-size: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.heatCell {
+  position: relative;
+  inline-size: 2.2rem;
+  block-size: 2.2rem;
+  border: 1px solid var(--surface);
+  background: var(--surface-sunken);
+}
+
+.heatFill {
+  position: absolute;
+  inset: 0;
+  background: var(--text-muted);
+}
+
+/* Category colours shared by the ranking bars and the heatmap cells (the legend
+   and detail dots use .dot above). */
+.rankBar[data-cat="advertising"],
+.heatFill[data-cat="advertising"] {
+  background: var(--cat-advertising);
+}
+.rankBar[data-cat="analytics"],
+.heatFill[data-cat="analytics"] {
+  background: var(--cat-analytics);
+}
+.rankBar[data-cat="social"],
+.heatFill[data-cat="social"] {
+  background: var(--cat-social);
+}
+.rankBar[data-cat="fingerprinting"],
+.heatFill[data-cat="fingerprinting"] {
+  background: var(--cat-fingerprinting);
 }
 
 .graphDetail {
