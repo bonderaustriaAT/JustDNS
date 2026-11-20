@@ -32,6 +32,21 @@ chrono-tz = "0.10"
 ureq = "3.5"
 ring = "0.17"
 base64 = "0.23"
+# NFS backup transport (optional, Linux-only). libnfs binds the C library libnfs
+# and links it dynamically, so it is gated behind the `nfs` feature and only
+# compiled for the container image; the default build (and Windows/CI) stays
+# free of the native dependency. nix is pinned to the same minor libnfs uses so
+# the OFlag/Mode types it takes unify.
+libnfs = { version = "0.1.1", optional = true }
+# Only to name the OFlag/Mode types libnfs's API takes; libnfs enables the nix
+# features that define them, so none are requested here. Pinned to libnfs's minor
+# so the types unify.
+nix = { version = "0.25", optional = true }
+
+[features]
+# Compile the in-process NFS transport. Needs libnfs-dev + libclang at build
+# time and libnfs.so at runtime (see the Dockerfile). Off by default.
+nfs = ["dep:libnfs", "dep:nix"]
 
 [dev-dependencies]
 tempfile = "3.23.0"

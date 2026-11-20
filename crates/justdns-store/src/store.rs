@@ -244,6 +244,24 @@ impl Store {
         reader.tracker_scan(start_ms, end_ms, limit)
     }
 
+    /// Stream the privacy scan, handing each row to `visit` as it is read rather
+    /// than collecting them all. Lets the privacy views fold millions of lookups
+    /// into a few hundred companies without holding the whole result set at once.
+    /// A quick blocking read; wrap async callers in `spawn_blocking`.
+    pub fn tracker_scan_each<F>(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+        visit: F,
+    ) -> Result<(), StoreError>
+    where
+        F: FnMut(TrackerScanRow),
+    {
+        let reader = self.reader.lock().expect("history reader mutex poisoned");
+        reader.tracker_scan_each(start_ms, end_ms, limit, visit)
+    }
+
     /// A snapshot of the running totals.
     pub fn stats(&self) -> Stats {
         self.recorder.stats()

@@ -4,6 +4,84 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.45.0] - 2026-11-20
+
+- Neu: **Privatsphäre-Modul.** Ein optionales Modul, das inaktiv bleibt, bis du es einschaltest,
+  sodass eine Node ohne das Modul keine zusätzliche Leistung braucht. Standardmäßig aus, aktivierbar
+  unter Einstellungen, Module. Es ergänzt die Privatsphäre-Seite um zwei Dinge. Der
+  **Überwachungs-Graph** zeigt als **Heatmap** (Gerät × Firma) und **Rangliste**, wer in deinem
+  Netzwerk wie oft mit welcher Tracker-Firma spricht, und trennt ein einzelnes Gerät per Tipp von
+  einer Firma; die Ansicht bleibt auch bei vielen Geräten und Firmen lesbar. **DNS-Chaff** sendet
+  einen stetigen Strom unauffälliger Schein-Abfragen an die Upstreams, damit dein echter Abfrage-Strom
+  von außen schwerer zu profilieren ist; ein einzelner Regler stellt die Rate. Die Schein-Abfragen
+  tauchen nie im DNS-Protokoll auf, das weiter nur zeigt, was deine Geräte wirklich abgefragt haben;
+  sie haben ein eigenes Protokoll im Modul.
+- Das Hintergrund-Profil des Moduls streamt den Verlauf jetzt zeilenweise in die Auswertung, statt
+  den ganzen Scan auf einmal in den Speicher zu laden, damit das Modul auch auf kleinen Nodes keinen
+  OOM mehr auslöst.
+
+## [0.44.1] - 2026-11-20
+
+- Behoben: **Ein Beta-Update bleibt nicht mehr still hängen, wenn eine Node einen veralteten
+  Updater-Sidecar hat.** Der Updater-Sidecar ist ein eigenes Image, getrennt von der App, und wird vom
+  Ein-Klick-Update nicht mit aufgefrischt. Dadurch konnte eine Node einen älteren Sidecar behalten, der
+  Vorabversionen (-rc) nicht kennt und sie ohne Rückmeldung als „invalid version" ablehnt. Im Cluster
+  wartete der rollende Update dann auf einen Follower, der nie zurückkam. Der Sidecar meldet jetzt im
+  Heartbeat, was er kann; die App lehnt ein Beta-Update vorab mit einem klaren Hinweis ab, den Sidecar
+  aufzufrischen, und der Beta-Kanal zeigt eine Warnung, wenn der Sidecar zu alt ist. Ein Follower
+  wirft denselben Fehler, sodass der Cluster-Update der Hauptnode in Sekunden abbricht statt erst nach
+  dem Node-Timeout.
+
+## [0.44.0] - 2026-11-20
+
+- Neu: **Release-Kanäle (Stable und Beta).** Jede Node kann dem Stable-Kanal folgen (geprüfte
+  Releases, Standard) oder dem Beta-Kanal, der zusätzlich Vorabversionen zum Testen bezieht. Der
+  Kanal gilt pro Node und wird nicht im Cluster gesynct, sodass eine einzelne Node einen Build testen
+  kann, bevor er alle erreicht. Einstellbar unter System, Update.
+
+## [0.43.2] - 2026-11-20
+
+- Behoben: **Das Speichern der Auto-Backup-Verbindung schießt die Node nicht mehr per OOM ab.** Jeder
+  Einstellungs-Speichervorgang baute die kompletten Block- und Phishing-Sets aus den aktiven Feeds
+  (Millionen Domains) neu auf, auch wenn die Änderung nichts mit DNS zu tun hatte, etwa das Speichern
+  des Backup-Ziels oder das Festhalten eines Backup-Laufs. Auf einer speicherbegrenzten Node konnte
+  dieser Rebuild über das Limit schießen und den Resolver neu starten. Ein Speichern, das nur
+  Backup-Ziel, Alarm-Webhook oder Metrics-Token betrifft, überspringt den Rebuild jetzt komplett.
+
+## [0.43.1] - 2026-11-19
+
+- Behoben: **Ein geplantes Backup schießt die Node nicht mehr per OOM ab.** Auf einer
+  speicherbegrenzten Node baute, versiegelte und lud das Backup die komplette Konfiguration hoch und
+  hielt dabei mehrere Vollkopien gleichzeitig im Speicher, was eine knapp ausgestattete Node über ihr
+  Limit treiben und neu starten konnte. Das Backup gibt jede Kopie jetzt sofort wieder frei und
+  streamt die versiegelte Datei von der Platte zur Freigabe (SMB und NFS), sodass der Speicherbedarf
+  klein und gleichmäßig bleibt.
+- Behoben: **Ein unterbrochenes Backup bringt die Node nicht mehr in eine Schleife.** Wurde ein Lauf
+  vor dem Ende abgebrochen, hielt der nächste Start das Backup weiter für fällig und versuchte es
+  sofort erneut. Die Laufzeit wird jetzt vor dem Upload festgehalten, sodass ein unterbrochenes
+  Backup auf das nächste Intervall wartet statt in einer Schleife zu wiederholen.
+- Neu: **Knopf „Verbindung speichern".** Beim Anlegen einer Backup-Verbindung gibt es jetzt einen
+  eigenen Speicherknopf, statt die Felder nur beim Verlassen zu sichern.
+
+## [0.43.0] - 2026-11-19
+
+- Neu: **Automatisches Backup auf ein Netzlaufwerk.** Eine neue Karte unter „Sicherung" legt deine
+  Einrichtung regelmäßig als verschlüsselte Datei auf einer Samba- oder NFS-Freigabe ab, ganz ohne
+  Mount. Oben stehen Status und Kennzahlen (letztes Backup, Intervall, Aufbewahrung), darunter
+  „Jetzt sichern" und „Verbindung testen"; Ziel und Zugang verstecken sich hinter einem Aufklapper.
+  Die Sicherung nutzt dasselbe Format wie der manuelle Download und wird mit deinem Backup-Passwort
+  verschlüsselt, alte Stände werden auf die eingestellte Anzahl zurückgeschnitten. Im Cluster läuft
+  der Zeitplan nur auf der Hauptnode. SMB (Samba) und NFS werden beide unterstützt; bei NFS ist die
+  „Freigabe" der Export-Pfad, und der Zugriff läuft über die IP der Node.
+- Behoben: **Eine einmal gesetzte Hauptnode bleibt gesetzt.** Bisher konnte eine unabhängige
+  Einstellungsänderung auf einer anderen Node die Hauptnode-Zuweisung im Cluster wieder entfernen,
+  sodass auf der Hochverfügbarkeits-Seite erneut „zur Hauptnode machen" erschien. Die Zuweisung wird
+  jetzt als eigener Eintrag synchronisiert und überlebt fremde Einstellungsänderungen.
+- Behoben: **Ein Tagesreport bringt die Node nicht mehr zum Absturz.** Auf speicherbegrenzten
+  Containern konnte ein großer Report die Node per OOM abschießen, weil DuckDB sich am gesamten
+  Host-Speicher statt am Container-Limit orientierte. DuckDB bekommt jetzt ein passendes
+  Speicherlimit und einen Platz zum Auslagern, sodass auch große Reports durchlaufen.
+
 ## [0.42.2] - 2026-11-18
 
 - Behoben: **Protokoll- und Geräte-Seite öffnen schneller.** Auf Instanzen mit großen Blocklisten

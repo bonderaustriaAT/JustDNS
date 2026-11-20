@@ -475,7 +475,25 @@ async fn main() -> ExitCode {
         let dnssec_validate = dnssec_validate.clone();
         let status = status.clone();
         let detector = phishing_detector.clone();
+        // Mirror of the settings the engine was last reconfigured from. Seeded with
+        // the startup settings (the engine above is already built from them), so the
+        // first real change decides whether a rebuild is needed.
+        let last_settings = std::sync::Mutex::new(settings.clone());
         config_store.on_change(move |settings| {
+            // The config store fires this on *every* save. The policy and phishing
+            // rebuilds below re-materialize the enabled feeds (millions of domains)
+            // from disk, so running them for a save that touches only the backup
+            // target, its run-status, the alert webhook or the metrics token spikes
+            // memory for nothing — enough to OOM a memory-tight node. Skip the whole
+            // rebuild unless a field the live DNS engine actually reads changed.
+            {
+                let mut last = last_settings.lock().expect("settings mirror lock poisoned");
+                let needs_rebuild = !only_non_engine_fields_changed(&last, settings);
+                *last = settings.clone();
+                if !needs_rebuild {
+                    return;
+                }
+            }
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams, dnssec_validate.clone()));
             tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
@@ -578,7 +596,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone(), shared_router.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
@@ -656,6 +674,25 @@ impl justdns_dns::blockpage::AccessRequestSink for AccessSink {
 
 /// Rebuild the per-client policies for the current stores, folding in the
 /// schedules that are open right now (evaluated in the configured time zone).
+/// Whether `next` differs from `prev` only in fields the live DNS engine never
+/// reads: the off-box backup target and its run-status, the alert webhook, and
+/// the metrics-endpoint token. A change confined to these needs none of the
+/// router / policy / phishing rebuilds, which re-materialize the enabled feed
+/// sets (millions of domains) from disk and would otherwise let a frequent
+/// admin-only save (a backup run records its status through the same config save)
+/// spike a memory-tight node into OOM.
+fn only_non_engine_fields_changed(prev: &Settings, next: &Settings) -> bool {
+    let mut probe = prev.clone();
+    probe.backup_sync = next.backup_sync.clone();
+    probe.notifications = next.notifications.clone();
+    probe.metrics_token = next.metrics_token.clone();
+    // The feature modules drive their own supervisor (started/stopped separately,
+    // before this check), not the DNS policy engine, so a module toggle or a chaff
+    // intensity change must not force the heavy rebuild either.
+    probe.modules = next.modules.clone();
+    &probe == next
+}
+
 fn rebuild_policies(
     engine: &PolicyEngine,
     lists: &ListStore,
@@ -1070,5 +1107,46 @@ mod tests {
         assert!(!feed_shrank(10, 0));
         // Growth is never a shrink.
         assert!(!feed_shrank(1_000, 2_000));
+    }
+
+    #[test]
+    fn admin_only_saves_skip_the_engine_rebuild_but_policy_changes_do_not() {
+        let base = Settings::default();
+
+        // Saving only the backup target (or its run-status) touches nothing the DNS
+        // engine reads, so it must not trigger a rebuild.
+        let mut only_backup = base.clone();
+        only_backup.backup_sync.enabled = true;
+        only_backup.backup_sync.host = "192.168.20.161".to_owned();
+        only_backup.backup_sync.last_run_ms = 1_795_000_000_000;
+        assert!(only_non_engine_fields_changed(&base, &only_backup));
+
+        // The alert webhook and the metrics token are engine-irrelevant too.
+        let mut only_webhook = base.clone();
+        only_webhook.notifications.webhook_url = "https://example.test/hook".to_owned();
+        assert!(only_non_engine_fields_changed(&base, &only_webhook));
+        let mut only_token = base.clone();
+        only_token.metrics_token = "a-token".to_owned();
+        assert!(only_non_engine_fields_changed(&base, &only_token));
+
+        // Toggling a feature module (or changing chaff intensity) drives the module
+        // supervisor, not the DNS engine, so it must not trigger a rebuild.
+        let mut only_module = base.clone();
+        only_module.modules.privacy.enabled = true;
+        only_module.modules.privacy.chaff_intensity = 40;
+        assert!(only_non_engine_fields_changed(&base, &only_module));
+
+        // An identical save is a no-op and need not rebuild either.
+        assert!(only_non_engine_fields_changed(&base, &base.clone()));
+
+        // A real DNS-policy change still forces the full rebuild.
+        let mut policy = base.clone();
+        policy.block_malware = !base.block_malware;
+        assert!(!only_non_engine_fields_changed(&base, &policy));
+
+        // And a policy change bundled with a backup change is not skippable.
+        let mut both = only_backup.clone();
+        both.safe_search = !base.safe_search;
+        assert!(!only_non_engine_fields_changed(&base, &both));
     }
 }

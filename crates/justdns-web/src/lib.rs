@@ -30,7 +30,7 @@ use justdns_auth::{AuthError, Role, SessionState, SessionStore, User, UserStore}
 use justdns_clients::{
     ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
 };
-use justdns_config::{BlockPage, ConfigStore, Settings};
+use justdns_config::{BackupProtocol, BackupSync, BlockPage, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::cert_store::{CertInfo, CertRecord, CertStore};
 use justdns_filter::Blocker;
@@ -55,18 +55,20 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
+mod backup_sync;
 mod demo;
 mod geo_watch;
 mod ha;
 mod ha_crypto;
 mod metrics;
 mod notify;
+mod privacy_module;
 mod reports;
 mod syslog;
 mod update;
 use syslog::LogRecord;
 pub use syslog::{LogBuffer, LogLevelControl, RingLayer, RuntimeStatus};
-use update::{UpdateChecker, UpdateProgress};
+use update::{UpdateChannel, UpdateChecker, UpdateProgress};
 
 /// Name of the cookie that carries the session token. HttpOnly and
 /// SameSite=Strict; not marked Secure because the dashboard is served over
@@ -264,6 +266,11 @@ struct AppState {
     /// dashboard opens straight away with no login. Writes stay gated (Editor/Admin)
     /// and secrets stay redacted, exactly as for any Viewer. Off everywhere else.
     demo: bool,
+    /// Runtime outputs of the opt-in Privacy module (the chaff log and its
+    /// counters). Inert until an admin enables the module in settings; the
+    /// background generator reads the live switch from the config, so this holds
+    /// only what the API reads back, never the on/off state itself.
+    privacy: privacy_module::PrivacyRuntime,
 }
 
 impl FromRef<AppState> for Store {
@@ -397,6 +404,7 @@ pub async fn serve(
     log_level: Arc<LogLevelControl>,
     metrics_token: Option<Arc<str>>,
     geo: Option<Arc<GeoDb>>,
+    resolver: justdns_dns::router::SharedRouter,
 ) -> std::io::Result<()> {
     // The update checker reads GitHub (public tags) and mediates the on-disk
     // protocol the updater sidecar watches. The periodic check runs on its own
@@ -467,7 +475,25 @@ pub async fn serve(
         cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
         geo,
         demo,
+        privacy: privacy_module::PrivacyRuntime::new(),
     };
+
+    // Privacy module: the chaff generator runs for the life of the process but
+    // parks on a cheap sleep while the module is off, so a node that never opts
+    // in carries no added load. It resolves decoys over the same upstream pool
+    // as real traffic (indistinguishable on the wire) while bypassing the
+    // pipeline, so the decoys never reach the query log or the counters.
+    privacy_module::spawn_chaff_generator(
+        app_state.privacy.clone(),
+        app_state.config.clone(),
+        resolver,
+    );
+    spawn_graph_worker(
+        app_state.privacy.clone(),
+        app_state.store.clone(),
+        app_state.clients.clone(),
+        app_state.config.clone(),
+    );
 
     // Fill the block-page server IP from this node's own cluster address when the
     // admin left it blank, so a blocked name points at the right node without
@@ -478,6 +504,14 @@ pub async fn serve(
     // feed, so a read-only visitor sees a live, populated dashboard.
     if app_state.demo {
         demo::start(app_state.store.clone(), app_state.lists.clone());
+        // Switch the privacy module on for the demo so a read-only visitor sees
+        // the surveillance graph and chaff views populated (the synthetic feed
+        // includes classifiable tracker names). Idempotent across restarts.
+        let mut settings = app_state.config.get();
+        if !settings.modules.privacy.enabled {
+            settings.modules.privacy.enabled = true;
+            let _ = app_state.config.set(settings);
+        }
     }
 
     // The HA sync loop pulls each peer's snapshot, merges it and applies the
@@ -557,6 +591,11 @@ pub async fn serve(
         });
     }
 
+    // Scheduled off-box config backup. Reads the live config each tick, so it does
+    // nothing until the admin turns it on; only the primary backs up (a manual run
+    // is allowed anywhere). Its own thread like the checkers above.
+    backup_sync::spawn_scheduler(app_state.clone());
+
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
     axum::serve(listener, router(app_state)).await
@@ -635,6 +674,8 @@ fn router(state: AppState) -> Router {
         .route("/api/privacy/trackers", get(privacy_trackers))
         .route("/api/privacy/networks", get(privacy_networks))
         .route("/api/privacy/block", post(privacy_block))
+        .route("/api/privacy/graph", get(privacy_graph))
+        .route("/api/privacy/chaff", get(privacy_chaff))
         .route("/api/nodes", get(nodes))
         .route("/api/dnssec", get(dnssec))
         .route("/api/phishing/brands", get(phishing_brands))
@@ -715,6 +756,14 @@ fn router(state: AppState) -> Router {
         .route("/api/blocking/resume", post(blocking_resume))
         .route("/api/backup", post(export_backup))
         .route("/api/backup/restore", post(restore_backup))
+        // Scheduled off-box backup to an SMB/NFS share (admin). Read/update the
+        // config, test the connection, or run a backup on demand.
+        .route(
+            "/api/backup/sync",
+            get(get_backup_sync).put(put_backup_sync),
+        )
+        .route("/api/backup/sync/test", post(test_backup_sync))
+        .route("/api/backup/sync/run", post(run_backup_sync))
         // Self-service: a signed-in user manages their own password and MFA.
         .route("/api/account", get(get_account))
         .route("/api/account/password", put(change_own_password))
@@ -746,6 +795,7 @@ fn router(state: AppState) -> Router {
         // the new version and its predecessor), so there is no cleanup endpoint.
         .route("/api/update", get(get_update).post(start_update))
         .route("/api/update/check", post(check_update))
+        .route("/api/update/channel", put(set_update_channel))
         .route("/api/update/status", get(update_status))
         // High-availability management (admin). The peer-to-peer endpoints
         // (`/api/ha/hello`, `/api/ha/snapshot`) carry their own key auth and live
@@ -857,8 +907,7 @@ fn required_role(method: &Method, path: &str) -> Role {
     if path == "/api/users"
         || path.starts_with("/api/users/")
         || path == "/api/audit"
-        || path == "/api/backup"
-        || path == "/api/backup/restore"
+        || path.starts_with("/api/backup")
         || path.starts_with("/api/logs/")
         || path == "/api/diag"
         || path.starts_with("/api/update")
@@ -3706,6 +3755,186 @@ async fn reports_download(
         .into_response())
 }
 
+/// The auto-backup configuration and status as the UI reads it: the share target
+/// and schedule, the two secrets replaced by a "is one stored" flag (they are
+/// write-only), and the last run's status.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupSyncView {
+    enabled: bool,
+    protocol: BackupProtocol,
+    host: String,
+    share: String,
+    path: String,
+    username: String,
+    domain: String,
+    /// Whether a share password is stored (the value itself never leaves the box).
+    has_password: bool,
+    /// Whether a backup password is stored.
+    has_backup_password: bool,
+    interval_hours: u32,
+    keep: u32,
+    last_run_ms: u64,
+    last_ok: bool,
+    last_error: String,
+}
+
+impl From<BackupSync> for BackupSyncView {
+    fn from(b: BackupSync) -> Self {
+        Self {
+            enabled: b.enabled,
+            protocol: b.protocol,
+            host: b.host,
+            share: b.share,
+            path: b.path,
+            username: b.username,
+            domain: b.domain,
+            has_password: !b.password.is_empty(),
+            has_backup_password: !b.backup_password.is_empty(),
+            interval_hours: b.interval_hours,
+            keep: b.keep,
+            last_run_ms: b.last_run_ms,
+            last_ok: b.last_ok,
+            last_error: b.last_error,
+        }
+    }
+}
+
+/// The auto-backup settings a save carries. An empty (or omitted) `password` /
+/// `backup_password` leaves the stored secret unchanged, so the UI never has to
+/// receive a secret just to echo it back — the write-only pattern the metrics
+/// token uses for downloads.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupSyncInput {
+    enabled: bool,
+    protocol: BackupProtocol,
+    #[serde(default)]
+    host: String,
+    #[serde(default)]
+    share: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    domain: String,
+    #[serde(default)]
+    backup_password: Option<String>,
+    interval_hours: u32,
+    keep: u32,
+}
+
+/// Read the auto-backup configuration and last-run status (secrets blanked).
+async fn get_backup_sync(State(state): State<AppState>) -> Json<BackupSyncView> {
+    Json(state.config.get().backup_sync.into())
+}
+
+/// Update the auto-backup configuration. Status fields and any secret left blank
+/// are preserved. Returns the stored value (secrets blanked).
+async fn put_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(input): Json<BackupSyncInput>,
+) -> Result<Json<BackupSyncView>, (StatusCode, String)> {
+    let mut settings = state.config.get();
+    {
+        let b = &mut settings.backup_sync;
+        b.enabled = input.enabled;
+        b.protocol = input.protocol;
+        b.host = input.host.trim().to_owned();
+        b.share = input.share.trim().to_owned();
+        b.path = input.path.trim().to_owned();
+        b.username = input.username.trim().to_owned();
+        b.domain = input.domain.trim().to_owned();
+        b.interval_hours = input.interval_hours.clamp(1, 24 * 30);
+        b.keep = input.keep.clamp(1, 365);
+        // An empty secret means "keep the stored one"; a non-empty one replaces it.
+        if let Some(password) = input.password.filter(|value| !value.is_empty()) {
+            b.password = password;
+        }
+        if let Some(backup_password) = input.backup_password.filter(|value| !value.is_empty()) {
+            b.backup_password = backup_password;
+        }
+        // last_run_ms / last_ok / last_error are status the scheduler owns — the
+        // snapshot above already carries them, so they are left untouched.
+    }
+    let view: BackupSyncView = settings.backup_sync.clone().into();
+    state
+        .config
+        .set(settings)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "backup.sync.update"),
+    );
+    Ok(Json(view))
+}
+
+/// Test the auto-backup share by writing and deleting a probe file.
+async fn test_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let cfg = state.config.get().backup_sync;
+    let result = tokio::task::spawn_blocking(move || backup_sync::test_connection(&cfg))
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    match result {
+        Ok(()) => {
+            record(
+                &state,
+                AuditEntry::success(&identity.username, "backup.sync.test"),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            record(
+                &state,
+                AuditEntry::failure(&identity.username, "backup.sync.test").detail(error.clone()),
+            );
+            Err((StatusCode::BAD_REQUEST, error))
+        }
+    }
+}
+
+/// Run an auto-backup on demand, recording the outcome as the scheduler would.
+async fn run_backup_sync(
+    State(state): State<AppState>,
+    identity: Identity,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let worker = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let outcome = backup_sync::run_once(&worker);
+        backup_sync::record_result(
+            &worker,
+            outcome.is_ok(),
+            outcome.clone().err().unwrap_or_default(),
+        );
+        outcome
+    })
+    .await
+    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    match result {
+        Ok(()) => {
+            record(
+                &state,
+                AuditEntry::success(&identity.username, "backup.sync.run"),
+            );
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => {
+            record(
+                &state,
+                AuditEntry::failure(&identity.username, "backup.sync.run").detail(error.clone()),
+            );
+            Err((StatusCode::BAD_REQUEST, error))
+        }
+    }
+}
+
 /// Assemble the full configuration backup from the live stores. Shared by the
 /// download endpoint and the pre-update safety backup.
 fn build_backup(state: &AppState) -> Backup {
@@ -3833,6 +4062,19 @@ fn ha_collections(state: &AppState) -> BTreeMap<String, ha::Collection> {
         "blockPage",
         "blockPage",
         serde_json::to_value(&settings.block_page),
+    );
+    // The cluster's primary (managing) node designation also travels as its OWN
+    // collection entry, with its own last-writer-wins timestamp, for the same
+    // reason as the block page: it stays inside the settings blob too (an older
+    // peer still reads it there), but a peer that understands the separate entry
+    // applies that one (see `ha_apply`). Changing any *other* setting on one node
+    // therefore can never clear the chosen primary on another through the shared
+    // blob's single timestamp — only an explicit primary change (or a node
+    // leaving) moves it, so once a primary is set the cluster remembers it.
+    put(
+        "cluster",
+        "cluster",
+        serde_json::to_value(&settings.cluster),
     );
     put("settings", "settings", serde_json::to_value(settings));
 
@@ -4077,6 +4319,19 @@ fn ha_apply(
             block_page.server_ipv4 = local.block_page.server_ipv4;
             block_page.server_ipv6 = local.block_page.server_ipv6;
             settings.block_page = block_page;
+        }
+        // The cluster primary designation travels as its own entry with an
+        // independent timestamp (like the block page), so an unrelated settings
+        // change on a peer cannot clear the chosen primary through the shared
+        // blob. Prefer that entry when present; an older peer that only carries the
+        // designation inside the settings blob falls through to the value
+        // deserialised above.
+        if let Some(cluster_value) = collections
+            .get("cluster")
+            .and_then(|entities| entities.get("cluster"))
+        {
+            settings.cluster =
+                serde_json::from_value(cluster_value.clone()).map_err(|error| error.to_string())?;
         }
         state
             .config
@@ -5488,9 +5743,15 @@ struct UpdateView {
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     updater_present: bool,
+    /// Whether the running sidecar can pull pre-release (`-rc`) versions. `false` for
+    /// an older sidecar, so the beta channel can warn before a doomed update instead
+    /// of leaving the request to fail silently.
+    updater_rc_capable: bool,
     default_backup_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     progress: Option<UpdateProgress>,
+    /// The release channel this node follows (`stable` or `beta`).
+    channel: UpdateChannel,
 }
 
 fn update_view(checker: &UpdateChecker) -> UpdateView {
@@ -5504,8 +5765,10 @@ fn update_view(checker: &UpdateChecker) -> UpdateView {
         checked_at_ms: check.checked_at_ms,
         error: check.error,
         updater_present: checker.updater_present(),
+        updater_rc_capable: checker.updater_supports_rc(),
         default_backup_path: checker.default_backup_path(),
         progress: checker.progress(),
+        channel: check.channel,
     }
 }
 
@@ -5605,6 +5868,21 @@ fn perform_update(
         ));
     }
 
+    // A pre-release (-rc) can only be pulled by a sidecar new enough to accept the
+    // suffix; an older one rejects the request as "invalid version" without a word
+    // back, which on a cluster leaves the rollout waiting on a node that never
+    // returns. Refuse up front with an actionable message instead of queuing a
+    // request this sidecar would silently drop. A follower raises the same error,
+    // so the primary's rollout aborts in seconds rather than after the node timeout.
+    if update::is_prerelease(&target) && !checker.updater_supports_rc() {
+        return Err((
+            StatusCode::CONFLICT,
+            "this node's updater sidecar is too old for pre-release (-rc) versions; \
+             refresh the justdns-updater image and recreate the sidecar, then retry"
+                .to_owned(),
+        ));
+    }
+
     // The safety net on disk comes before anything is triggered. It is encrypted
     // with the admin's password, so the on-disk backup is not readable in the
     // clear even though it keeps the webhook credential.
@@ -5639,6 +5917,37 @@ async fn start_update(
     record(
         &state,
         AuditEntry::success(&identity.username, "update.start").target(&target),
+    );
+    Ok(Json(update_view(&state.update)))
+}
+
+/// The body of `PUT /api/update/channel`: the channel to switch this node to.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetChannel {
+    channel: UpdateChannel,
+}
+
+/// Switch this node's release channel (stable/beta) and refresh against GitHub so
+/// the available-update view reflects the new channel at once. The channel is
+/// per node (stored on the node's own data volume) and never synced across the
+/// cluster, so a single node can run beta. Admin-only.
+async fn set_update_channel(
+    State(state): State<AppState>,
+    identity: Identity,
+    Json(body): Json<SetChannel>,
+) -> Result<Json<UpdateView>, (StatusCode, String)> {
+    state
+        .update
+        .set_channel(body.channel)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let checker = state.update.clone();
+    tokio::task::spawn_blocking(move || checker.refresh())
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    record(
+        &state,
+        AuditEntry::success(&identity.username, "update.channel").target(body.channel.as_str()),
     );
     Ok(Json(update_view(&state.update)))
 }
@@ -5678,6 +5987,9 @@ async fn get_settings(identity: Identity, State(config): State<ConfigStore>) -> 
 fn redact_settings_secrets(settings: &mut Settings) {
     settings.notifications.webhook_url = String::new();
     settings.metrics_token = String::new();
+    // The auto-backup share and backup passwords are write-only secrets too.
+    settings.backup_sync.password = String::new();
+    settings.backup_sync.backup_password = String::new();
 }
 
 /// Replace the settings. The new values take effect at once (IPv6 live); a
@@ -5689,6 +6001,11 @@ async fn put_settings(
     Json(mut settings): Json<Settings>,
 ) -> Result<Json<Settings>, (StatusCode, String)> {
     sanitize_phishing(&mut settings.phishing);
+    // The auto-backup config (share credentials, schedule and status) is managed
+    // only through its own `/api/backup/sync` endpoints; the general settings save
+    // does not carry it (the UI omits it), so keep the stored value instead of
+    // letting an omitted field reset it to defaults.
+    settings.backup_sync = state.config.get().backup_sync;
     state
         .config
         .set(settings)
@@ -6248,53 +6565,63 @@ async fn privacy_trackers(
     let to_ms = now_ms() as i64;
     let from_ms = to_ms - span_ms;
 
-    let rows =
-        tokio::task::spawn_blocking(move || store.tracker_scan(from_ms, to_ms, TRACKER_SCAN_LIMIT))
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Fold the scan into the per-device and per-company aggregation while it
+    // streams, so the whole (up to TRACKER_SCAN_LIMIT) result never sits in memory
+    // beside the aggregation it is being folded into.
+    let scan = tokio::task::spawn_blocking(move || {
+        let mut per_device: std::collections::HashMap<
+            String,
+            std::collections::HashMap<&'static str, TrackerAccum>,
+        > = std::collections::HashMap::new();
+        let mut network: std::collections::HashMap<&'static str, OrgAgg> =
+            std::collections::HashMap::new();
+        let mut total_contacts = 0u64;
+        let mut total_blocked = 0u64;
+        let mut total_allowed = 0u64;
+        store.tracker_scan_each(from_ms, to_ms, TRACKER_SCAN_LIMIT, |row| {
+            let Some(tracker) = justdns_filter::classify_tracker(&row.name) else {
+                return;
+            };
+            total_contacts += row.count;
+            if row.blocked {
+                total_blocked += row.count;
+            } else {
+                total_allowed += row.count;
+            }
+            per_device
+                .entry(row.client.clone())
+                .or_default()
+                .entry(tracker.org)
+                .or_default()
+                .add(tracker.category, row.count, row.blocked);
+            let org = network.entry(tracker.org).or_default();
+            org.totals.add(tracker.category, row.count, row.blocked);
+            org.devices.entry(row.client.clone()).or_default().add(
+                tracker.category,
+                row.count,
+                row.blocked,
+            );
+            org.domains.entry(row.name.clone()).or_default().add(
+                tracker.category,
+                row.count,
+                row.blocked,
+            );
+        })?;
+        Ok::<_, justdns_store::StoreError>((
+            per_device,
+            network,
+            total_contacts,
+            total_blocked,
+            total_allowed,
+        ))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let (per_device, network, total_contacts, total_blocked, total_allowed) = scan;
 
     let resolver = ClientResolver::new(clients.view());
-
-    let mut per_device: std::collections::HashMap<
-        String,
-        std::collections::HashMap<&'static str, TrackerAccum>,
-    > = std::collections::HashMap::new();
-    let mut network: std::collections::HashMap<&'static str, OrgAgg> =
-        std::collections::HashMap::new();
-    let mut total_contacts = 0u64;
-    let mut total_blocked = 0u64;
-    let mut total_allowed = 0u64;
-
-    for row in &rows {
-        let Some(tracker) = justdns_filter::classify_tracker(&row.name) else {
-            continue;
-        };
-        total_contacts += row.count;
-        if row.blocked {
-            total_blocked += row.count;
-        } else {
-            total_allowed += row.count;
-        }
-        per_device
-            .entry(row.client.clone())
-            .or_default()
-            .entry(tracker.org)
-            .or_default()
-            .add(tracker.category, row.count, row.blocked);
-        let org = network.entry(tracker.org).or_default();
-        org.totals.add(tracker.category, row.count, row.blocked);
-        org.devices.entry(row.client.clone()).or_default().add(
-            tracker.category,
-            row.count,
-            row.blocked,
-        );
-        org.domains.entry(row.name.clone()).or_default().add(
-            tracker.category,
-            row.count,
-            row.blocked,
-        );
-    }
 
     let mut devices: Vec<DeviceTrackers> = per_device
         .into_iter()
@@ -6333,6 +6660,206 @@ async fn privacy_trackers(
         companies: network_companies(network, &resolver),
         devices,
     }))
+}
+
+/// The busiest companies the surveillance graph keeps, so a large network still
+/// renders as a legible profile rather than an unreadable hairball.
+const GRAPH_TOP_COMPANIES: usize = 80;
+
+/// How often the background worker recomputes the surveillance graph while the
+/// module is on. The profile shifts slowly, so a few minutes between snapshots
+/// is plenty and keeps the scan off the hot path.
+const GRAPH_REFRESH: Duration = Duration::from_secs(5 * 60);
+
+/// Fold one scan row into the per-company aggregation behind the surveillance
+/// graph: classify the queried name, and when it belongs to a tracker company,
+/// add its contacts to that company's totals and to the reaching device. Names
+/// outside the catalogue are ignored. Shared by the background worker (folding a
+/// streamed scan row by row) and [`build_surveillance_graph`] (folding a row
+/// slice in tests), so both attribute a scan identically.
+fn fold_graph_row(
+    network: &mut HashMap<&'static str, OrgAgg>,
+    row: &justdns_store::TrackerScanRow,
+) {
+    let Some(tracker) = justdns_filter::classify_tracker(&row.name) else {
+        return;
+    };
+    let org = network.entry(tracker.org).or_default();
+    org.totals.add(tracker.category, row.count, row.blocked);
+    org.devices.entry(row.client.clone()).or_default().add(
+        tracker.category,
+        row.count,
+        row.blocked,
+    );
+}
+
+/// Shape the per-company/per-device aggregation into the bipartite surveillance
+/// graph: one node per device, one per tracker company, and a weighted edge
+/// wherever a device reached a company. The company set is capped to the busiest
+/// few so the view stays readable; devices follow from the kept edges. Pure — it
+/// reads nothing but the aggregation handed in.
+fn graph_from_network(
+    network: HashMap<&'static str, OrgAgg>,
+    resolver: &ClientResolver,
+    window: String,
+) -> privacy_module::SurveillanceGraph {
+    let mut orgs: Vec<(&'static str, OrgAgg)> = network.into_iter().collect();
+    orgs.sort_by(|a, b| {
+        b.1.totals
+            .contacts
+            .cmp(&a.1.totals.contacts)
+            .then_with(|| a.0.cmp(b.0))
+    });
+    orgs.truncate(GRAPH_TOP_COMPANIES);
+
+    let mut nodes: Vec<privacy_module::GraphNode> = Vec::new();
+    let mut links: Vec<privacy_module::GraphLink> = Vec::new();
+    let mut device_totals: HashMap<String, u64> = HashMap::new();
+
+    for (org, agg) in &orgs {
+        nodes.push(privacy_module::GraphNode {
+            id: format!("org:{org}"),
+            kind: "company",
+            label: org.to_string(),
+            category: agg.totals.category.to_string(),
+            contacts: agg.totals.contacts,
+        });
+        for (client, a) in &agg.devices {
+            *device_totals.entry(client.clone()).or_default() += a.contacts;
+            links.push(privacy_module::GraphLink {
+                source: format!("dev:{client}"),
+                target: format!("org:{org}"),
+                contacts: a.contacts,
+                blocked: a.blocked,
+            });
+        }
+    }
+
+    let company_count = orgs.len();
+    let device_count = device_totals.len();
+    for (client, contacts) in device_totals {
+        let label = client
+            .parse()
+            .ok()
+            .and_then(|ip| resolver.name_for(ip).map(str::to_owned))
+            .unwrap_or_else(|| client.clone());
+        nodes.push(privacy_module::GraphNode {
+            id: format!("dev:{client}"),
+            kind: "device",
+            label,
+            category: String::new(),
+            contacts,
+        });
+    }
+
+    privacy_module::SurveillanceGraph {
+        generated_ms: now_ms(),
+        window,
+        device_count,
+        company_count,
+        nodes,
+        links,
+    }
+}
+
+/// Fold a slice of scan rows into the surveillance graph in one shot. The
+/// background worker instead streams rows through [`fold_graph_row`] so it never
+/// holds the whole scan in memory; this row-slice form stays for unit tests.
+#[cfg(test)]
+fn build_surveillance_graph(
+    rows: &[justdns_store::TrackerScanRow],
+    resolver: &ClientResolver,
+    window: String,
+) -> privacy_module::SurveillanceGraph {
+    let mut network: HashMap<&'static str, OrgAgg> = HashMap::new();
+    for row in rows {
+        fold_graph_row(&mut network, row);
+    }
+    graph_from_network(network, resolver, window)
+}
+
+/// Recompute the surveillance graph in the background while the module is on,
+/// caching each snapshot so the API serves it instantly. Parks on a cheap sleep
+/// while the module is off (and drops any stale snapshot), so a node that never
+/// opts in does no scanning.
+fn spawn_graph_worker(
+    runtime: privacy_module::PrivacyRuntime,
+    store: Store,
+    clients: ClientStore,
+    config: ConfigStore,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(25)).await;
+        loop {
+            if !config.get().modules.privacy.enabled {
+                runtime.clear_graph();
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+            let to_ms = now_ms() as i64;
+            let from_ms = to_ms - 7 * MS_PER_DAY;
+            let scan_store = store.clone();
+            // Fold the scan into the per-company aggregation on the blocking thread,
+            // streaming each row in so the whole (up to TRACKER_SCAN_LIMIT) result
+            // never sits in memory beside the aggregation — the peak that OOM'd the
+            // node when the module was on.
+            let folded = tokio::task::spawn_blocking(move || {
+                let mut network: HashMap<&'static str, OrgAgg> = HashMap::new();
+                scan_store
+                    .tracker_scan_each(from_ms, to_ms, TRACKER_SCAN_LIMIT, |row| {
+                        fold_graph_row(&mut network, &row);
+                    })
+                    .map(|()| network)
+            })
+            .await;
+            if let Ok(Ok(network)) = folded {
+                let resolver = ClientResolver::new(clients.view());
+                let graph = graph_from_network(network, &resolver, "week".to_string());
+                runtime.store_graph(graph);
+            }
+            tokio::time::sleep(GRAPH_REFRESH).await;
+        }
+    });
+}
+
+/// The cached surveillance graph. Returns an empty graph (never an error) until
+/// the first background snapshot lands, so the UI can render a clean empty state
+/// right after the module is switched on. Readable by any signed-in user.
+async fn privacy_graph(State(state): State<AppState>) -> Json<privacy_module::SurveillanceGraph> {
+    match state.privacy.graph() {
+        Some(graph) => Json((*graph).clone()),
+        None => Json(privacy_module::SurveillanceGraph {
+            generated_ms: 0,
+            window: "week".to_string(),
+            device_count: 0,
+            company_count: 0,
+            nodes: Vec::new(),
+            links: Vec::new(),
+        }),
+    }
+}
+
+/// The chaff status and its own recent log: the live on/off switch and intensity
+/// (from the synced settings) plus the node-local decoy total and the newest
+/// decoy lookups. These never appear in the DNS query log — this is their only
+/// record. Readable by any signed-in user.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChaffStatus {
+    enabled: bool,
+    intensity: u32,
+    total: u64,
+    entries: Vec<privacy_module::ChaffEntry>,
+}
+
+async fn privacy_chaff(State(state): State<AppState>) -> Json<ChaffStatus> {
+    let privacy = state.config.get().modules.privacy;
+    Json(ChaffStatus {
+        enabled: privacy.enabled,
+        intensity: privacy.chaff_intensity,
+        total: state.privacy.chaff_total(),
+        entries: state.privacy.recent_chaff(200),
+    })
 }
 
 /// Block request from the privacy dashboard: a whole company by `org` (every
@@ -7648,6 +8175,74 @@ mod tests {
         assert_eq!(out.collateral[0].count, 3);
     }
 
+    #[test]
+    fn surveillance_graph_aggregates_and_caps_companies() {
+        use justdns_store::TrackerScanRow;
+
+        let resolver = ClientResolver::new(test_clients().view());
+        let rows = vec![
+            // Two devices reach Google (doubleclick), one of them reaches Amazon.
+            TrackerScanRow {
+                client: "10.0.0.1".into(),
+                name: "doubleclick.net.".into(),
+                blocked: false,
+                count: 10,
+            },
+            // A sub-domain still attributes to Google; this device's lookups were
+            // blocked.
+            TrackerScanRow {
+                client: "10.0.0.2".into(),
+                name: "ads.doubleclick.net.".into(),
+                blocked: true,
+                count: 4,
+            },
+            TrackerScanRow {
+                client: "10.0.0.1".into(),
+                name: "amazon-adsystem.com.".into(),
+                blocked: false,
+                count: 3,
+            },
+            // A name outside the tracker catalogue is ignored entirely.
+            TrackerScanRow {
+                client: "10.0.0.3".into(),
+                name: "example.com.".into(),
+                blocked: false,
+                count: 99,
+            },
+        ];
+
+        let graph = build_surveillance_graph(&rows, &resolver, "week".to_string());
+
+        // Google and Amazon are the two companies; only the two devices that
+        // reached them appear — the uncatalogued name brings in no device.
+        assert_eq!(graph.company_count, 2);
+        assert_eq!(graph.device_count, 2);
+        assert!(
+            graph.nodes.iter().all(|n| n.id != "dev:10.0.0.3"),
+            "a device that only hit an uncatalogued name never appears"
+        );
+
+        let google = graph
+            .nodes
+            .iter()
+            .find(|n| n.id == "org:Google")
+            .expect("a Google company node");
+        assert_eq!(google.kind, "company");
+        assert_eq!(google.category, "advertising");
+        assert_eq!(google.contacts, 14, "both devices' Google contacts sum");
+
+        let google_blocked: u64 = graph
+            .links
+            .iter()
+            .filter(|l| l.target == "org:Google")
+            .map(|l| l.blocked)
+            .sum();
+        assert_eq!(
+            google_blocked, 4,
+            "only device .2's Google lookups were blocked"
+        );
+    }
+
     fn test_state(store: Store) -> AppState {
         let blocker = test_blocker();
         AppState {
@@ -7679,6 +8274,7 @@ mod tests {
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
             geo: None,
             demo: false,
+            privacy: privacy_module::PrivacyRuntime::new(),
         }
     }
 
@@ -8902,6 +9498,63 @@ mod tests {
 
         ha_apply(&node, &collections).unwrap();
         assert!(node.config.get().block_page.enabled);
+    }
+
+    #[tokio::test]
+    async fn ha_primary_survives_unrelated_settings_change_on_peer() {
+        // The chosen primary travels as its own "cluster" entry with an independent
+        // timestamp. A peer that changed some *other* setting (so its settings blob
+        // is newer and happens to carry an empty primary) must not clear this node's
+        // primary designation: `ha_apply` applies the separate "cluster" entry.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+        let mut local = node.config.get();
+        local.cluster.primary_node_id = "primary-node-xyz".into();
+        node.config.set(local).unwrap();
+
+        // An incoming snapshot whose settings blob disagrees (primary cleared) but
+        // whose own "cluster" entry keeps it — the shape a peer produces after an
+        // unrelated settings save.
+        let mut collections = ha_collections(&node);
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] = serde_json::Value::String(String::new())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-node-xyz",
+            "the separate cluster entry must win over the settings blob"
+        );
+    }
+
+    #[tokio::test]
+    async fn ha_primary_falls_back_to_settings_blob_for_old_peer() {
+        // A peer too old to emit a separate "cluster" entry carries the primary only
+        // inside its settings blob. `ha_apply` must still adopt it from there.
+        let (store, _w) = Store::in_memory(100).unwrap();
+        let node = test_state(store);
+
+        let mut collections = ha_collections(&node);
+        collections.remove("cluster");
+        collections
+            .get_mut("settings")
+            .and_then(|m| m.get_mut("settings"))
+            .map(|value| {
+                value["cluster"]["primaryNodeId"] =
+                    serde_json::Value::String("primary-from-blob".into())
+            })
+            .expect("a settings entry");
+
+        ha_apply(&node, &collections).unwrap();
+        assert_eq!(
+            node.config.get().cluster.primary_node_id,
+            "primary-from-blob"
+        );
     }
 
     #[tokio::test]

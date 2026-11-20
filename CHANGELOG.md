@@ -3,6 +3,78 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.45.0] - 2026-11-20
+
+- New: **Privacy module.** An opt-in module that stays dormant until you switch it on, so a node that
+  leaves it off needs no extra resources. It is off by default; enable it under Settings, Modules. It
+  adds two things to the Privacy page. The **surveillance graph** shows who on your network talks to
+  which tracker company, and how often, as a **heatmap** (device × company) and a **ranking**, and
+  lets you cut a single device off from a company with one tap; the view stays legible even with many
+  devices and companies. **DNS chaff** sends a steady trickle of plausible decoy lookups to the
+  upstreams so your real query stream is harder to profile from the outside; a single slider sets the
+  rate. The decoys never appear in the DNS query log, which keeps showing only what your devices
+  really asked for; they have their own separate log under the module.
+- The module's background profile now streams the history into the aggregation row by row instead of
+  loading the whole scan into memory at once, so the module no longer OOMs a small node.
+
+## [0.44.1] - 2026-11-20
+
+- Fixed: **A beta update no longer stalls silently when a node runs an outdated updater sidecar.** The
+  updater sidecar is a separate image from the app and is not refreshed by a one-click update, so a
+  node could keep an older sidecar that does not understand pre-release (-rc) versions and rejects
+  them as "invalid version" without reporting back. On a cluster that left the rolling update waiting
+  on a follower that would never return. The sidecar now advertises what it supports in its heartbeat;
+  the app refuses a beta update up front with a clear message to refresh the sidecar, and the beta
+  channel shows a warning when the sidecar is too old. A follower raises the same error, so the
+  primary's cluster update aborts in seconds instead of after the node timeout.
+
+## [0.44.0] - 2026-11-20
+
+- New: **Release channels (stable and beta).** Each node can follow the stable channel (vetted
+  releases, the default) or the beta channel, which also pulls pre-release builds for testing. The
+  channel is per node and is never synced across the cluster, so a single node can trial a build
+  before it reaches everyone. Set it under System, Update.
+
+## [0.43.2] - 2026-11-20
+
+- Fixed: **Saving the auto-backup connection no longer OOM-kills the node.** Every settings save
+  rebuilt the full blocking and phishing sets from the enabled feeds (millions of domains), even when
+  the change had nothing to do with DNS, such as saving the backup target or recording a backup run.
+  On a memory-capped node that rebuild could spike over the limit and restart the resolver. A save
+  that touches only the backup target, the alert webhook or the metrics token now skips the rebuild
+  entirely.
+
+## [0.43.1] - 2026-11-19
+
+- Fixed: **A scheduled backup no longer OOM-kills the node.** On a memory-capped node the backup
+  built, sealed and uploaded the whole configuration while holding several full copies in memory at
+  once, which could push a tight node over its limit and restart it. The backup now frees each copy
+  as soon as it is done and streams the sealed file from disk to the share (SMB and NFS), so it stays
+  within a small, steady footprint.
+- Fixed: **An interrupted backup can no longer loop the node.** If a run was cut short before it
+  finished, the next start treated the backup as still due and tried again at once. The run time is
+  now recorded before the upload, so an interrupted backup waits for the next interval instead of
+  retrying in a loop.
+- New: **"Save connection" button.** Creating a backup connection now has an explicit save button,
+  instead of only saving each field as you leave it.
+
+## [0.43.0] - 2026-11-19
+
+- New: **Scheduled backup to a network share.** A new card under "Sicherung" stores your setup as an
+  encrypted file on a Samba or NFS share on a schedule, with no mount needed. Status and metrics sit
+  up top (last backup, interval, retention), with "Back up now" and "Test connection" below; target
+  and access tuck behind an expander. The backup uses the same format as the manual download and is
+  encrypted with your backup password; older copies are pruned to the configured count. In a cluster
+  the schedule runs on the primary node only. Both SMB (Samba) and NFS are supported; for NFS the
+  "Share" is the export path and access is granted by the node's IP.
+- Fixed: **A primary node stays set once chosen.** An unrelated settings change on another node could
+  clear the cluster's primary assignment, so the high-availability page would offer "make primary"
+  again. The assignment is now synced as its own entry and survives other nodes' settings changes.
+- Fixed: **A daily report no longer crashes the node.** On memory-capped containers a large report
+  could OOM-kill the node, because DuckDB sized itself to the whole host's memory rather than the
+  container limit. DuckDB now gets a fitting memory limit and a place to spill, so large reports run
+  through.
+
 ## [0.42.2] - 2026-11-18
 
 - Fixed: **The log and devices pages open faster.** On instances with large block lists, opening

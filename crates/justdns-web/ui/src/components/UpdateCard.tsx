@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError, api, type HaStatus, type UpdateInfo } from "../lib/api";
+import {
+  ApiError,
+  api,
+  type HaStatus,
+  type UpdateChannel,
+  type UpdateInfo,
+} from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useClusterUpdate } from "../lib/useClusterUpdate";
 import { downloadRestore } from "../lib/downloadRestore";
@@ -86,6 +92,23 @@ export function UpdateCard() {
       });
     return () => controller.abort();
   }, []);
+
+  // Switching the release channel is per node (never synced) and refreshes the
+  // available-update view against the newly selected channel.
+  const [channelBusy, setChannelBusy] = useState(false);
+  async function pickChannel(channel: UpdateChannel) {
+    if (channelBusy || info?.channel === channel) return;
+    setChannelBusy(true);
+    try {
+      const next = await api.setUpdateChannel(channel);
+      setInfo(next);
+      setBackupPath(next.defaultBackupPath);
+    } catch {
+      /* Leave the previous state; the error field carries the reason. */
+    } finally {
+      setChannelBusy(false);
+    }
+  }
 
   async function recheck() {
     setChecking(true);
@@ -272,6 +295,55 @@ export function UpdateCard() {
         >
           {checking ? t("update.checking") : t("update.recheck")}
         </button>
+      </div>
+
+      {/* Release channel: stable (default) or beta, chosen per node. */}
+      <div className={styles.channel}>
+        <span className={styles.channelLabel}>{t("update.channelLabel")}</span>
+        <div
+          className={styles.channelCards}
+          role="radiogroup"
+          aria-label={t("update.channelLabel")}
+        >
+          {(["stable", "beta"] as const).map((ch) => {
+            const active = info.channel === ch;
+            return (
+              <button
+                key={ch}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                className={`${styles.channelCard} ${active ? styles.channelActive : ""}`}
+                onClick={() => pickChannel(ch)}
+                disabled={channelBusy || flow.kind === "running"}
+              >
+                <span className={styles.channelName}>
+                  {t(ch === "stable" ? "update.channelStable" : "update.channelBeta")}
+                  {active ? (
+                    <span className={styles.channelBadge}>{t("update.channelActive")}</span>
+                  ) : null}
+                </span>
+                <span className={styles.channelDesc}>
+                  {t(
+                    ch === "stable"
+                      ? "update.channelStableDesc"
+                      : "update.channelBetaDesc",
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {info.channel === "beta" ? (
+          <p className={styles.channelWarn} role="note">
+            {t("update.channelBetaWarn")}
+          </p>
+        ) : null}
+        {info.channel === "beta" && info.updaterPresent && !info.updaterRcCapable ? (
+          <p className={styles.channelBlock} role="alert">
+            {t("update.updaterTooOld")}
+          </p>
+        ) : null}
       </div>
 
       {/* Running / done / failed take over the body; otherwise the status. */}

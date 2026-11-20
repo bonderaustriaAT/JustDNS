@@ -12,6 +12,7 @@ import {
 import {
   api,
   DEFAULT_BLOCK_PAGE,
+  DEFAULT_MODULES,
   DEFAULT_NOTIFICATIONS,
   DEFAULT_REPORT_SETTINGS,
   type BlockPageSettings,
@@ -67,6 +68,7 @@ const SERVER_DEFAULTS: ServerSettings = {
   blockPage: DEFAULT_BLOCK_PAGE,
   notifications: DEFAULT_NOTIFICATIONS,
   metricsToken: "",
+  modules: DEFAULT_MODULES,
 };
 
 const EXPERT_KEY = "justdns.expertMode";
@@ -93,6 +95,7 @@ const SERVER_KEYS: (keyof ServerSettings)[] = [
   "blockPage",
   "notifications",
   "metricsToken",
+  "modules",
 ];
 
 function toServer(settings: Settings): ServerSettings {

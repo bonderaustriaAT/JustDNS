@@ -135,6 +135,9 @@ export interface ServerSettings {
   /// Phishing protection (homoglyph/Punycode brand imitation + newly registered
   /// domains). Off by default. Optional on the wire (an older server omits it).
   phishing?: Phishing;
+  /// The opt-in module set (Privacy module). Off by default. Optional on the
+  /// wire (an older server omits it).
+  modules?: ModulesSettings;
 }
 
 /** Warn only (mark the query) or block it outright, chosen per category. Matches
@@ -208,6 +211,78 @@ export interface PhishingFlag {
   kind: PhishingKind;
   blocked: boolean;
   brand?: string;
+}
+
+/** The Privacy module's settings: a surveillance graph of cross-device tracking
+ *  plus a DNS chaff generator. Off by default; the module starts no background
+ *  work and needs no extra resources until it is switched on. Matches the Rust
+ *  `PrivacyModule`. */
+export interface PrivacyModuleSettings {
+  enabled: boolean;
+  /** Decoy lookups per minute while chaff is on (0 pauses the trickle). */
+  chaffIntensity: number;
+}
+
+/** The opt-in module set. Matches the Rust `Modules`. */
+export interface ModulesSettings {
+  privacy: PrivacyModuleSettings;
+}
+
+/** Default module set, mirroring the Rust `Modules::default`: Privacy off, a
+ *  gentle base chaff rate ready for when it is enabled. Backfills an older
+ *  server that does not send the field. */
+export const DEFAULT_MODULES: ModulesSettings = {
+  privacy: { enabled: false, chaffIntensity: 15 },
+};
+
+/** One node in the surveillance graph: a device on the network, or a tracker
+ *  company it has been seen reaching. Matches the Rust `GraphNode`. */
+export interface GraphNode {
+  id: string;
+  kind: "device" | "company";
+  label: string;
+  /** Tracker category for a company node (advertising, analytics, …); empty for
+   *  a device. */
+  category: string;
+  contacts: number;
+}
+
+/** A weighted edge: a device reached a company this many times in the window.
+ *  Matches the Rust `GraphLink`. */
+export interface GraphLink {
+  source: string;
+  target: string;
+  contacts: number;
+  blocked: number;
+}
+
+/** A computed snapshot of who-talks-to-whom across the network, rendered as a
+ *  force-directed graph. `generatedMs` is 0 until the first background snapshot
+ *  lands. Matches the Rust `SurveillanceGraph`. */
+export interface SurveillanceGraph {
+  generatedMs: number;
+  window: TrackerWindow;
+  deviceCount: number;
+  companyCount: number;
+  nodes: GraphNode[];
+  links: GraphLink[];
+}
+
+/** One decoy lookup the chaff generator sent. These never appear in the DNS
+ *  query log — this is their only record. Matches the Rust `ChaffEntry`. */
+export interface ChaffEntry {
+  tsMs: number;
+  name: string;
+  recordType: string;
+  answered: boolean;
+}
+
+/** The chaff status and its own recent log. Matches the Rust `ChaffStatus`. */
+export interface ChaffStatus {
+  enabled: boolean;
+  intensity: number;
+  total: number;
+  entries: ChaffEntry[];
 }
 
 /** The globally watched countries and networks: answers that resolve into one are
@@ -593,6 +668,48 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   spikeBlockedThreshold: 100,
   spikeWindowMins: 10,
 };
+
+/// Which network file protocol the scheduled off-box backup speaks. Matches the
+/// Rust `BackupProtocol` (lowercase on the wire).
+export type BackupProtocol = "smb" | "nfs";
+
+/// The auto-backup configuration and last-run status as the server reports it.
+/// The two secrets never leave the box: `hasPassword` / `hasBackupPassword` say
+/// whether one is stored. Matches the Rust `BackupSyncView`.
+export interface BackupSyncInfo {
+  enabled: boolean;
+  protocol: BackupProtocol;
+  host: string;
+  share: string;
+  path: string;
+  username: string;
+  domain: string;
+  hasPassword: boolean;
+  hasBackupPassword: boolean;
+  intervalHours: number;
+  keep: number;
+  /** When the last scheduled or manual run happened (Unix ms), 0 if never. */
+  lastRunMs: number;
+  lastOk: boolean;
+  lastError: string;
+}
+
+/// The writable auto-backup settings. An empty (or omitted) `password` /
+/// `backupPassword` keeps the stored secret unchanged. Matches the Rust
+/// `BackupSyncInput`.
+export interface BackupSyncInput {
+  enabled: boolean;
+  protocol: BackupProtocol;
+  host: string;
+  share: string;
+  path: string;
+  username: string;
+  password?: string;
+  domain: string;
+  backupPassword?: string;
+  intervalHours: number;
+  keep: number;
+}
 
 export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked";
 
@@ -1196,6 +1313,10 @@ export interface UpdateProgress {
  *  present (one-click vs. guided fallback), a pre-filled persistent backup path,
  *  and any in-flight progress. Matches the Rust `UpdateView`; optional fields are
  *  omitted when unset, so they are typed optional. */
+/** The release channel a node follows. Stable sees only final releases; beta
+ *  also sees pre-release builds. Chosen per node, never synced across the cluster. */
+export type UpdateChannel = "stable" | "beta";
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion?: string;
@@ -1205,8 +1326,12 @@ export interface UpdateInfo {
   checkedAtMs?: number;
   error?: string;
   updaterPresent: boolean;
+  /** Whether the running sidecar can pull pre-release (`-rc`) builds. False for an
+   *  older sidecar, so the beta channel warns before a doomed update. */
+  updaterRcCapable: boolean;
   defaultBackupPath: string;
   progress?: UpdateProgress;
+  channel: UpdateChannel;
 }
 
 /** The lighter `/api/update/status` poll: the running version (so the UI sees
@@ -1419,6 +1544,13 @@ export const api = {
    *  GeoIP database is loaded, so the caller can hide the section. */
   privacyNetworks: (window: TrackerWindow = "day", signal?: AbortSignal) =>
     getJson<NetworkReport>(`/api/privacy/networks?window=${window}`, signal),
+  /** The surveillance graph snapshot (Privacy module). Computed in the background
+   *  while the module is on; an empty graph until the first snapshot lands. */
+  privacyGraph: (signal?: AbortSignal) =>
+    getJson<SurveillanceGraph>("/api/privacy/graph", signal),
+  /** The chaff status and its own recent decoy log (Privacy module). */
+  privacyChaff: (signal?: AbortSignal) =>
+    getJson<ChaffStatus>("/api/privacy/chaff", signal),
   /** The live query feed (the hot ring), newest first. `country` (ISO 3166-1
    *  alpha-2) and `asn` narrow it to answers resolving into that country or
    *  network; both need a GeoIP database loaded. */
@@ -1656,6 +1788,15 @@ export const api = {
    *  server refuses a file that is not a JustDNS backup or a wrong password. */
   restoreBackup: (file: string, password?: string) =>
     sendJson<void>("POST", "/api/backup/restore", { file, password }),
+  /** The scheduled off-box backup configuration and last-run status (admin). */
+  backupSync: (signal?: AbortSignal) => getJson<BackupSyncInfo>("/api/backup/sync", signal),
+  /** Save the auto-backup configuration; a blank secret keeps the stored one. */
+  saveBackupSync: (input: BackupSyncInput) =>
+    sendJson<BackupSyncInfo>("PUT", "/api/backup/sync", input),
+  /** Test the share by writing and deleting a probe file. */
+  testBackupSync: () => sendJson<void>("POST", "/api/backup/sync/test"),
+  /** Run an auto-backup right now. */
+  runBackupSync: () => sendJson<void>("POST", "/api/backup/sync/run"),
   /** The encrypted client-DNS status (DoT/DoH flags, hostname, selected certs). */
   tls: (signal?: AbortSignal) => getJson<TlsStatus>("/api/tls", signal),
   /** Set the DoT/DoH flags, hostname and selected certificate ids. Applied live. */
@@ -1777,6 +1918,9 @@ export const api = {
     sendJson<UpdateInfo>("POST", "/api/update", { backupPath, password }),
   /** The light progress poll, used while an update runs and the UI reconnects. */
   updateStatus: (signal?: AbortSignal) => getJson<UpdateStatus>("/api/update/status", signal),
+  /** Switch this node's release channel (stable/beta) and refresh. Per node. */
+  setUpdateChannel: (channel: UpdateChannel) =>
+    sendJson<UpdateInfo>("PUT", "/api/update/channel", { channel }),
 
   // --- High availability (admin only) ---
   /** The current HA status (node id, enablement, pairing, last sync). */

@@ -63,6 +63,84 @@ const MIGRATIONS: &str = "\
 const SELECT_COLUMNS: &str = "at_ms, client, name, record_type, response_code, source, \
     duration_ms, answers, addresses, resolver, dnssec, phishing";
 
+/// Cap DuckDB's memory and thread use, and point its temp spill at `temp_dir`, so
+/// a heavy aggregate (a report over a day or week) cannot take the process down.
+///
+/// DuckDB otherwise sizes its memory budget from the **host's** total RAM and
+/// ignores a container's cgroup limit, so in a memory-capped node a report query
+/// grows past the cgroup limit and is OOM-killed before DuckDB ever spills — the
+/// node drops for the few seconds Docker needs to restart it. With an explicit
+/// `memory_limit` and a `temp_directory` on the data volume, an aggregate that
+/// exceeds the budget spills to disk (or fails cleanly) instead of being killed.
+///
+/// All settings are best-effort: a PRAGMA an older DuckDB rejects is skipped, so
+/// configuring the limits never stops the log from opening.
+fn apply_runtime_limits(conn: &Connection, temp_dir: Option<&Path>) {
+    if let Some(dir) = temp_dir {
+        let escaped = dir.to_string_lossy().replace('\'', "''");
+        let _ = conn.execute_batch(&format!("PRAGMA temp_directory='{escaped}';"));
+    }
+    let limit_mb = duckdb_memory_limit_mb();
+    let _ = conn.execute_batch(&format!("PRAGMA memory_limit='{limit_mb}MB';"));
+    let threads = duckdb_threads();
+    let _ = conn.execute_batch(&format!("PRAGMA threads={threads};"));
+}
+
+/// The memory budget to hand DuckDB, in MB: `JUSTDNS_DUCKDB_MEMORY_MB` when set,
+/// else about 60% of the container's cgroup memory limit, clamped to a sane
+/// range, else a conservative fixed default when no limit can be read.
+fn duckdb_memory_limit_mb() -> u64 {
+    const MIN_MB: u64 = 128;
+    const MAX_MB: u64 = 4096;
+    const DEFAULT_MB: u64 = 512;
+
+    if let Ok(raw) = std::env::var("JUSTDNS_DUCKDB_MEMORY_MB") {
+        if let Ok(mb) = raw.trim().parse::<u64>() {
+            return mb.max(MIN_MB);
+        }
+    }
+    match cgroup_memory_limit_bytes() {
+        Some(bytes) => ((bytes / (1024 * 1024)) * 6 / 10).clamp(MIN_MB, MAX_MB),
+        None => DEFAULT_MB,
+    }
+}
+
+/// How many threads DuckDB may use: the available parallelism, capped so a report
+/// cannot fan out into a large per-thread memory spike. Falls back to a small
+/// default when the parallelism cannot be read.
+fn duckdb_threads() -> u64 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u64)
+        .unwrap_or(2)
+        .clamp(1, 4)
+}
+
+/// The container's memory limit in bytes, from the cgroup (v2 then v1), or `None`
+/// when there is no limit or it cannot be read (e.g. on a non-Linux host). A v1
+/// "unlimited" is a near-`u64::MAX` sentinel, so an implausibly large value is
+/// treated as no limit.
+fn cgroup_memory_limit_bytes() -> Option<u64> {
+    if let Ok(raw) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+        let trimmed = raw.trim();
+        if trimmed == "max" {
+            return None;
+        }
+        if let Ok(value) = trimmed.parse::<u64>() {
+            if value > 0 {
+                return Some(value);
+            }
+        }
+    }
+    if let Ok(raw) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+        if let Ok(value) = raw.trim().parse::<u64>() {
+            if value > 0 && value < (1u64 << 62) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
 /// Errors from the DuckDB query log.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -79,12 +157,26 @@ pub struct DuckStore {
 impl DuckStore {
     /// Open (creating if needed) the query log at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
-        Self::from_connection(Connection::open(path)?)
+        let path = path.as_ref();
+        let conn = Connection::open(path)?;
+        // Spill heavy aggregates to disk next to the database. Point DuckDB's temp
+        // directory at the data volume so a report that exceeds the memory budget
+        // spills instead of being killed.
+        let temp_dir = path.parent().map(|parent| parent.join("duck-tmp"));
+        if let Some(dir) = temp_dir.as_deref() {
+            // Best-effort: if the directory cannot be created DuckDB falls back to
+            // its own default, so a failure here must not stop the log from opening.
+            let _ = std::fs::create_dir_all(dir);
+        }
+        apply_runtime_limits(&conn, temp_dir.as_deref());
+        Self::from_connection(conn)
     }
 
     /// Open an in-memory query log, used for tests.
     pub fn open_in_memory() -> Result<Self, StoreError> {
-        Self::from_connection(Connection::open_in_memory()?)
+        let conn = Connection::open_in_memory()?;
+        apply_runtime_limits(&conn, None);
+        Self::from_connection(conn)
     }
 
     fn from_connection(conn: Connection) -> Result<Self, StoreError> {
@@ -721,6 +813,26 @@ impl DuckReader {
         end_ms: i64,
         limit: usize,
     ) -> Result<Vec<TrackerScanRow>, StoreError> {
+        let mut rows = Vec::new();
+        self.tracker_scan_each(start_ms, end_ms, limit, |row| rows.push(row))?;
+        Ok(rows)
+    }
+
+    /// Stream the same per-client, per-name scan as [`Self::tracker_scan`], handing
+    /// each row to `visit` as it is read instead of collecting them all first. The
+    /// privacy views fold the rows down to a few hundred companies, so visiting one
+    /// at a time keeps a busy node from holding the whole (up to `limit`) result set
+    /// in Rust memory alongside the aggregation — the peak that drove the module OOM.
+    pub fn tracker_scan_each<F>(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        limit: usize,
+        mut visit: F,
+    ) -> Result<(), StoreError>
+    where
+        F: FnMut(TrackerScanRow),
+    {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let mut stmt = self.conn.prepare(
             "SELECT client, name, source = 'blocked' AS blocked, COUNT(*) c \
@@ -729,17 +841,18 @@ impl DuckReader {
              GROUP BY client, name, blocked \
              ORDER BY c DESC, name LIMIT ?",
         )?;
-        let rows = stmt
-            .query_map(params![start_ms, end_ms, limit], |row| {
-                Ok(TrackerScanRow {
-                    client: row.get::<_, String>(0)?,
-                    name: row.get::<_, String>(1)?,
-                    blocked: row.get::<_, bool>(2)?,
-                    count: count(row, 3)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+        let rows = stmt.query_map(params![start_ms, end_ms, limit], |row| {
+            Ok(TrackerScanRow {
+                client: row.get::<_, String>(0)?,
+                name: row.get::<_, String>(1)?,
+                blocked: row.get::<_, bool>(2)?,
+                count: count(row, 3)?,
+            })
+        })?;
+        for row in rows {
+            visit(row?);
+        }
+        Ok(())
     }
 
     /// Helper for [`Self::period_report`]: run a `(label, COUNT(*))` top-list query

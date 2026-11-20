@@ -793,3 +793,229 @@
     min-width: 0;
   }
 }
+
+/* The scheduled-backup card: a status-first panel inside the backup category.
+   A header with its own switch, a row of metric tiles, the run/test actions,
+   and the target/access fields behind an expander. */
+.autoBackup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.abHead {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.abMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.abTile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+}
+
+.abTileLabel {
+  color: var(--text-muted);
+  font-size: var(--step--2);
+}
+
+.abTileValue {
+  color: var(--text);
+  font-size: var(--step-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.abTileValue[data-tone="ok"] {
+  color: var(--signal);
+}
+
+.abTileValue[data-tone="bad"] {
+  color: var(--danger);
+}
+
+.abWarn {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.abActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* A quiet text button, set apart from the solid run/test buttons, that pushes
+   to the end of the actions row. */
+.abEditToggle {
+  margin-inline-start: auto;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.abEditToggle:hover {
+  color: var(--text);
+}
+
+.abConfig {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.abGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.abField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.abFieldLabel {
+  color: var(--text);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 540px) {
+  .abMetrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .abGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .abEditToggle {
+    margin-inline-start: 0;
+  }
+}
+
+/* Module tiles: each opt-in module is one card the admin flips on or off. A tile
+   carries its own icon, name, one-liner, the switch, and — once on — a live
+   status line and a link into the module's own page. */
+.moduleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+.moduleTile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+}
+
+.moduleTile[data-on="true"] {
+  border-color: var(--signal);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal) 40%, transparent);
+}
+
+.moduleTileHead {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.moduleIdent {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-inline-size: 0;
+}
+
+.moduleIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 38px;
+  block-size: 38px;
+  border-radius: var(--radius-sm);
+  color: var(--signal-strong);
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+}
+
+.moduleIcon svg {
+  inline-size: 22px;
+  block-size: 22px;
+}
+
+.moduleName {
+  font-weight: 600;
+  font-size: var(--step-0);
+}
+
+.moduleDesc {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  line-height: 1.5;
+}
+
+.moduleFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.moduleStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text-muted);
+}
+
+.moduleDot {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.moduleDot[data-on="true"] {
+  background: var(--signal);
+}
+
+.moduleLink {
+  font-size: var(--step--1);
+  font-weight: 500;
+  color: var(--signal-strong);
+}
