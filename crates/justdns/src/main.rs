@@ -686,6 +686,10 @@ fn only_non_engine_fields_changed(prev: &Settings, next: &Settings) -> bool {
     probe.backup_sync = next.backup_sync.clone();
     probe.notifications = next.notifications.clone();
     probe.metrics_token = next.metrics_token.clone();
+    // The feature modules drive their own supervisor (started/stopped separately,
+    // before this check), not the DNS policy engine, so a module toggle or a chaff
+    // intensity change must not force the heavy rebuild either.
+    probe.modules = next.modules.clone();
     &probe == next
 }
 
@@ -1124,6 +1128,13 @@ mod tests {
         let mut only_token = base.clone();
         only_token.metrics_token = "a-token".to_owned();
         assert!(only_non_engine_fields_changed(&base, &only_token));
+
+        // Toggling a feature module (or changing chaff intensity) drives the module
+        // supervisor, not the DNS engine, so it must not trigger a rebuild.
+        let mut only_module = base.clone();
+        only_module.modules.privacy.enabled = true;
+        only_module.modules.privacy.chaff_intensity = 40;
+        assert!(only_non_engine_fields_changed(&base, &only_module));
 
         // An identical save is a no-op and need not rebuild either.
         assert!(only_non_engine_fields_changed(&base, &base.clone()));

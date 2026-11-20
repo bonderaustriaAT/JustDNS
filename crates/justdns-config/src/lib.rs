@@ -537,6 +537,40 @@ impl Default for BackupSync {
     }
 }
 
+/// The optional feature modules. Each module is off by default, and while off it
+/// starts no background worker, so it costs no RAM or CPU until the admin turns it
+/// on. Part of [`Settings`], so an activation syncs across an HA cluster as one
+/// unit: every node then runs the same modules.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Modules {
+    /// The privacy module: cross-device tracking graph and DNS chaff.
+    pub privacy: PrivacyModule,
+}
+
+/// The privacy module. Off by default. When on, two in-process workers run: the
+/// background correlation-graph pre-compute and the DNS chaff generator. Turning
+/// it off stops both and frees their resources.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PrivacyModule {
+    /// Master switch. Off by default — no worker runs until the admin turns it on.
+    pub enabled: bool,
+    /// Chaff intensity, 0..=100. `0` runs the graph only (no chaff); the module
+    /// starts at a gentle base rate when first enabled. Read by the chaff
+    /// generator while the module is on.
+    pub chaff_intensity: u32,
+}
+
+impl Default for PrivacyModule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            chaff_intensity: 15,
+        }
+    }
+}
+
 /// The settings the dashboard shows and edits. Field names are serialised in
 /// camelCase to match the UI's JSON directly. `#[serde(default)]` lets a file
 /// written by an older build load even when newer fields are missing.
@@ -638,6 +672,10 @@ pub struct Settings {
     /// Scheduled off-box backup to an SMB/NFS share. Off by default.
     #[serde(default)]
     pub backup_sync: BackupSync,
+    /// Optional feature modules (privacy, ...). All off by default; an off module
+    /// runs no worker and costs nothing.
+    #[serde(default)]
+    pub modules: Modules,
 }
 
 impl Default for Settings {
@@ -671,6 +709,7 @@ impl Default for Settings {
             geo_watch: GeoWatch::default(),
             phishing: Phishing::default(),
             backup_sync: BackupSync::default(),
+            modules: Modules::default(),
         }
     }
 }
@@ -1576,6 +1615,36 @@ mod tests {
         let legacy: Settings = serde_json::from_str(r#"{"instanceName":"Old"}"#).unwrap();
         assert!(!legacy.backup_sync.enabled);
         assert_eq!(legacy.backup_sync.interval_hours, 24);
+    }
+
+    #[test]
+    fn modules_default_off_and_round_trip() {
+        let defaults = Settings::default().modules;
+        assert!(!defaults.privacy.enabled, "modules ship off");
+        assert_eq!(
+            defaults.privacy.chaff_intensity, 15,
+            "gentle base rate when first enabled"
+        );
+
+        let settings = Settings {
+            modules: Modules {
+                privacy: PrivacyModule {
+                    enabled: true,
+                    chaff_intensity: 40,
+                },
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("modules") && json.contains("chaffIntensity"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert!(back.modules.privacy.enabled);
+        assert_eq!(back.modules.privacy.chaff_intensity, 40);
+
+        // An older config without the field still loads the module off.
+        let legacy: Settings = serde_json::from_str(r#"{"instanceName":"Old"}"#).unwrap();
+        assert!(!legacy.modules.privacy.enabled);
+        assert_eq!(legacy.modules.privacy.chaff_intensity, 15);
     }
 
     #[test]
