@@ -4,6 +4,18 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.46.2] - 2026-11-21
+
+- Behoben: **Einstellungen schalten sich im Cluster nicht mehr von selbst ab.** Schutzfunktionen wie
+  der NRD-Block (newly registered domains), die Lookalike- und Homoglyph-Pruefung von URLs und das
+  Privacy-Modul konnten von allein ausgehen, und die gewaehlte Primary (Hauptnode) konnte sich selbst
+  loeschen. Im Cluster wird die Konfiguration nur auf der Primary bearbeitet, der Sync hat sie aber
+  weiter in beide Richtungen per letztem Schreibzugriff zusammengefuehrt, sodass eine noch nicht
+  konvergierte Node eine Einstellung clusterweit ueberschreiben konnte, nur weil sie etwas anderes
+  speicherte. Die Primary ist jetzt autoritativ: jede andere Node spiegelt die Konfiguration der
+  Primary und schiebt nie ihre eigene darueber. Ohne gesetzte Primary synct ein Cluster weiter in
+  beide Richtungen wie bisher, das Festlegen einer Primary laesst eine Einstellung also halten.
+
 ## [0.46.1] - 2026-11-21
 
 - Behoben: **Die festgelegte Primary (Hauptnode) setzt sich nicht mehr selbst zurück.** Im Cluster ist

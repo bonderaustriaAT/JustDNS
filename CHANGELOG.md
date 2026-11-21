@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.46.2] - 2026-11-21
+
+- Fixed: **Settings no longer switch themselves off across a cluster.** Protections such as the newly
+  registered domain (NRD) block, the lookalike and homoglyph URL check and the privacy module could
+  turn off on their own, and the chosen primary (main node) could clear itself. In a cluster the
+  configuration is edited only on the primary, but the sync still merged config both ways by last
+  write, so a node that had not yet caught up could overwrite a setting cluster-wide just by saving
+  something else. The primary is now authoritative: every other node mirrors the primary's
+  configuration and never pushes its own over it. With no primary designated a cluster still syncs both
+  ways as before, so designating a primary is what makes a setting stick.
+
 ## [0.46.1] - 2026-11-21
 
 - Fixed: **The designated primary (main node) no longer clears itself.** In a cluster the chosen
