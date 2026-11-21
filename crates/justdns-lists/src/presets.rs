@@ -34,7 +34,7 @@ use crate::ListKind;
 const TRUSTED_PREFIXES: &[&str] = &[
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/",
     "https://raw.githubusercontent.com/hagezi/nrd/main/domains/",
-    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/",
+    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-blocklist/main/",
 ];
 
 /// One entry in the curated catalogue: a ready-made list the user can switch on
@@ -192,7 +192,7 @@ sein; der Großteil von iOS/macOS läuft unverändert weiter.",
         category: "ads",
         recommended: true,
         name: "JustDNS DACH",
-        url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/dach-ads-trackers.txt",
+        url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-blocklist/main/dach-ads-trackers.txt",
         kind: ListKind::Block,
         description: "Die hauseigene DACH-Ergänzung: deutschsprachige Reichweitenmessung und \
 Tracking, die internationale Listen erfahrungsgemäß schwächer abdecken (INFOnline/IVW, VG Wort \
