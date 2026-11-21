@@ -4,6 +4,17 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.46.1] - 2026-11-21
+
+- Behoben: **Die festgelegte Primary (Hauptnode) setzt sich nicht mehr selbst zurück.** Im Cluster ist
+  die gewählte Primary die einzige Node, die Konfiguration ändern darf; jede andere Node ist ein
+  Read-only-Follower. Ein Sync-Race konnte diese Festlegung löschen: eine Node, die die Primary noch
+  nicht kannte, stempelte bei jedem beliebigen Settings-Speichern ihre eigene leere Festlegung mit
+  neuerer Zeit und gewann den Merge, sodass das ganze Cluster wieder ohne Primary dastand und jede
+  Node wieder schreibbar wurde. Die Festlegung wird jetzt danach gereiht, wann sie explizit gesetzt
+  wurde, nicht nach dem letzten Settings-Schreiben, sodass eine leere eine gewählte Primary nicht mehr
+  überschreibt. Ein bewusstes Löschen der Primary greift weiterhin im ganzen Cluster.
+
 ## [0.46.0] - 2026-11-21
 
 - Neu: **iOS-Profil für verschlüsseltes DNS.** Unter Einstellungen, Verschlüsselung gibt es jetzt
