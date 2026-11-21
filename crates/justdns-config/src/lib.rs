@@ -231,6 +231,14 @@ pub struct Cluster {
     /// every node is then writable. When set, only the node whose own id matches
     /// may change configuration; the others serve a read-only dashboard.
     pub primary_node_id: String,
+    /// When the designation above was last set or cleared (ms since the Unix epoch),
+    /// bumped **only** by an explicit primary change — never by an ordinary settings
+    /// save. This is the cluster-wide tiebreaker for the designation: on a sync the
+    /// side with the higher value wins, so a node that has not yet learned the chosen
+    /// primary cannot clear it by merely carrying a newer last-writer-wins timestamp
+    /// from an unrelated save. 0 = never explicitly set. Kept distinct from the
+    /// ledger's entry timestamp on purpose, so the two cannot be confused.
+    pub primary_set_at_ms: i64,
 }
 
 /// Which shape a notification webhook payload takes, so the same URL field can
@@ -1438,16 +1446,19 @@ mod tests {
     fn cluster_defaults_unset_and_round_trips() {
         // No primary designated by default — every node stays writable.
         assert!(Settings::default().cluster.primary_node_id.is_empty());
+        assert_eq!(Settings::default().cluster.primary_set_at_ms, 0);
 
         let settings = Settings {
             cluster: Cluster {
                 primary_node_id: "node-abc".to_owned(),
+                primary_set_at_ms: 1_700_000_000_000,
             },
             ..Default::default()
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"cluster\":{"), "{json}");
         assert!(json.contains("\"primaryNodeId\":\"node-abc\""), "{json}");
+        assert!(json.contains("\"primarySetAtMs\":1700000000000"), "{json}");
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, settings);
     }
@@ -1458,6 +1469,18 @@ mod tests {
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
         let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert!(store.get().cluster.primary_node_id.is_empty());
+        assert_eq!(store.get().cluster.primary_set_at_ms, 0);
+    }
+
+    #[test]
+    fn older_config_with_primary_but_no_set_at_loads_zero() {
+        // A config written before the set-at field existed carries only the id; it
+        // must load with set_at 0 so it is never confused with a fresh designation.
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"cluster":{"primaryNodeId":"node-xyz"}}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        assert_eq!(store.get().cluster.primary_node_id, "node-xyz");
+        assert_eq!(store.get().cluster.primary_set_at_ms, 0);
     }
 
     #[test]
