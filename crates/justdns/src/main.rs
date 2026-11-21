@@ -480,12 +480,29 @@ async fn main() -> ExitCode {
         // first real change decides whether a rebuild is needed.
         let last_settings = std::sync::Mutex::new(settings.clone());
         config_store.on_change(move |settings| {
+            // Cheap and idempotent, so applied on every save regardless of the
+            // rebuild gate below: the encrypted-DNS listeners, the block page and
+            // the DoT/DoH status flags are driven by their own supervisors, not the
+            // DNS policy engine. apply() is a no-op when the listener/cert/page
+            // state is already current, so keeping them out of the heavy-rebuild
+            // path lets a DoT/DoH toggle or a certificate switch take effect without
+            // re-materializing the enabled feeds (millions of domains) for nothing.
+            if let Some(supervisor) = &supervisor {
+                supervisor.apply(&settings.encrypted_dns);
+            }
+            if let Some(block_page) = &block_page {
+                block_page.apply(&settings.block_page);
+            }
+            status.set_dot(settings.encrypted_dns.dot_enabled);
+            status.set_doh(settings.encrypted_dns.doh_enabled);
+
             // The config store fires this on *every* save. The policy and phishing
             // rebuilds below re-materialize the enabled feeds (millions of domains)
-            // from disk, so running them for a save that touches only the backup
-            // target, its run-status, the alert webhook or the metrics token spikes
-            // memory for nothing — enough to OOM a memory-tight node. Skip the whole
-            // rebuild unless a field the live DNS engine actually reads changed.
+            // from disk, so running them for a save that touches only a non-engine
+            // field (backup target/status, webhook, metrics token, module toggle,
+            // encrypted-DNS or block-page settings) spikes memory for nothing —
+            // enough to OOM a memory-tight node. Skip the whole rebuild unless a
+            // field the live DNS engine actually reads changed.
             {
                 let mut last = last_settings.lock().expect("settings mirror lock poisoned");
                 let needs_rebuild = !only_non_engine_fields_changed(&last, settings);
@@ -507,17 +524,6 @@ async fn main() -> ExitCode {
             // Rebuild the phishing detector from the new settings (brands, modes,
             // NRD on/off) over the current warn set.
             configure_phishing(&detector, settings, &lists_handle);
-            // Start/stop the encrypted-DNS listeners and apply the selected
-            // certificates to match the new settings.
-            if let Some(supervisor) = &supervisor {
-                supervisor.apply(&settings.encrypted_dns);
-            }
-            // Start/stop the block page, update its text and redirect target.
-            if let Some(block_page) = &block_page {
-                block_page.apply(&settings.block_page);
-            }
-            status.set_dot(settings.encrypted_dns.dot_enabled);
-            status.set_doh(settings.encrypted_dns.doh_enabled);
             info!(
                 profile = ?settings.speed_profile,
                 dnssec = dnssec_validate.load(Ordering::Relaxed),
@@ -690,6 +696,12 @@ fn only_non_engine_fields_changed(prev: &Settings, next: &Settings) -> bool {
     // before this check), not the DNS policy engine, so a module toggle or a chaff
     // intensity change must not force the heavy rebuild either.
     probe.modules = next.modules.clone();
+    // The encrypted-DNS listeners and the block page are reconciled by their own
+    // supervisors (applied before this check), not by the DNS policy engine, so a
+    // DoT/DoH toggle, certificate switch, hostname or block-page edit must not force
+    // the heavy feed rebuild either.
+    probe.encrypted_dns = next.encrypted_dns.clone();
+    probe.block_page = next.block_page.clone();
     &probe == next
 }
 

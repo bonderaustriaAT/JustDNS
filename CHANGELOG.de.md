@@ -4,6 +4,18 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.46.0] - 2026-11-21
+
+- Neu: **iOS-Profil für verschlüsseltes DNS.** Unter Einstellungen, Verschlüsselung gibt es jetzt
+  einen Download für ein Konfigurationsprofil (`.mobileconfig`), das iOS und iPadOS auf den
+  DNS-over-TLS-Endpunkt dieser Node zeigt. iOS hat keinen „Privates DNS"-Schalter wie Android; das
+  Profil wird über Einstellungen, Allgemein, VPN & Geräteverwaltung installiert. Mit einem öffentlich
+  vertrauten Zertifikat ist keine CA-Installation nötig.
+- Behoben: **Die DoT/DoH-Schalter und das Umstellen des Zertifikats greifen jetzt sofort.** Vorher
+  stieß jedes Speichern in diesem Bereich den vollen Richtlinien-Neuaufbau an (Millionen Domains aus
+  den Feeds neu materialisiert), obwohl nur ein TLS-Listener an- oder ausgeht. Der Neuaufbau läuft
+  jetzt nur noch, wenn sich wirklich ein Feld der DNS-Engine ändert.
+
 ## [0.45.0] - 2026-11-20
 
 - Neu: **Privatsphäre-Modul.** Ein optionales Modul, das inaktiv bleibt, bis du es einschaltest,
