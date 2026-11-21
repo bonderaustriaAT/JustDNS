@@ -704,6 +704,7 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/notifications/test", post(notifications_test))
         .route("/api/tls", get(get_tls).put(put_tls))
+        .route("/api/tls/profile/ios", get(download_ios_profile))
         .route("/api/certs", get(list_certs).post(create_cert))
         .route("/api/certs/{id}", delete(delete_cert))
         .route("/api/certs/{id}/renew", post(renew_cert))
@@ -3072,6 +3073,128 @@ async fn put_tls(
         .set(settings)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok(Json(tls_status(&state)))
+}
+
+/// Build and download an Apple configuration profile (`.mobileconfig`) that points
+/// iOS/iPadOS at this server's DNS-over-TLS endpoint. iOS has no "Private DNS"
+/// switch like Android; encrypted client DNS is set up through a profile carrying a
+/// managed DNS-settings payload (`DNSProtocol = TLS`, `ServerName` = the DoT
+/// hostname). The profile is unsigned, so iOS shows a one-time "not verified" note
+/// on install, which is expected for a self-hosted profile. Readable like the rest
+/// of `/api/tls` (it carries a hostname, not a secret).
+async fn download_ios_profile(
+    State(state): State<AppState>,
+) -> Result<Response, (StatusCode, String)> {
+    if state.certs.is_none() {
+        return Err(certs_unavailable());
+    }
+    let hostname = state.config.get().encrypted_dns.hostname.trim().to_owned();
+    if hostname.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "set a hostname under Encryption before downloading the iOS profile".to_owned(),
+        ));
+    }
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/x-apple-aspen-config".to_owned(),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"justdns-dot.mobileconfig\"".to_owned(),
+            ),
+        ],
+        ios_dot_profile(&hostname),
+    )
+        .into_response())
+}
+
+/// Render the DNS-over-TLS `.mobileconfig` for `hostname`. Pure (no I/O), so it is
+/// unit-tested directly. The payload UUIDs are derived from the hostname so a
+/// re-download keeps the same identifiers and iOS replaces the installed profile in
+/// place instead of stacking duplicates.
+fn ios_dot_profile(hostname: &str) -> String {
+    let host_xml = xml_escape(hostname);
+    let top_uuid = stable_uuid(&format!("justdns-dot-top:{hostname}"));
+    let dns_uuid = stable_uuid(&format!("justdns-dot-dns:{hostname}"));
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>DNSSettings</key>
+			<dict>
+				<key>DNSProtocol</key>
+				<string>TLS</string>
+				<key>ServerName</key>
+				<string>{host_xml}</string>
+			</dict>
+			<key>PayloadDescription</key>
+			<string>DNS-over-TLS via JustDNS ({host_xml})</string>
+			<key>PayloadDisplayName</key>
+			<string>JustDNS (DNS-over-TLS)</string>
+			<key>PayloadIdentifier</key>
+			<string>at.justfuture.justdns.dot</string>
+			<key>PayloadType</key>
+			<string>com.apple.dnsSettings.managed</string>
+			<key>PayloadUUID</key>
+			<string>{dns_uuid}</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Richtet JustDNS als verschluesselten DNS-over-TLS-Resolver ein.</string>
+	<key>PayloadDisplayName</key>
+	<string>JustDNS verschluesseltes DNS ({host_xml})</string>
+	<key>PayloadIdentifier</key>
+	<string>at.justfuture.justdns</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>{top_uuid}</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>
+"#
+    )
+}
+
+/// A deterministic, dependency-free UUID-shaped identifier for `seed`. Not a real
+/// v4/v5 UUID, but a well-formed UUID string: two FNV-1a passes over the seed give
+/// 128 bits, formatted 8-4-4-4-12. Stable for a given seed, so the profile keeps
+/// the same UUIDs across downloads.
+fn stable_uuid(seed: &str) -> String {
+    fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+        for &b in bytes {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+    let hi = fnv1a(seed.as_bytes(), 0xcbf2_9ce4_8422_2325);
+    let lo = fnv1a(seed.as_bytes(), 0x8422_2325_cbf2_9ce4);
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&hi.to_be_bytes());
+    b[8..].copy_from_slice(&lo.to_be_bytes());
+    format!(
+        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+    )
+}
+
+/// Minimal XML text escaping for values placed into the profile.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// A stored certificate as the dashboard sees it: the store's derived facts plus
@@ -7963,6 +8086,21 @@ mod tests {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         AuditStore::load(path).unwrap()
+    }
+
+    #[test]
+    fn ios_dot_profile_carries_hostname_and_stable_uuids() {
+        let p = ios_dot_profile("dns.example.at");
+        assert!(p.contains("<string>TLS</string>"), "DoT protocol");
+        assert!(p.contains("<string>dns.example.at</string>"), "hostname");
+        assert!(p.contains("com.apple.dnsSettings.managed"), "managed DNS payload");
+        // Deterministic for a given hostname (iOS replaces in place on re-download).
+        assert_eq!(p, ios_dot_profile("dns.example.at"));
+        // A different hostname yields different UUIDs, so the profiles differ.
+        assert_ne!(p, ios_dot_profile("dns.other.at"));
+        // The hostname is XML-escaped.
+        let e = ios_dot_profile("a&b<c");
+        assert!(e.contains("a&amp;b&lt;c"), "xml-escaped hostname");
     }
 
     #[test]

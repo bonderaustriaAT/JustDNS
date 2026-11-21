@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.46.0] - 2026-11-21
+
+- Added: **iOS profile for encrypted DNS.** Settings, Encryption now offers a download for a
+  configuration profile (`.mobileconfig`) that points iOS and iPadOS at this node's DNS-over-TLS
+  endpoint. iOS has no "Private DNS" switch like Android; install the profile via Settings, General,
+  VPN & Device Management. With a publicly trusted certificate no CA install is needed.
+- Fixed: **The DoT/DoH toggles and switching the certificate now take effect instantly.** Previously
+  every save in this area kicked off the full policy rebuild (millions of domains re-materialized from
+  the feeds) even though only a TLS listener goes up or down. The rebuild now runs only when a field
+  the DNS engine actually reads changes.
+
 ## [0.45.0] - 2026-11-20
 
 - New: **Privacy module.** An opt-in module that stays dormant until you switch it on, so a node that

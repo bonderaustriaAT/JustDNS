@@ -1278,6 +1278,13 @@ function EncryptedDnsSection() {
             <code className={styles.encCode}>{dohEndpoint}</code>
             <CopyButton value={dohEndpoint} />
           </div>
+          <div className={styles.encEndpointRow}>
+            <span className={styles.encEndpointLabel}>{t("settings.encDns.iosProfileLabel")}</span>
+            <a className={styles.inlineLink} href="/api/tls/profile/ios">
+              {t("settings.encDns.iosProfileDownload")}
+            </a>
+          </div>
+          <p className={styles.encEndpointHint}>{t("settings.encDns.iosProfileHint")}</p>
         </div>
       ) : null}
         </>
