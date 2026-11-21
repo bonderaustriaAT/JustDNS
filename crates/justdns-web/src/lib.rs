@@ -30,7 +30,7 @@ use justdns_auth::{AuthError, Role, SessionState, SessionStore, User, UserStore}
 use justdns_clients::{
     ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
 };
-use justdns_config::{BackupProtocol, BackupSync, BlockPage, ConfigStore, Settings};
+use justdns_config::{BackupProtocol, BackupSync, BlockPage, Cluster, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::cert_store::{CertInfo, CertRecord, CertStore};
 use justdns_filter::Blocker;
@@ -3185,7 +3185,22 @@ fn stable_uuid(seed: &str) -> String {
     b[8..].copy_from_slice(&lo.to_be_bytes());
     format!(
         "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5],
+        b[6],
+        b[7],
+        b[8],
+        b[9],
+        b[10],
+        b[11],
+        b[12],
+        b[13],
+        b[14],
+        b[15]
     )
 }
 
@@ -4253,6 +4268,90 @@ fn ha_reconcile_mfa(
     }
 }
 
+/// Keep the chosen primary (the "main node") from being cleared by a sync race. The
+/// designation is ranked by its own `primary_set_at_ms` — bumped only by an explicit
+/// primary change — not by the ledger's last-writer-wins stamp. So a node that saved
+/// some *other* setting before it had learned the primary (its cluster entry still
+/// empty, but freshly stamped and therefore the last-writer-wins winner) can no
+/// longer clear a designation that was set with a later `primary_set_at_ms`
+/// elsewhere. That race is exactly how the primary kept clearing itself after it was
+/// set, even with the dedicated cluster entry: the entry travels separately, but
+/// nothing stopped an *empty* one with a newer stamp from winning.
+///
+/// Deterministic and symmetric: both nodes see the same local/remote pair and pick
+/// the same winner (higher `primary_set_at_ms`; on a tie the non-empty id, then the
+/// larger id), so they converge rather than flap. An explicit clear still
+/// propagates, because clearing bumps `primary_set_at_ms` too, so the cleared
+/// designation outranks the old one by timestamp.
+fn ha_reconcile_primary(
+    merged: &mut BTreeMap<String, ha::Collection>,
+    local: &BTreeMap<String, ha::Collection>,
+    remote: &BTreeMap<String, ha::Collection>,
+) {
+    // The cluster config a side carries: its dedicated `cluster` entry if present,
+    // else the copy inside its settings blob (an older peer carries it only there).
+    let cluster_in = |side: &BTreeMap<String, ha::Collection>| -> Option<Cluster> {
+        if let Some(value) = side
+            .get("cluster")
+            .and_then(|entities| entities.get("cluster"))
+        {
+            if let Ok(cluster) = serde_json::from_value::<Cluster>(value.clone()) {
+                return Some(cluster);
+            }
+        }
+        side.get("settings")
+            .and_then(|entities| entities.get("settings"))
+            .and_then(|settings| settings.get("cluster"))
+            .and_then(|value| serde_json::from_value::<Cluster>(value.clone()).ok())
+    };
+
+    let (Some(local_cluster), Some(remote_cluster)) = (cluster_in(local), cluster_in(remote))
+    else {
+        return;
+    };
+
+    // Rank the designation: the higher explicit set-at wins. On a tie (normally both
+    // 0, i.e. never set) prefer a non-empty id, then the larger id, so both nodes
+    // pick the same winner.
+    let winner = if local_cluster.primary_set_at_ms > remote_cluster.primary_set_at_ms {
+        local_cluster
+    } else if local_cluster.primary_set_at_ms < remote_cluster.primary_set_at_ms {
+        remote_cluster
+    } else {
+        let pick_local = match (
+            local_cluster.primary_node_id.is_empty(),
+            remote_cluster.primary_node_id.is_empty(),
+        ) {
+            (false, true) => true,
+            (true, false) => false,
+            _ => local_cluster.primary_node_id >= remote_cluster.primary_node_id,
+        };
+        if pick_local {
+            local_cluster
+        } else {
+            remote_cluster
+        }
+    };
+
+    let Ok(value) = serde_json::to_value(&winner) else {
+        return;
+    };
+    // Write the winner into the dedicated cluster entry (which `ha_apply` prefers)
+    // and into the settings blob's copy (what an older peer and the blob fallback
+    // read), so both stay consistent with the reconciled designation.
+    merged
+        .entry("cluster".to_owned())
+        .or_default()
+        .insert("cluster".to_owned(), value.clone());
+    if let Some(settings) = merged
+        .get_mut("settings")
+        .and_then(|entities| entities.get_mut("settings"))
+        .and_then(|settings| settings.as_object_mut())
+    {
+        settings.insert("cluster".to_owned(), value);
+    }
+}
+
 /// Apply a merged set of collections to the live stores, reusing the same
 /// `replace`/`set` paths as a backup restore. Rewrites go first because they are
 /// validated as they are stored, so an invalid merge is rejected before anything
@@ -4406,6 +4505,16 @@ fn sync_peer(state: &AppState, peer: &ha::Peer) -> Result<(), String> {
     // the same reconciliation, so they converge on "MFA on" rather than letting an
     // arbitrary last-writer-wins order silently strip it (see ha_reconcile_mfa).
     ha_reconcile_mfa(
+        &mut merged.collections,
+        &local.collections,
+        &remote.collections,
+    );
+
+    // The chosen primary must likewise survive a sync: rank it by its own explicit
+    // set-at stamp, not the ledger's last-writer-wins order, so an empty designation
+    // from a node that has not yet learned the primary cannot clear it (see
+    // `ha_reconcile_primary`). Both nodes compute the same winner and converge.
+    ha_reconcile_primary(
         &mut merged.collections,
         &local.collections,
         &remote.collections,
@@ -4872,6 +4981,13 @@ async fn ha_set_primary(
     }
     let mut settings = state.config.get();
     settings.cluster.primary_node_id = node_id.clone();
+    // Bump the designation timestamp on every explicit change (set and clear). This
+    // is the one place it moves; an ordinary settings save never touches it. The
+    // sync then ranks the designation by this value, not the ledger's last-writer-
+    // wins stamp, so a node that has not yet learned the chosen primary cannot clear
+    // it just by saving some other setting with a newer stamp (see
+    // `ha_reconcile_primary`).
+    settings.cluster.primary_set_at_ms = now_ms() as i64;
     state
         .config
         .set(settings)
@@ -8093,7 +8209,10 @@ mod tests {
         let p = ios_dot_profile("dns.example.at");
         assert!(p.contains("<string>TLS</string>"), "DoT protocol");
         assert!(p.contains("<string>dns.example.at</string>"), "hostname");
-        assert!(p.contains("com.apple.dnsSettings.managed"), "managed DNS payload");
+        assert!(
+            p.contains("com.apple.dnsSettings.managed"),
+            "managed DNS payload"
+        );
         // Deterministic for a given hostname (iOS replaces in place on re-download).
         assert_eq!(p, ios_dot_profile("dns.example.at"));
         // A different hostname yields different UUIDs, so the profiles differ.
@@ -9556,6 +9675,110 @@ mod tests {
             node.config.get().cluster.primary_node_id,
             "primary-from-blob"
         );
+    }
+
+    #[tokio::test]
+    async fn ha_primary_survives_empty_clobber_with_newer_stamp() {
+        // The regression: the primary was set on node A, then node B saved some other
+        // setting before it had learned the designation. B's still-empty cluster entry
+        // got the newer last-writer-wins stamp and cleared the primary cluster-wide.
+        // The reconcile keeps the designation, ranked by its own set-at stamp.
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let node_a = test_state(store_a);
+        let mut a = node_a.config.get();
+        a.cluster.primary_node_id = "primary-xyz".into();
+        a.cluster.primary_set_at_ms = 500;
+        node_a.config.set(a).unwrap();
+
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let node_b = test_state(store_b); // empty primary, set_at 0
+
+        let cols_a = ha_collections(&node_a);
+        let cols_b = ha_collections(&node_b);
+
+        // B's entries carry the NEWER ledger stamp (its unrelated save), so raw
+        // last-writer-wins resolves to B — an empty primary.
+        let snap_a = ha::SyncSnapshot {
+            node_id: "a".into(),
+            collections: cols_a.clone(),
+            ledger: ha::restamp(&cols_a, &ha::Ledger::new(), "a", 100),
+            version: String::new(),
+            roster: std::collections::BTreeMap::new(),
+        };
+        let snap_b = ha::SyncSnapshot {
+            node_id: "b".into(),
+            collections: cols_b.clone(),
+            ledger: ha::restamp(&cols_b, &ha::Ledger::new(), "b", 999),
+            version: String::new(),
+            roster: std::collections::BTreeMap::new(),
+        };
+
+        let raw = ha::merge(&snap_a, &snap_b);
+        assert_eq!(
+            raw.collections["cluster"]["cluster"]["primaryNodeId"], "",
+            "sanity: raw last-writer-wins clears the primary (B's empty entry is newer)"
+        );
+
+        let reconcile = |local: &BTreeMap<String, ha::Collection>,
+                         remote: &BTreeMap<String, ha::Collection>| {
+            let mut merged = raw.collections.clone();
+            ha_reconcile_primary(&mut merged, local, remote);
+            merged
+        };
+        let from_a = reconcile(&cols_a, &cols_b);
+        let from_b = reconcile(&cols_b, &cols_a);
+
+        for merged in [&from_a, &from_b] {
+            assert_eq!(
+                merged["cluster"]["cluster"]["primaryNodeId"], "primary-xyz",
+                "the designation with the higher set-at stamp wins"
+            );
+            assert_eq!(
+                merged["settings"]["settings"]["cluster"]["primaryNodeId"], "primary-xyz",
+                "the settings blob copy is kept consistent"
+            );
+        }
+        assert_eq!(
+            from_a, from_b,
+            "both nodes reconcile to the identical designation"
+        );
+
+        // Applied on node B, the primary is actually restored there.
+        ha_apply(&node_b, &from_b).unwrap();
+        assert_eq!(node_b.config.get().cluster.primary_node_id, "primary-xyz");
+    }
+
+    #[tokio::test]
+    async fn ha_primary_explicit_clear_still_propagates() {
+        // Clearing the primary bumps its set-at stamp, so the empty designation
+        // outranks the old one and still spreads — "make every node writable again"
+        // keeps working, it is only an *unstamped* empty that can no longer clobber.
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let node_a = test_state(store_a);
+        let mut a = node_a.config.get();
+        a.cluster.primary_node_id = "old-primary".into();
+        a.cluster.primary_set_at_ms = 500;
+        node_a.config.set(a).unwrap();
+
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let node_b = test_state(store_b);
+        let mut b = node_b.config.get();
+        b.cluster.primary_node_id = String::new(); // cleared
+        b.cluster.primary_set_at_ms = 900; // the clear is the later explicit action
+        node_b.config.set(b).unwrap();
+
+        let cols_a = ha_collections(&node_a);
+        let cols_b = ha_collections(&node_b);
+        let mut merged = cols_a.clone();
+        ha_reconcile_primary(&mut merged, &cols_a, &cols_b);
+        assert_eq!(
+            merged["cluster"]["cluster"]["primaryNodeId"], "",
+            "a clear with the newer set-at stamp wins"
+        );
+        // Symmetric from B's point of view.
+        let mut merged_b = cols_b.clone();
+        ha_reconcile_primary(&mut merged_b, &cols_b, &cols_a);
+        assert_eq!(merged_b["cluster"]["cluster"]["primaryNodeId"], "");
     }
 
     #[tokio::test]

@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.46.1] - 2026-11-21
+
+- Fixed: **The designated primary (main node) no longer clears itself.** In a cluster the chosen
+  primary is the only node that may edit configuration; every other node is a read-only follower. A
+  sync race could wipe that designation: a node that had not yet learned the primary would, on any
+  unrelated settings save, stamp its own empty designation with a newer time and win the merge, so the
+  whole cluster fell back to no primary and every node turned writable again. The designation is now
+  ranked by when it was explicitly set, not by the last settings write, so an empty one can no longer
+  overwrite a chosen primary. Clearing the primary on purpose still applies across the cluster.
+
 ## [0.46.0] - 2026-11-21
 
 - Added: **iOS profile for encrypted DNS.** Settings, Encryption now offers a download for a
