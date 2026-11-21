@@ -3,6 +3,12 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.46.3] - 2026-11-21
+
+- Changed: **DACH blocklist moved to its new repository.** The JustDNS DACH supplement is now fetched
+  from `justdns-blocklist` (previously `justdns-dach-blocklist`). The list contents are unchanged, and
+  saved subscriptions keep working because they store the preset key rather than the URL.
+
 ## [0.46.2] - 2026-11-21
 
 - Fixed: **Settings no longer switch themselves off across a cluster.** Protections such as the newly

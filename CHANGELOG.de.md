@@ -4,6 +4,12 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.46.3] - 2026-11-21
+
+- Geaendert: **DACH-Blockliste in ihr neues Repository umgezogen.** Die JustDNS-DACH-Ergaenzung wird
+  jetzt aus `justdns-blocklist` geladen (vorher `justdns-dach-blocklist`). Der Listeninhalt bleibt
+  gleich, gespeicherte Abos funktionieren weiter, da sie den Preset-Key statt der URL speichern.
+
 ## [0.46.2] - 2026-11-21
 
 - Behoben: **Einstellungen schalten sich im Cluster nicht mehr von selbst ab.** Schutzfunktionen wie
