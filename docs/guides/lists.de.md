@@ -78,6 +78,15 @@ Response-IP-Listen sind **global** (sie gelten für jeden Client) und decken akt
 **IPv4**-Antworten ab. Eine Domain auf deiner Immer-erlauben-Liste überschreibt eine
 Response-IP-Sperre **nicht**: die Adresse ist die Bedrohung.
 
+Damit eine einzelne gelistete Adresse in einem großen, geteilten CDN keinen großen
+Dienst lahmlegt, nimmt JustDNS die veröffentlichten IPv4-Bereiche der großen
+Netze (Google/YouTube, Cloudflare, Fastly) immer vom Response-IP-Block aus. Diese
+eingebaute Allowlist ist dauerhaft aktiv, braucht keine Einrichtung und wird in der
+Listen-UI nicht angezeigt; sie greift nur, solange eine Response-IP-Liste aktiv ist.
+Eine direkte Schad-IP liegt nicht in diesem Raum und bleibt geblockt, und ein
+bösartiger **Name** hinter so einem CDN wird weiterhin vom normalen Namens-Block
+erfasst.
+
 ## Die eingebauten Kategorien
 
 Zwei Sperrmengen stecken fest in JustDNS und werden über einfache Schalter unter

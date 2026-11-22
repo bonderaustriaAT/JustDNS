@@ -74,6 +74,14 @@ Response-IP lists are **global** (they apply to every client) and currently cove
 **IPv4** answers. A domain on your Always-allow list does **not** override a
 response-IP block: the address is the threat.
 
+To stop a single flagged address inside a large shared CDN from taking a major
+service offline, JustDNS always exempts the published IPv4 ranges of the big
+eyeball networks (Google/YouTube, Cloudflare, Fastly) from response-IP blocking.
+This built-in allowlist is always on, needs no setup and is not shown in the list
+UI; it only matters while a response-IP list is active. A direct-IP threat is not
+in that space and stays blocked, and a malicious **name** fronted by such a CDN is
+still caught by the ordinary name block.
+
 ## The built-in categories
 
 Two block sets ship inside JustDNS and are controlled by simple switches under

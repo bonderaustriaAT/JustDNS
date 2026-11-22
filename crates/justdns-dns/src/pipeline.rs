@@ -86,6 +86,12 @@ pub struct PipelineOptions {
     /// name block. The binary rebuilds and publishes it live from the user's IP
     /// lists; `None` (the default) means no response-IP filtering.
     pub ip_block: Option<Arc<IpBlocker>>,
+    /// The answer-IP allow set that overrides [`ip_block`](Self::ip_block): an
+    /// answer IP on this set is never treated as a block hit, so a big CDN that
+    /// shares address space with a flagged host still resolves. Holds the built-in
+    /// CDN allowlist, which is always active and not user-editable. `None` (the
+    /// default) means no override, so every block hit stands.
+    pub ip_allow: Option<Arc<IpBlocker>>,
 }
 
 /// The address the custom block page is reached at, per family. A blocked `A`
@@ -114,6 +120,7 @@ impl PipelineOptions {
             dnssec_validate: Arc::new(AtomicBool::new(false)),
             pause_until: Arc::new(AtomicU64::new(0)),
             ip_block: None,
+            ip_allow: None,
         }
     }
 }
@@ -275,7 +282,8 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         ) && !self.blocking_paused()
         {
             if let Some(ip_block) = &self.options.ip_block {
-                if !ip_block.is_empty() && answer_hits_ip_block(&response, ip_block) {
+                let ip_allow = self.options.ip_allow.as_deref();
+                if !ip_block.is_empty() && answer_hits_ip_block(&response, ip_block, ip_allow) {
                     // Drop the leaked records before writing the block answer, the
                     // same way the CNAME uncloak path does.
                     response.answers.clear();
@@ -698,9 +706,22 @@ fn answer_addresses(response: &Message) -> Vec<IpAddr> {
 /// Whether any IPv4 address in the answer is on the response-IP block set. Only
 /// A records are checked (IPv4-only for now); one match means the whole answer is
 /// refused.
-fn answer_hits_ip_block(response: &Message, ip_block: &IpBlocker) -> bool {
+fn answer_hits_ip_block(
+    response: &Message,
+    ip_block: &IpBlocker,
+    ip_allow: Option<&IpBlocker>,
+) -> bool {
     response.answers.iter().any(|record| match &record.data {
-        RData::A(a) => ip_block.contains(a.0),
+        RData::A(a) => {
+            let ip = a.0;
+            // An allow-listed answer IP overrides the block: it is never a hit, so
+            // a big CDN sharing space with a flagged host still resolves. A mixed
+            // answer still blocks on its other, non-allowed IPs.
+            if ip_allow.is_some_and(|allow| allow.contains(ip)) {
+                return false;
+            }
+            ip_block.contains(ip)
+        }
         _ => false,
     })
 }
@@ -968,6 +989,29 @@ mod tests {
             1,
             "the second answer came from the cache"
         );
+    }
+
+    #[tokio::test]
+    async fn an_allow_listed_answer_ip_overrides_the_block() {
+        // The same IP is on both the block set and the allow set. The allow set
+        // wins, so the answer is delivered: a CDN sharing space with a flagged
+        // host still resolves.
+        let shared = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
+        let ip_block = Arc::new(IpBlocker::new());
+        ip_block.publish(IpSet::from_rules("45.83.0.0/16\n"));
+        let ip_allow = Arc::new(IpBlocker::new());
+        ip_allow.publish(IpSet::from_rules("45.83.1.0/24\n"));
+        let options = PipelineOptions {
+            ip_block: Some(ip_block),
+            ip_allow: Some(ip_allow),
+            ..PipelineOptions::default()
+        };
+        let (pipe, _calls) = pipeline(Reply::A(shared), options);
+        let req = request("cdn.example.", RecordType::A);
+
+        let answer = pipe.handle(&req, CLIENT).await;
+        assert_eq!(answer.response_code, ResponseCode::NoError);
+        assert_eq!(answer.answers[0].data, RData::A(A(shared)));
     }
 
     #[tokio::test]

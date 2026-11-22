@@ -296,6 +296,11 @@ pub struct ResolvedLists {
     /// resolver answers, never against query names, so it is global (not scoped
     /// per device) like the warn set.
     pub ip_block: IpSet,
+    /// The built-in answer-IP allowlist (the large eyeball CDNs). Always active in
+    /// the background and not user-editable: an answer IP in this set overrides the
+    /// response-IP block, so a big CDN sharing space with a flagged host still
+    /// resolves. Only matters while a block-IP list is active.
+    pub ip_allow: IpSet,
 }
 
 /// A cheap, cloneable handle to the persistent lists.
@@ -389,6 +394,12 @@ impl ListStore {
         let mut block_feeds = Vec::new();
         let mut warn = DomainSet::new();
         let mut ip_block = IpSet::new();
+        // The answer-IP allow set is the built-in CDN allowlist: always active in
+        // the background and never surfaced in the UI, it keeps the large eyeball
+        // services from being caught by a response-IP block. It only has an effect
+        // while a block-IP list is active, since the answer path checks it only
+        // then.
+        let ip_allow = IpSet::from_rules(justdns_filter::BUILTIN_ANSWER_ALLOW);
         for sub in &lists.subscriptions {
             match sub.kind {
                 // Allow feeds merge into the one allow set; they are global-only.
@@ -440,6 +451,7 @@ impl ListStore {
             block_feeds,
             warn,
             ip_block,
+            ip_allow,
         }
     }
 

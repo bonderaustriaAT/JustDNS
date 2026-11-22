@@ -293,6 +293,10 @@ async fn main() -> ExitCode {
     // detector, republished live when the IP feeds change.
     let ip_blocker = Arc::new(IpBlocker::new());
     publish_ip_block(&ip_blocker, &lists);
+    // The answer-IP allow set that overrides the block: the built-in CDN allowlist,
+    // always active and not user-editable. Republished alongside the block set.
+    let ip_allower = Arc::new(IpBlocker::new());
+    publish_ip_allow(&ip_allower, &lists);
     {
         let engine = policy_engine.clone();
         let lists_handle = lists.clone();
@@ -301,6 +305,7 @@ async fn main() -> ExitCode {
         let config_handle = config_store.clone();
         let detector = phishing_detector.clone();
         let ip_blocker_handle = ip_blocker.clone();
+        let ip_allower_handle = ip_allower.clone();
         lists.on_change(move || {
             rebuild_policies(
                 &engine,
@@ -313,8 +318,9 @@ async fn main() -> ExitCode {
             // the detector's NRD set too.
             configure_phishing(&detector, &config_handle.get(), &lists_handle);
             // The IP feeds live there too, so a list change can change the
-            // response-IP block set.
+            // response-IP block set and the answer-IP allow set.
             publish_ip_block(&ip_blocker_handle, &lists_handle);
+            publish_ip_allow(&ip_allower_handle, &lists_handle);
         });
     }
     {
@@ -397,6 +403,7 @@ async fn main() -> ExitCode {
             dnssec_validate: dnssec_validate.clone(),
             pause_until: config_store.blocking_pause_flag(),
             ip_block: Some(ip_blocker.clone()),
+            ip_allow: Some(ip_allower.clone()),
         },
     )
     .with_observer(observer)
@@ -743,6 +750,13 @@ fn configure_phishing(detector: &PhishingDetector, settings: &Settings, lists: &
 /// resolver answers, never against query names.
 fn publish_ip_block(ip_blocker: &IpBlocker, lists: &ListStore) {
     ip_blocker.publish(lists.resolved().ip_block);
+}
+
+/// Publish the answer-IP allow set that overrides the response-IP block: the
+/// built-in CDN allowlist, always active and not user-editable. Global, like the
+/// block set.
+fn publish_ip_allow(ip_allower: &IpBlocker, lists: &ListStore) {
+    ip_allower.publish(lists.resolved().ip_allow);
 }
 
 /// Map the stored phishing settings plus the warn set into the detector's config.
