@@ -4,6 +4,28 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.47.1] - 2026-11-22
+
+- Behoben: **Schutz pausieren gilt jetzt fuer den ganzen Cluster.** Wenn du den Schutz voruebergehend
+  abschaltest (die Fehlersuche-Pause), pausierte bisher nur der eine Knoten, auf dem du warst. Ein
+  Geraet, das mehrere Cluster-Knoten als DNS nutzt, traf darum nach kurzer Zeit einen Knoten, der nie
+  pausiert hat, und der Schutz kam vor Ablauf des Timers zurueck. Der Pause-Ablaufzeitpunkt wird jetzt
+  auf alle Knoten gespiegelt, sodass der Schutz ueberall aus bleibt, bis er ablaeuft. Weiterhin
+  laufzeit-only: ein vollstaendiger Neustart loescht ihn. Das Pausieren leert jetzt auch den DNS-Cache,
+  sodass ein Name, der aus einem veralteten oder leeren Cache-Eintrag beantwortet wurde, sofort frisch
+  aufgeloest wird, statt bis zum Ablauf dieses Eintrags unerreichbar zu bleiben.
+- Behoben: **Grosse Dienste haengen nicht mehr, wenn eine Response-IP-Liste aktiv ist.** YouTube und
+  andere grosse Seiten wechseln staendig zwischen vielen CDN-Adressen, und eine Response-IP-Liste, die
+  zufaellig eine davon markiert, verwarf diese Antwort und brachte den Dienst zum Haengen. Eine
+  eingebaute Allowlist nimmt jetzt die veroeffentlichten IPv4-Bereiche der grossen Netze
+  (Google/YouTube, Cloudflare, Fastly) immer vom Response-IP-Block aus. Sie ist dauerhaft aktiv,
+  braucht keine Einrichtung, wird in der Listen-UI nicht angezeigt und greift nur, solange eine
+  Response-IP-Liste aktiv ist. Eine direkte Schad-IP liegt nicht in diesem Raum und bleibt geblockt,
+  und ein boesartiger Name hinter so einem CDN wird weiter vom normalen Namens-Block erfasst.
+- Geaendert: **DNS-Chaff reicht hoeher und variiert staerker.** Der Intensitaets-Regler geht jetzt bis
+  600 Schein-Abfragen pro Minute (vorher 120), und der Decoy-Pool ist auf rund 150 vielfaeltige
+  Hostnamen gewachsen, damit der Cover-Traffic besser aufgeht.
+
 ## [0.47.0] - 2026-11-22
 
 - Neu: **Antworten blockieren, die auf eine bekannte Schad-IP zeigen.** Eine neue Listenart enthaelt

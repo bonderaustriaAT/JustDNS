@@ -78,7 +78,9 @@ pub struct PipelineOptions {
     /// block and CNAME uncloaking are all skipped, so every name resolves
     /// normally. `0` means not paused. A shared, swappable slot so the web layer
     /// can arm it live and the deadline makes it expire on its own without any
-    /// timer. Node-local and never persisted: a restart clears it.
+    /// timer. Mirrored across an HA cluster (a pause on one node pauses them all,
+    /// to the same absolute deadline), but runtime-only and never persisted to
+    /// disk, so a full restart still clears it.
     pub pause_until: Arc<AtomicU64>,
     /// The response-IP block set: IPv4 addresses and CIDR ranges that must not
     /// appear in an answer. When an upstream or cached answer resolves to one of

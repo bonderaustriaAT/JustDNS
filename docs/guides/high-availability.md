@@ -52,6 +52,13 @@ Everything you set in the dashboard:
   is the **log retention** you set under *Settings → Query log* (seven days by
   default): that window now both prunes the local log and bounds what is synced.
 
+- **Protection pause** — when you temporarily turn protection off (the
+  troubleshooting pause on the dashboard), it applies to the **whole cluster** until
+  the same expiry, not just the node you armed it on. Otherwise a device that uses
+  more than one node as its DNS would, after a short while, hit a node that never
+  paused and see blocking resume. It stays runtime-only: a full cluster restart
+  clears it.
+
 What is **not** synced, on purpose: anything node-local — the node id, this node's
 own address and display name, its DoT/DoH **hostname** and certificate selections,
 the **block-page server IP** (each node points blocked names at itself), the mesh
