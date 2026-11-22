@@ -2980,6 +2980,12 @@ async fn blocking_pause(
         ));
     }
     let until = state.config.pause_blocking(body.seconds);
+    // Flush the DNS cache so a name that was being answered from a stale or
+    // negative cache entry (for example a blocked domain that had a cached empty
+    // answer) resolves fresh on the very next query, instead of serving the old
+    // cached answer until its TTL runs out. Without this, "turn protection off"
+    // appears not to work for anything already in the cache.
+    state.cache.clear();
     record(
         &state,
         AuditEntry::success(&identity.username, "blocking.pause"),
@@ -4072,6 +4078,16 @@ fn autofill_block_page_ips(state: &AppState) {
 // `restore_backup` uses.
 // ----------------------------------------------------------------------------
 
+/// The cluster-wide troubleshooting pause, carried as its own HA entry: the
+/// absolute Unix-millisecond deadline a pause is in force until. Present only
+/// while a pause is active; its absence means blocking is on. Runtime-only, so it
+/// is sourced from the live deadline and never from the saved settings.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlockingPauseSync {
+    until_ms: u64,
+}
+
 /// Serialise this node's live configuration into the keyed collections the HA
 /// merge operates on: one entry per entity, keyed by its stable id. The settings
 /// are a single entry under `settings/settings`.
@@ -4127,6 +4143,19 @@ fn ha_collections(state: &AppState) -> BTreeMap<String, ha::Collection> {
         "cluster",
         serde_json::to_value(&settings.cluster),
     );
+    // The troubleshooting blocking pause travels as its own entry so a pause on one
+    // node pauses the whole cluster (clients that use more than one node would
+    // otherwise keep hitting a node that never paused). It is sourced from the live
+    // deadline, never the saved settings, so it stays runtime-only and a restart
+    // still clears it. Emitted only while a pause is actually in force; when it ends
+    // or expires the entry drops and its tombstone resumes blocking on every node.
+    if let Some(until_ms) = state.config.blocking_pause_until_ms() {
+        put(
+            "blockingPause",
+            "blockingPause",
+            serde_json::to_value(BlockingPauseSync { until_ms }),
+        );
+    }
     put("settings", "settings", serde_json::to_value(settings));
 
     // The certificate store is shared across the cluster: one entry per stored
@@ -4472,6 +4501,30 @@ fn ha_apply(
             .config
             .set(settings)
             .map_err(|error| error.to_string())?;
+    }
+
+    // Apply the cluster-wide troubleshooting pause, independently of the settings
+    // blob: a pause armed on any node pauses them all until the shared deadline,
+    // and its removal (the entry tombstoned once the pause ends or expires) resumes
+    // blocking everywhere. Absent means no node is paused, so clear any local pause.
+    // The deadline is absolute, so every node expires together.
+    match collections
+        .get("blockingPause")
+        .and_then(|entities| entities.get("blockingPause"))
+    {
+        Some(value) => {
+            let pause: BlockingPauseSync =
+                serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+            // Flush the cache when this node newly enters (or re-targets) a pause,
+            // so it clears stale or negative cache entries exactly like the node the
+            // pause was armed on. The guard keeps a steady sync cycle, which re-sets
+            // the same deadline every time, from clearing the cache repeatedly.
+            if state.config.blocking_pause_until_ms() != Some(pause.until_ms) {
+                state.cache.clear();
+            }
+            state.config.set_blocking_pause_until(pause.until_ms);
+        }
+        None => state.config.resume_blocking(),
     }
     Ok(())
 }
@@ -9435,6 +9488,42 @@ mod tests {
         assert!(
             node.users.exists("admin"),
             "accounts survive a userless peer"
+        );
+    }
+
+    #[tokio::test]
+    async fn ha_syncs_the_blocking_pause_across_the_cluster() {
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let paused = test_state(store_a);
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let peer = test_state(store_b);
+
+        // Not paused: no entry at all, and applying leaves the peer unpaused.
+        let cols = ha_collections(&paused);
+        assert!(!cols.contains_key("blockingPause"), "no pause, no entry");
+        ha_apply(&peer, &cols).unwrap();
+        assert!(peer.config.blocking_pause_until_ms().is_none());
+
+        // A pause armed on one node travels to the peer with the same deadline, so
+        // the whole cluster pauses, not just the node the admin clicked.
+        let until = paused.config.pause_blocking(600);
+        let cols = ha_collections(&paused);
+        assert!(cols.contains_key("blockingPause"), "an active pause is shared");
+        ha_apply(&peer, &cols).unwrap();
+        assert_eq!(
+            peer.config.blocking_pause_until_ms(),
+            Some(until),
+            "the peer pauses until the same deadline"
+        );
+
+        // Resuming on that node drops the entry, so the peer resumes too.
+        paused.config.resume_blocking();
+        let cols = ha_collections(&paused);
+        assert!(!cols.contains_key("blockingPause"), "resume removes the entry");
+        ha_apply(&peer, &cols).unwrap();
+        assert!(
+            peer.config.blocking_pause_until_ms().is_none(),
+            "the peer resumes blocking too"
         );
     }
 

@@ -50,6 +50,11 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
   eingebauten Kategorien an oder aus, ergänze jederzeit eigene Allow-/Block-
   Einträge oder Listen-Abos und gib jedem **Gerät oder jeder Gruppe** eigene
   Regeln obendrauf.
+- **Blockt schlechte Antworten, nicht nur schlechte Namen.** Eine Response-IP-Liste
+  verwirft jede Antwort, die auf eine bekannte Schad-Adresse zeigt (IPv4 und CIDR),
+  sodass ein Name mit bösartiger Adresse auch dann gestoppt wird, wenn er selbst auf
+  keiner Liste steht. Mit der **JustDNS Threat-IPs**-Liste aus unserem eigenen
+  Honeypot-Netz, und eigene IP-Listen lassen sich per URL einbinden.
 - **Läuft als Cluster statt als Single Point of Failure.** Vernetze **bis zu vier
   gleichberechtigte Knoten** im Mesh, die synchron bleiben — was du auf einem
   Knoten änderst, fließt zu allen anderen. Nimm einen zum Neustarten oder Updaten
@@ -113,6 +118,7 @@ Unterschiede — ehrlich, Gleichstand inklusive:
 | Rollendes Update ohne DNS-Ausfall | ✅ | — | — |
 | Verschlüsselter Upstream per Vorgabe | ✅ DoT von Haus aus | ⚠️ Zusatz (cloudflared/unbound) | ✅ unterstützt |
 | DNSSEC-Validierung | ✅ | ✅ | ✅ |
+| Response-IP-Blocklisten (Antwort-IPs, IPv4 + CIDR) | ✅ | — | — |
 | Richtlinien pro Gerät & Gruppe | ✅ | ⚠️ Client-Gruppen | ✅ Clients |
 | Benutzer, Rollen & TOTP-2FA | ✅ | — ein Passwort | — ein Login |
 | Geheimnisse verschlüsselt gespeichert | ✅ | — | — |

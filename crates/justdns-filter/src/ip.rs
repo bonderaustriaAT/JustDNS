@@ -16,6 +16,50 @@ use std::net::Ipv4Addr;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
 
+/// A built-in answer-IP allowlist that always overrides the response-IP block:
+/// the published IPv4 ranges of the large eyeball CDNs that serve a big share of
+/// ordinary traffic (Google/YouTube, Cloudflare, Fastly). An answer that resolves
+/// into one of these ranges is never refused by the response-IP filter, so a feed
+/// that happens to list a single address inside a shared CDN range cannot take a
+/// major service offline. Direct-IP threats (C2, droppers on plain hosts) are not
+/// in this space and stay blockable; a name fronted by one of these CDNs is still
+/// caught by the ordinary name block. Always active and not user-editable.
+pub const BUILTIN_ANSWER_ALLOW: &str = "\
+# Google / YouTube (AS15169)
+74.125.0.0/16
+64.233.160.0/19
+66.102.0.0/20
+66.249.64.0/19
+72.14.192.0/18
+108.177.0.0/17
+142.250.0.0/15
+172.217.0.0/16
+172.253.0.0/16
+173.194.0.0/16
+209.85.128.0/17
+216.58.192.0/19
+216.239.32.0/19
+# Cloudflare
+104.16.0.0/13
+104.24.0.0/14
+172.64.0.0/13
+162.158.0.0/15
+198.41.128.0/17
+173.245.48.0/20
+141.101.64.0/18
+108.162.192.0/18
+190.93.240.0/20
+188.114.96.0/20
+197.234.240.0/22
+131.0.72.0/22
+103.21.244.0/22
+103.22.200.0/22
+103.31.4.0/22
+# Fastly
+151.101.0.0/16
+199.232.0.0/16
+";
+
 /// A collection of blocked IPv4 addresses and ranges.
 #[derive(Clone, Debug, Default)]
 pub struct IpSet {
@@ -247,6 +291,19 @@ mod tests {
         let set = IpSet::new();
         assert!(set.is_empty());
         assert!(!set.contains("1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn builtin_answer_allow_covers_the_major_cdns() {
+        let set = IpSet::from_rules(BUILTIN_ANSWER_ALLOW);
+        assert!(!set.is_empty());
+        // A googlevideo edge, a Cloudflare address and a Fastly address all fall
+        // inside the shipped ranges.
+        assert!(set.contains("142.250.74.14".parse().unwrap()));
+        assert!(set.contains("104.16.1.1".parse().unwrap()));
+        assert!(set.contains("151.101.1.1".parse().unwrap()));
+        // An ordinary address outside those ranges does not.
+        assert!(!set.contains("203.0.113.7".parse().unwrap()));
     }
 
     #[test]

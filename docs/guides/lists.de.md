@@ -55,6 +55,38 @@ erlaubst und die sie trotzdem erwischen würde, damit du Wirkung und Kollaterals
 vor dem Übernehmen siehst. Erlauben-Feeds haben keinen Testen-Knopf, denn eine
 Freigabe blockt nichts.
 
+## Response-IP-Listen (nach Antwort-Adresse sperren)
+
+Die Listen oben greifen alle auf den **Namen**, der nachgefragt wird. Eine
+**Response-IP-Liste** greift stattdessen auf die **Adresse, auf die eine Antwort
+auflöst**. Liefert ein Resolver eine Antwort, prüft JustDNS jede IPv4-Adresse darin
+gegen die Liste; bei einem Treffer wird die **ganze Antwort verworfen** und der Client
+bekommt dieselbe Block-Antwort wie bei einem gesperrten Namen (Block-Page-IP, sonst
+Null-IP, sonst NXDOMAIN). Das erwischt einen bösartigen Host auch dann, wenn seine
+Domain auf keiner Sperrliste steht, und eine wechselnde Domain, die immer auf dieselbe
+Schad-Adresse zeigt.
+
+- Füge sie als Abo vom Typ **IP-Sperrliste** hinzu und trag die Feed-URL ein, genau wie
+  bei einem Domain-Feed. Listen enthalten einzelne IPv4-Adressen und CIDR-Bereiche
+  (z. B. `203.0.113.0/24`), eine pro Zeile, mit `#`-Kommentaren.
+- Der Katalog bringt **JustDNS Threat-IPs** mit, unsere eigene Liste von C2-, Dropper-
+  und Malware-Adressen aus dem Honeypot-Netz (Empfohlen-Badge, nicht automatisch an).
+- Ein Treffer zählt im [Protokoll](query-log.de.md) als **Blockiert** mit dem Grund
+  `threat-ip`, damit du eine Antwort-IP-Sperre von einer Namens-Sperre unterscheidest.
+
+Response-IP-Listen sind **global** (sie gelten für jeden Client) und decken aktuell
+**IPv4**-Antworten ab. Eine Domain auf deiner Immer-erlauben-Liste überschreibt eine
+Response-IP-Sperre **nicht**: die Adresse ist die Bedrohung.
+
+Damit eine einzelne gelistete Adresse in einem großen, geteilten CDN keinen großen
+Dienst lahmlegt, nimmt JustDNS die veröffentlichten IPv4-Bereiche der großen
+Netze (Google/YouTube, Cloudflare, Fastly) immer vom Response-IP-Block aus. Diese
+eingebaute Allowlist ist dauerhaft aktiv, braucht keine Einrichtung und wird in der
+Listen-UI nicht angezeigt; sie greift nur, solange eine Response-IP-Liste aktiv ist.
+Eine direkte Schad-IP liegt nicht in diesem Raum und bleibt geblockt, und ein
+bösartiger **Name** hinter so einem CDN wird weiterhin vom normalen Namens-Block
+erfasst.
+
 ## Die eingebauten Kategorien
 
 Zwei Sperrmengen stecken fest in JustDNS und werden über einfache Schalter unter
@@ -87,7 +119,10 @@ manuellen Sperr-Einträge und jeder aktive *Block*-Feed werden zu Sperrquellen; 
 eingebauten Werbung/Schadsoftware-Mengen kommen je nach Schalter hinzu. Die
 [Richtlinien-Engine](policies.de.md) prüft dann zuerst Erlauben (eine Freigabe bricht
 ab), dann die Sperrquellen in fester Reihenfolge. Die erste treffende Sperrquelle ist
-das, was das [Protokoll](query-log.de.md) als Grund nennt.
+das, was das [Protokoll](query-log.de.md) als Grund nennt. Eine Response-IP-Sperre
+läuft **nach** dem Eintreffen der Antwort (aus Cache oder Upstream), sodass ein Name,
+der die Block-Prüfung passiert, über seine aufgelöste Adresse trotzdem verworfen
+werden kann.
 
 **Feeds auf der Platte.** Abos werden unter dem `/data`-Volume zwischengespeichert,
 sodass der Blocker beim Start sofort und ohne Netzwerk-Runde gefüllt ist; ein

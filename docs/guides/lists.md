@@ -52,6 +52,36 @@ list would newly block, broken down by device and by domain, and flags any names
 explicitly allow that it would catch — so you see the effect and the collateral
 before committing. Allow feeds have no Test button, since allowing nothing blocks.
 
+## Response-IP lists (block by answer address)
+
+The lists above all match on the **name** being looked up. A **response-IP list**
+matches on the **address an answer resolves to** instead. When a resolver returns an
+answer, JustDNS checks every IPv4 address in it against the list; on any hit the
+**whole answer is refused** and the client gets the same block response as a blocked
+name (block-page IP, else null IP, else NXDOMAIN). This catches a malicious host even
+when its domain is on no block list, and a changing domain that always points at the
+same bad address.
+
+- Add one as a subscription of kind **IP block list** and paste the feed URL, exactly
+  like a domain feed. Lists hold single IPv4 addresses and CIDR ranges
+  (e.g. `203.0.113.0/24`), one per line, with `#` comments.
+- The catalogue ships **JustDNS Threat-IPs**, our own list of C2, dropper and malware
+  addresses from our honeypot network (Recommended badge, not on by default).
+- A hit is counted as **Blocked** in the [query log](query-log.md) with the reason
+  `threat-ip`, so you can tell an answer-IP block from a name block.
+
+Response-IP lists are **global** (they apply to every client) and currently cover
+**IPv4** answers. A domain on your Always-allow list does **not** override a
+response-IP block: the address is the threat.
+
+To stop a single flagged address inside a large shared CDN from taking a major
+service offline, JustDNS always exempts the published IPv4 ranges of the big
+eyeball networks (Google/YouTube, Cloudflare, Fastly) from response-IP blocking.
+This built-in allowlist is always on, needs no setup and is not shown in the list
+UI; it only matters while a response-IP list is active. A direct-IP threat is not
+in that space and stays blocked, and a malicious **name** fronted by such a CDN is
+still caught by the ordinary name block.
+
 ## The built-in categories
 
 Two block sets ship inside JustDNS and are controlled by simple switches under
@@ -83,7 +113,9 @@ Full `*.example.com` wildcard syntax is accepted and treated the same as
 *block* feed become block sources; the built-in ads/malware sets are added according
 to their switches. The [policy engine](policies.md) then checks allow first (an allow
 short-circuits), then block sources in a fixed order. The first matching block source
-is what the [query log](query-log.md) names as the reason.
+is what the [query log](query-log.md) names as the reason. A response-IP block runs
+**after** the answer comes back (from cache or upstream), so a name that passes the
+block check can still have its answer refused on its resolved address.
 
 **Feeds on disk.** Subscriptions are cached under the `/data` volume so the blocker is
 populated immediately on startup with no network round-trip; a scheduled refresh (and

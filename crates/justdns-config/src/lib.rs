@@ -564,9 +564,10 @@ pub struct Modules {
 pub struct PrivacyModule {
     /// Master switch. Off by default — no worker runs until the admin turns it on.
     pub enabled: bool,
-    /// Chaff intensity, 0..=100. `0` runs the graph only (no chaff); the module
-    /// starts at a gentle base rate when first enabled. Read by the chaff
-    /// generator while the module is on.
+    /// Chaff intensity in decoys per minute, 0..=600. `0` runs the graph only
+    /// (no chaff); the module starts at a gentle base rate when first enabled.
+    /// Read by the chaff generator while the module is on, which clamps it to its
+    /// own maximum.
     pub chaff_intensity: u32,
 }
 
@@ -776,7 +777,9 @@ struct Inner {
     /// A troubleshooting pause on all blocking: the Unix-millisecond deadline the
     /// DNS pipeline compares against per query (`0` means not paused). Runtime
     /// state, not part of the saved settings: it is never persisted and a restart
-    /// clears it, so a forgotten pause cannot outlive the process.
+    /// clears it, so a forgotten pause cannot outlive the process. In an HA cluster
+    /// the deadline is mirrored to the other nodes (see the `blockingPause` HA
+    /// entry) so a pause covers every node, not just the one it was armed on.
     blocking_pause_until: Arc<AtomicU64>,
     /// Run after each change to apply settings the engine owns (router, cache)
     /// that cannot be expressed as a simple atomic flag here.
@@ -999,6 +1002,17 @@ impl ConfigStore {
     /// Clear the troubleshooting pause at once, so blocking resumes.
     pub fn resume_blocking(&self) {
         self.inner.blocking_pause_until.store(0, Ordering::Relaxed);
+    }
+
+    /// Set the troubleshooting pause to an absolute Unix-millisecond deadline (`0`
+    /// clears it). Unlike [`pause_blocking`](Self::pause_blocking), which takes a
+    /// duration from now, this stores a deadline as given, so a pause armed on one
+    /// cluster node can be mirrored onto another with the same expiry. Still
+    /// runtime-only and never persisted: a restart clears it.
+    pub fn set_blocking_pause_until(&self, until_ms: u64) {
+        self.inner
+            .blocking_pause_until
+            .store(until_ms, Ordering::Relaxed);
     }
 
     /// The current blocking-pause deadline in Unix milliseconds, or `None` when

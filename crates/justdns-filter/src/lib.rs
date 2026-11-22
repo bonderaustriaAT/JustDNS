@@ -19,7 +19,7 @@ mod services;
 mod trackers;
 
 pub use domain::{DomainSet, parse_rule};
-pub use ip::{IpBlocker, IpSet};
+pub use ip::{BUILTIN_ANSWER_ALLOW, IpBlocker, IpSet};
 pub use phishing::{
     BRANDS, Brand, BrandGroup, PhishingConfig, PhishingDetector, PhishingHit, PhishingKind,
     PhishingMode,

@@ -1046,8 +1046,8 @@ function ChaffView({
           type="range"
           className={styles.range}
           min={0}
-          max={120}
-          step={1}
+          max={600}
+          step={5}
           value={intensity}
           aria-label={t("privacy.module.chaff.intensity")}
           onChange={(e) => setIntensity(Number(e.target.value))}

@@ -3,6 +3,26 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.47.1] - 2026-11-22
+
+- Fixed: **Pausing protection now covers the whole cluster.** When you temporarily turn protection off
+  (the troubleshooting pause), it used to pause only the one node you were on, so a device that uses
+  more than one cluster node as its DNS would, after a short while, reach a node that never paused and
+  see blocking come back before the timer ran out. The pause deadline is now mirrored to every node, so
+  protection stays off everywhere until it expires. It is still runtime-only, and a full restart clears
+  it. Arming a pause now also flushes the DNS cache, so a name that was being answered from a stale or
+  cached empty entry resolves fresh at once instead of staying stuck until that entry expires.
+- Fixed: **Large services no longer stall when a response-IP list is active.** YouTube and other big
+  sites rotate across many CDN addresses, and a response-IP list that happened to flag one of them
+  would refuse that answer and stall the service. A built-in allowlist now always exempts the
+  published IPv4 ranges of the large eyeball networks (Google/YouTube, Cloudflare, Fastly) from
+  response-IP blocking. It is always on, needs no setup and is not shown in the list UI, and it only
+  has an effect while a response-IP list is active. A direct-IP threat is not in that space and stays
+  blocked, and a malicious name fronted by such a CDN is still caught by the ordinary name block.
+- Changed: **DNS chaff reaches higher and varies more.** The intensity slider now goes up to 600 decoy
+  lookups per minute (was 120), and the decoy pool grew to about 150 varied hostnames so the cover
+  traffic blends in better.
+
 ## [0.47.0] - 2026-11-22
 
 - Added: **Block answers that resolve to a known-bad IP.** A new kind of list holds IPv4 addresses and

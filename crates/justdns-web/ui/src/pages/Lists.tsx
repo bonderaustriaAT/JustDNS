@@ -854,7 +854,7 @@ function SimulateModal({
 /** Human-readable status for a feed row from its last-fetch fields. Number
  *  formatting follows the given locale; the relative time follows `lang`. */
 function feedStatusText(
-  feed: { lastError?: string; lastCount?: number; lastFetchedMs?: number },
+  feed: { kind?: string; lastError?: string; lastCount?: number; lastFetchedMs?: number },
   t: T,
   lang: Lang,
   locale: string = lang === "de" ? "de-DE" : "en-US",
@@ -863,12 +863,13 @@ function feedStatusText(
     return <span className={styles.statusError}>{t("lists.feedFailed")}</span>;
   }
   if (feed.lastCount !== undefined && feed.lastFetchedMs !== undefined) {
+    const count = feed.lastCount.toLocaleString(locale);
+    const time = relativeTime(feed.lastFetchedMs, t);
     return (
       <span className={styles.statusOk}>
-        {t("lists.feedCount", {
-          count: feed.lastCount.toLocaleString(locale),
-          time: relativeTime(feed.lastFetchedMs, t),
-        })}
+        {feed.kind === "blockip"
+          ? t("lists.feedCountIp", { count, time })
+          : t("lists.feedCount", { count, time })}
       </span>
     );
   }
