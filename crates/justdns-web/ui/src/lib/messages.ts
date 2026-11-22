@@ -738,7 +738,7 @@ const de = {
   "category.privacy": "Telemetrie",
   "category.bypass": "Umgehung",
   "category.allow": "Freigabe",
-  "category.threatip": "Schad-IPs",
+  "category.threatip": "Threat-IPs",
 
   // Settings.
   "settings.title": "Einstellungen",
