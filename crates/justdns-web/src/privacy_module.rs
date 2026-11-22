@@ -33,10 +33,12 @@ use justdns_dns::router::SharedRouter;
 /// back; this is a live view, not durable history.
 const CHAFF_LOG_CAP: usize = 500;
 
-/// Decoy lookups are capped well below a real browser's rate: even at the top of
-/// the slider the generator stays a background trickle, never a flood that would
-/// stress the upstreams or stand out by volume.
-const MAX_INTENSITY: u32 = 120;
+/// Upper bound for the intensity slider (decoys per minute). The top of the
+/// range is a deliberate choice between stronger cover and upstream load: even
+/// here the generator is a steady background stream (ten per second), not a
+/// flood. The generator clamps to this on every tick, so a stored value above it
+/// never takes effect.
+const MAX_INTENSITY: u32 = 600;
 
 /// A node in the surveillance graph: either a device on the network or a
 /// tracker company it has been seen reaching.
@@ -168,52 +170,189 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// The decoy name pool. These are high-traffic, benign hostnames across a spread
-/// of categories (cloud, video, shopping, news, social, telemetry) so a decoy
-/// blends in with ordinary browsing instead of forming a recognisable pattern.
-/// The pool is deliberately plain: the goal is cover traffic, not a fixed
-/// signature an observer could learn to filter out.
+/// The decoy name pool. These are high-traffic, benign hostnames across a wide
+/// spread of categories (search, video, social, shopping, news, cloud/CDN,
+/// developer, telemetry, finance, travel, software updates) so a decoy blends in
+/// with ordinary browsing instead of forming a recognisable pattern. The pool is
+/// deliberately broad and plain: the goal is varied cover traffic, not a small
+/// fixed signature an observer could learn to filter out. All entries are real,
+/// ordinary hostnames; the picker spreads across the whole list.
 const DECOY_POOL: &[&str] = &[
+    // Search and portals
     "www.google.com",
-    "www.youtube.com",
-    "www.cloudflare.com",
-    "www.amazon.com",
-    "www.amazon.de",
-    "www.wikipedia.org",
-    "www.reddit.com",
-    "www.github.com",
-    "www.microsoft.com",
-    "www.apple.com",
-    "www.netflix.com",
-    "www.spotify.com",
     "www.bing.com",
     "duckduckgo.com",
+    "www.ecosia.org",
+    "www.qwant.com",
+    "search.brave.com",
+    "www.startpage.com",
+    "www.yahoo.com",
+    "yandex.com",
+    "www.baidu.com",
+    // Video and streaming
+    "www.youtube.com",
+    "www.netflix.com",
+    "www.twitch.tv",
+    "www.vimeo.com",
+    "www.dailymotion.com",
+    "www.disneyplus.com",
+    "www.primevideo.com",
+    "www.max.com",
+    "www.tiktok.com",
+    "www.arte.tv",
+    // Music
+    "www.spotify.com",
+    "open.spotify.com",
+    "music.apple.com",
+    "soundcloud.com",
+    "www.deezer.com",
+    // Social and messaging
+    "www.instagram.com",
+    "www.facebook.com",
+    "www.linkedin.com",
+    "www.reddit.com",
+    "x.com",
+    "www.pinterest.com",
+    "www.snapchat.com",
+    "www.threads.net",
+    "mastodon.social",
+    "www.quora.com",
+    "discord.com",
+    "t.me",
+    "web.whatsapp.com",
+    // Shopping, international
+    "www.amazon.com",
+    "www.amazon.de",
+    "www.ebay.com",
     "www.ebay.de",
+    "www.aliexpress.com",
+    "www.etsy.com",
+    "www.temu.com",
+    "www.shein.com",
+    // Shopping and classifieds, DACH
     "www.zalando.de",
+    "www.otto.de",
+    "www.mediamarkt.de",
+    "www.saturn.de",
+    "www.idealo.de",
+    "www.geizhals.at",
+    "www.willhaben.at",
+    "www.shop-apotheke.com",
+    "www.lidl.de",
+    "www.notebooksbilliger.de",
+    "www.about-you.de",
+    "www.bauhaus.info",
+    // News, international
+    "www.bbc.co.uk",
+    "www.nytimes.com",
+    "www.theguardian.com",
+    "edition.cnn.com",
+    "www.reuters.com",
+    "apnews.com",
+    "www.aljazeera.com",
+    "www.washingtonpost.com",
+    // News and tech press, DACH
     "www.spiegel.de",
     "www.heise.de",
     "orf.at",
     "www.derstandard.at",
-    "www.bbc.co.uk",
-    "www.nytimes.com",
-    "www.instagram.com",
-    "www.linkedin.com",
-    "www.twitch.tv",
-    "www.paypal.com",
-    "outlook.office365.com",
-    "api.github.com",
-    "fonts.googleapis.com",
+    "www.zeit.de",
+    "www.sueddeutsche.de",
+    "www.faz.net",
+    "www.tagesschau.de",
+    "www.krone.at",
+    "www.diepresse.com",
+    "www.nzz.ch",
+    "www.srf.ch",
+    "www.golem.de",
+    "www.chip.de",
+    // Cloud, CDN and developer
+    "www.cloudflare.com",
     "cdn.jsdelivr.net",
+    "cdnjs.cloudflare.com",
+    "unpkg.com",
     "registry.npmjs.org",
-    "www.dropbox.com",
-    "www.twitch.tv",
-    "www.gmx.net",
-    "www.willhaben.at",
-    "www.booking.com",
-    "maps.googleapis.com",
+    "www.npmjs.com",
+    "www.github.com",
+    "api.github.com",
+    "raw.githubusercontent.com",
+    "objects.githubusercontent.com",
+    "gitlab.com",
+    "stackoverflow.com",
+    "pypi.org",
+    "crates.io",
+    "hub.docker.com",
+    "s3.amazonaws.com",
+    "storage.googleapis.com",
+    // Big-tech services
+    "www.microsoft.com",
+    "www.apple.com",
+    "www.icloud.com",
+    "www.adobe.com",
     "play.google.com",
+    "drive.google.com",
+    "docs.google.com",
+    "mail.google.com",
+    "accounts.google.com",
+    "maps.googleapis.com",
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "www.gstatic.com",
+    "outlook.office365.com",
+    "login.microsoftonline.com",
+    "www.office.com",
+    // Telemetry and analytics seen in ordinary browsing
+    "www.googletagmanager.com",
+    "www.google-analytics.com",
+    "connect.facebook.net",
+    "static.cloudflareinsights.com",
+    "incoming.telemetry.mozilla.org",
+    // Finance and payments
+    "www.paypal.com",
+    "www.paypal.de",
+    "www.stripe.com",
+    "api.stripe.com",
+    "www.klarna.com",
+    "www.visa.com",
+    "www.mastercard.com",
+    "www.coinbase.com",
+    "www.binance.com",
+    "www.n26.com",
+    "www.revolut.com",
+    // Travel and mobility
+    "www.booking.com",
+    "www.airbnb.com",
+    "www.expedia.com",
+    "www.tripadvisor.com",
+    "www.ryanair.com",
+    "www.lufthansa.com",
+    "www.skyscanner.net",
+    "www.oebb.at",
+    "www.bahn.de",
+    // Productivity and misc
+    "www.dropbox.com",
+    "www.wetransfer.com",
+    "www.notion.so",
+    "www.figma.com",
+    "www.canva.com",
+    "zoom.us",
+    "www.slack.com",
+    "www.wikipedia.org",
+    "de.wikipedia.org",
+    "en.wikipedia.org",
+    "www.imdb.com",
+    "www.gmx.net",
+    "web.de",
+    "mail.proton.me",
     "www.wetter.com",
-    "www.idealo.de",
+    "www.weather.com",
+    "www.speedtest.net",
+    // Time and software updates
+    "time.cloudflare.com",
+    "pool.ntp.org",
+    "dl.google.com",
+    "clients2.google.com",
+    "swcdn.apple.com",
 ];
 
 /// Pick the next decoy name, cycling through the pool with a per-tick offset so

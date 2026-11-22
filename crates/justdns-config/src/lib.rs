@@ -564,9 +564,10 @@ pub struct Modules {
 pub struct PrivacyModule {
     /// Master switch. Off by default — no worker runs until the admin turns it on.
     pub enabled: bool,
-    /// Chaff intensity, 0..=100. `0` runs the graph only (no chaff); the module
-    /// starts at a gentle base rate when first enabled. Read by the chaff
-    /// generator while the module is on.
+    /// Chaff intensity in decoys per minute, 0..=600. `0` runs the graph only
+    /// (no chaff); the module starts at a gentle base rate when first enabled.
+    /// Read by the chaff generator while the module is on, which clamps it to its
+    /// own maximum.
     pub chaff_intensity: u32,
 }
 
