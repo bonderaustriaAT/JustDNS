@@ -3,6 +3,16 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.47.0] - 2026-11-22
+
+- Added: **Block answers that resolve to a known-bad IP.** A new kind of list holds IPv4 addresses and
+  CIDR ranges instead of domain names and is checked against the addresses a resolver returns: when an
+  answer resolves to an address on the list, the whole answer is refused with the usual block response,
+  so a name whose address is malicious is stopped even when the name itself is on no list. The
+  ready-made "JustDNS Threat-IPs" list (C2, dropper and malware addresses from our honeypot network) is
+  one click away in the catalogue, and you can add your own IP lists by URL like any other feed. IPv4
+  only for now.
+
 ## [0.46.3] - 2026-11-21
 
 - Changed: **DACH blocklist moved to its new repository.** The JustDNS DACH supplement is now fetched

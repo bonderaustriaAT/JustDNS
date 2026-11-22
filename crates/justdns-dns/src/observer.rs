@@ -76,6 +76,10 @@ pub struct QueryRecord {
     /// `None` otherwise. A warn-mode hit leaves the answer unchanged and is only
     /// recorded; a block-mode hit is recorded on the answer the block produced.
     pub phishing: Option<PhishingHit>,
+    /// Why the answer was blocked by a response-level check rather than a name
+    /// block, as a short stable label; `None` otherwise. Currently only
+    /// `"threat-ip"`: the resolved answer carried an IP on an IP block list.
+    pub block_reason: Option<&'static str>,
 }
 
 /// Something that records handled queries. Implementations must not block for

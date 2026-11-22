@@ -8424,6 +8424,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         }
     }
 

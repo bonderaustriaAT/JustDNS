@@ -37,7 +37,8 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
     resolver      VARCHAR DEFAULT '',
     dnssec        VARCHAR DEFAULT '',
     origin        VARCHAR DEFAULT '',
-    phishing      VARCHAR DEFAULT ''
+    phishing      VARCHAR DEFAULT '',
+    block_reason  VARCHAR DEFAULT ''
 );";
 
 /// Schema upgrades for a log written by an older build, applied in order. Each
@@ -58,10 +59,11 @@ const MIGRATIONS: &str = "\
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS resolver VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS dnssec VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT '';
-    ALTER TABLE queries ADD COLUMN IF NOT EXISTS phishing VARCHAR DEFAULT '';";
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS phishing VARCHAR DEFAULT '';
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS block_reason VARCHAR DEFAULT '';";
 
 const SELECT_COLUMNS: &str = "at_ms, client, name, record_type, response_code, source, \
-    duration_ms, answers, addresses, resolver, dnssec, phishing";
+    duration_ms, answers, addresses, resolver, dnssec, phishing, block_reason";
 
 /// Cap DuckDB's memory and thread use, and point its temp spill at `temp_dir`, so
 /// a heavy aggregate (a report over a day or week) cannot take the process down.
@@ -223,6 +225,7 @@ impl DuckStore {
                 .as_ref()
                 .map(PhishingFlag::label)
                 .unwrap_or_default();
+            let block_reason = event.block_reason.as_deref().unwrap_or("");
             appender.append_row(params![
                 event.at_ms,
                 client,
@@ -237,6 +240,7 @@ impl DuckStore {
                 dnssec,
                 origin,
                 phishing,
+                block_reason,
             ])?;
         }
         if any {
@@ -631,8 +635,8 @@ impl DuckReader {
         let rows = stmt
             .query_map(params_from_iter(binds.iter()), |row| {
                 let event = row_to_event(row)?;
-                let origin: String = row.get::<_, Option<String>>(12)?.unwrap_or_default();
-                let rowid: i64 = row.get(13)?;
+                let origin: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
+                let rowid: i64 = row.get(14)?;
                 Ok(HistoryRow {
                     event,
                     origin,
@@ -984,6 +988,9 @@ fn row_to_event(row: &duckdb::Row<'_>) -> duckdb::Result<QueryEvent> {
             .get::<_, Option<String>>(11)?
             .as_deref()
             .and_then(PhishingFlag::from_label),
+        block_reason: row
+            .get::<_, Option<String>>(12)?
+            .filter(|label| !label.is_empty()),
     })
 }
 
@@ -1027,6 +1034,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         }
     }
 
@@ -1161,6 +1169,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1206,6 +1215,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1258,6 +1268,7 @@ mod tests {
             resolver: resolver.map(str::to_owned),
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1452,6 +1463,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1510,6 +1522,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1564,6 +1577,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let noisy = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let quiet = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
@@ -1610,6 +1624,7 @@ mod tests {
             resolver: resolver.map(str::to_owned),
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1690,6 +1705,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store

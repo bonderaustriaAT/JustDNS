@@ -30,7 +30,7 @@ use justdns_dns::server::Server;
 use justdns_dns::tls::TlsManager;
 use justdns_dns::upstream::{Upstream, UpstreamConfig};
 use justdns_filter::{
-    Blocker, DomainSet, PhishingConfig, PhishingDetector, PhishingMode, PolicyEngine,
+    Blocker, DomainSet, IpBlocker, PhishingConfig, PhishingDetector, PhishingMode, PolicyEngine,
 };
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
@@ -288,6 +288,11 @@ async fn main() -> ExitCode {
     // policy engine, so a dashboard edit takes effect on the next query.
     let phishing_detector = Arc::new(PhishingDetector::new());
     configure_phishing(&phishing_detector, &config_store.get(), &lists);
+    // The response-IP block set the pipeline checks each answer against: the union
+    // of the enabled IP feeds. A list-derived global object like the phishing
+    // detector, republished live when the IP feeds change.
+    let ip_blocker = Arc::new(IpBlocker::new());
+    publish_ip_block(&ip_blocker, &lists);
     {
         let engine = policy_engine.clone();
         let lists_handle = lists.clone();
@@ -295,6 +300,7 @@ async fn main() -> ExitCode {
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
         let detector = phishing_detector.clone();
+        let ip_blocker_handle = ip_blocker.clone();
         lists.on_change(move || {
             rebuild_policies(
                 &engine,
@@ -306,6 +312,9 @@ async fn main() -> ExitCode {
             // The warn feeds live in the lists store, so a list change can change
             // the detector's NRD set too.
             configure_phishing(&detector, &config_handle.get(), &lists_handle);
+            // The IP feeds live there too, so a list change can change the
+            // response-IP block set.
+            publish_ip_block(&ip_blocker_handle, &lists_handle);
         });
     }
     {
@@ -387,6 +396,7 @@ async fn main() -> ExitCode {
             block_page: block_page_target.clone(),
             dnssec_validate: dnssec_validate.clone(),
             pause_until: config_store.blocking_pause_flag(),
+            ip_block: Some(ip_blocker.clone()),
         },
     )
     .with_observer(observer)
@@ -725,6 +735,14 @@ fn rebuild_policies(
 fn configure_phishing(detector: &PhishingDetector, settings: &Settings, lists: &ListStore) {
     let nrd = lists.resolved().warn;
     detector.configure(phishing_config(&settings.phishing, nrd));
+}
+
+/// (Re)build the response-IP block set from the enabled IP feeds and publish it,
+/// so a change to the IP lists takes effect on the next answer without a restart.
+/// The set is the union of the enabled IP feeds; it is global and checked against
+/// resolver answers, never against query names.
+fn publish_ip_block(ip_blocker: &IpBlocker, lists: &ListStore) {
+    ip_blocker.publish(lists.resolved().ip_block);
 }
 
 /// Map the stored phishing settings plus the warn set into the detector's config.

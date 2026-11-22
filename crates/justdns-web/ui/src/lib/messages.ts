@@ -694,6 +694,7 @@ const de = {
   "lists.filterAll": "Alle",
   "lists.kindAllow": "Freigabe",
   "lists.kindBlock": "Sperrliste",
+  "lists.kindBlockIp": "IP-Sperrliste",
   "lists.recommended": "Empfohlen",
   "lists.recommendedHint": "Von JustDNS als sinnvolle Standardwahl empfohlen.",
   "lists.simulate": "Testen",
@@ -737,6 +738,7 @@ const de = {
   "category.privacy": "Telemetrie",
   "category.bypass": "Umgehung",
   "category.allow": "Freigabe",
+  "category.threatip": "Schad-IPs",
 
   // Settings.
   "settings.title": "Einstellungen",
@@ -2335,6 +2337,7 @@ const en: Catalog = {
   "lists.filterAll": "All",
   "lists.kindAllow": "Allow",
   "lists.kindBlock": "Block list",
+  "lists.kindBlockIp": "IP block list",
   "lists.recommended": "Recommended",
   "lists.recommendedHint": "Recommended by JustDNS as a sensible default choice.",
   "lists.simulate": "Test",
@@ -2378,6 +2381,7 @@ const en: Catalog = {
   "category.privacy": "Telemetry",
   "category.bypass": "Bypass",
   "category.allow": "Allow",
+  "category.threatip": "Threat IPs",
 
   "settings.title": "Settings",
   "settings.expertMode": "Expert mode",

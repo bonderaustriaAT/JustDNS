@@ -35,6 +35,7 @@ const TRUSTED_PREFIXES: &[&str] = &[
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/",
     "https://raw.githubusercontent.com/hagezi/nrd/main/domains/",
     "https://raw.githubusercontent.com/bonderaustriaAT/justdns-blocklist/main/",
+    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-threat-ips/main/",
 ];
 
 /// One entry in the curated catalogue: a ready-made list the user can switch on
@@ -202,6 +203,21 @@ Zweifel bleibt eine Domain draußen.",
         fp_level: 1,
     },
     Preset {
+        key: "justdns-threat-ips-v4",
+        category: "threatip",
+        recommended: true,
+        name: "JustDNS Threat-IPs",
+        url: "https://raw.githubusercontent.com/bonderaustriaAT/justdns-threat-ips/main/threat-ips-v4.txt",
+        kind: ListKind::BlockIp,
+        description: "Keine Domain-, sondern eine IP-Blockliste: prueft die Antwort-Adressen (A-Records) \
+des Resolvers. Zeigt eine Antwort auf eine bekannte Schad-IP (C2, Dropper, Malware aus unserem \
+Honeypot-Netz), wird die ganze Antwort verworfen. Greift auch dort, wo die Domain selbst noch nicht \
+gelistet ist. Nur IPv4, Einzel-IPs und CIDR.",
+        false_positive: "Gering. Die IPs stammen aus laufend gepflegter Honeypot-Beobachtung; ein \
+geteilter Hoster-Range kann theoretisch Mitlaeufer treffen, daher nur bestaetigte Schad-IPs.",
+        fp_level: 2,
+    },
+    Preset {
         key: "nrd-7",
         category: "nrd",
         recommended: true,
@@ -287,7 +303,10 @@ mod tests {
             assert!(!preset.false_positive.is_empty());
             assert!((1..=5).contains(&preset.fp_level));
             assert!(
-                ["ads", "security", "privacy", "bypass", "nrd", "allow"].contains(&preset.category),
+                [
+                    "ads", "security", "privacy", "bypass", "nrd", "allow", "threatip"
+                ]
+                .contains(&preset.category),
                 "{} has an unknown category {}",
                 preset.key,
                 preset.category
@@ -310,9 +329,15 @@ mod tests {
             .collect();
         assert_eq!(
             recommended,
-            ["hagezi-multi", "hagezi-tif", "justdns-dach", "nrd-7"]
-                .into_iter()
-                .collect(),
+            [
+                "hagezi-multi",
+                "hagezi-tif",
+                "justdns-dach",
+                "nrd-7",
+                "justdns-threat-ips-v4",
+            ]
+            .into_iter()
+            .collect(),
             "the recommended-badge set changed; update this test deliberately",
         );
 
