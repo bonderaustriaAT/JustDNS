@@ -39,4 +39,11 @@ pub enum ListKind {
     ///
     /// [`PhishingDetector`]: justdns_filter::PhishingDetector
     Warn,
+    /// IPv4 addresses and CIDR ranges to block in resolver answers. Entries are
+    /// response IPs, not names: when an answer resolves to one of them the whole
+    /// answer is refused. Routed to the [`IpSet`], never to the domain blocker.
+    ///
+    /// [`IpSet`]: justdns_filter::IpSet
+    #[serde(rename = "blockip")]
+    BlockIp,
 }

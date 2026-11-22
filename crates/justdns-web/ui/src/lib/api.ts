@@ -823,8 +823,9 @@ export interface ClassifyResult {
   name?: string;
 }
 
-/** Whether a list adds names to the allow set or the block set. */
-export type ListKind = "allow" | "block" | "warn";
+/** Whether a list adds names to the allow set or the block set, warns, or blocks
+ *  response IPs. */
+export type ListKind = "allow" | "block" | "warn" | "blockip";
 
 /** A subscription to an external feed, with the status of its last fetch. */
 export interface Subscription {
@@ -851,7 +852,7 @@ export interface Preset {
   /** False-positive risk on a 1 (negligible) to 5 (high) scale. */
   fpLevel: number;
   /** Coarse grouping for the catalogue filter. */
-  category: "ads" | "security" | "privacy" | "bypass" | "nrd" | "allow";
+  category: "ads" | "security" | "privacy" | "bypass" | "nrd" | "allow" | "threatip";
   /** Whether JustDNS marks this as a recommended starting choice (badge in the
    *  catalogue). Optional on the wire: an older server omits it. */
   recommended?: boolean;

@@ -4,6 +4,16 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.47.0] - 2026-11-22
+
+- Neu: **Antworten blockieren, die auf eine bekannte Schad-IP zeigen.** Eine neue Listenart enthaelt
+  IPv4-Adressen und CIDR-Bereiche statt Domainnamen und wird gegen die Adressen geprueft, die ein
+  Resolver zurueckgibt: Zeigt eine Antwort auf eine gelistete Adresse, wird die ganze Antwort mit der
+  ueblichen Block-Antwort verworfen, sodass ein Name mit boesartiger Adresse auch dann gestoppt wird,
+  wenn der Name selbst auf keiner Liste steht. Die fertige Liste "JustDNS Threat-IPs" (C2-, Dropper-
+  und Malware-Adressen aus unserem Honeypot-Netz) ist im Katalog mit einem Klick dabei, und eigene
+  IP-Listen lassen sich wie jeder andere Feed per URL einbinden. Vorerst nur IPv4.
+
 ## [0.46.3] - 2026-11-21
 
 - Geaendert: **DACH-Blockliste in ihr neues Repository umgezogen.** Die JustDNS-DACH-Ergaenzung wird

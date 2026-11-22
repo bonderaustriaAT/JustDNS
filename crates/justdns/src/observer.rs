@@ -46,6 +46,7 @@ impl QueryObserver for StoreObserver {
             resolver: record.resolver,
             dnssec: record.dnssec.map(map_dnssec),
             phishing: record.phishing.map(map_phishing),
+            block_reason: record.block_reason.map(str::to_owned),
         });
     }
 }
@@ -113,6 +114,7 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
         }
     }
 

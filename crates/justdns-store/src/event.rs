@@ -216,6 +216,12 @@ pub struct QueryEvent {
     /// Older logs written before this field read back as `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phishing: Option<PhishingFlag>,
+    /// Why the answer was blocked by a response-level check rather than a name
+    /// block, as a short stable label; absent otherwise. Currently only
+    /// `"threat-ip"`: the resolved answer carried an IP on an IP block list.
+    /// Older logs written before this field read back as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<String>,
 }
 
 #[cfg(test)]

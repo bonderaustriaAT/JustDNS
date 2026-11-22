@@ -42,7 +42,14 @@ function relativeTime(ms: number, t: T): string {
 }
 
 /** The catalogue categories in the order the filter shows them. */
-const CATEGORY_ORDER: Preset["category"][] = ["ads", "security", "privacy", "bypass", "allow"];
+const CATEGORY_ORDER: Preset["category"][] = [
+  "ads",
+  "security",
+  "threatip",
+  "privacy",
+  "bypass",
+  "allow",
+];
 
 /** Catalogue sort rank: the JustDNS list leads, then the other recommended
  *  picks, then the long tail. Lower sorts first; equal ranks keep their original
@@ -295,7 +302,11 @@ function PresetCard({
               </span>
             )}
             <span className={styles.kind} data-kind={preset.kind}>
-              {preset.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
+              {preset.kind === "allow"
+                ? t("lists.kindAllow")
+                : preset.kind === "blockip"
+                  ? t("lists.kindBlockIp")
+                  : t("lists.kindBlock")}
             </span>
             <span className={styles.categoryTag}>
               {t(`category.${preset.category}` as MessageKey)}
@@ -608,6 +619,7 @@ export function Lists({ section }: { section: ListsSection }) {
           >
             <option value="block">{t("lists.kindBlock")}</option>
             <option value="allow">{t("lists.kindAllow")}</option>
+            <option value="blockip">{t("lists.kindBlockIp")}</option>
           </select>
           <button type="submit" className={styles.addButton} disabled={pending.has("add-feed")}>
             {t("lists.subscribe")}
@@ -625,7 +637,11 @@ export function Lists({ section }: { section: ListsSection }) {
                   <span className={styles.feedUrl}>{feed.url}</span>
                   <span className={styles.feedStatus}>
                     <span className={styles.kind} data-kind={feed.kind}>
-                      {feed.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
+                      {feed.kind === "allow"
+                        ? t("lists.kindAllow")
+                        : feed.kind === "blockip"
+                          ? t("lists.kindBlockIp")
+                          : t("lists.kindBlock")}
                     </span>
                     {feedStatusText(feed, t, lang, locale)}
                   </span>

@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use justdns_filter::{BlockCategory, BlockSource, Blocker, DomainSet, parse_rule};
+use justdns_filter::{BlockCategory, BlockSource, Blocker, DomainSet, IpSet, parse_rule};
 use serde::{Deserialize, Serialize};
 
 use crate::ListKind;
@@ -292,6 +292,10 @@ pub struct ResolvedLists {
     /// The merged newly-registered-domain warn set: every enabled warn feed.
     /// Handed to the phishing detector, never to the blocking policy.
     pub warn: DomainSet,
+    /// The merged response-IP block set: every enabled IP feed. Checked against
+    /// resolver answers, never against query names, so it is global (not scoped
+    /// per device) like the warn set.
+    pub ip_block: IpSet,
 }
 
 /// A cheap, cloneable handle to the persistent lists.
@@ -384,6 +388,7 @@ impl ListStore {
 
         let mut block_feeds = Vec::new();
         let mut warn = DomainSet::new();
+        let mut ip_block = IpSet::new();
         for sub in &lists.subscriptions {
             match sub.kind {
                 // Allow feeds merge into the one allow set; they are global-only.
@@ -417,6 +422,15 @@ impl ListStore {
                         }
                     }
                 }
+                // IP feeds merge into one global response-IP block set, checked
+                // against resolver answers, never scoped per device.
+                ListKind::BlockIp => {
+                    if sub.enabled {
+                        if let Some(text) = self.read_cache(&sub.id) {
+                            ip_block.add_rules(&text);
+                        }
+                    }
+                }
             }
         }
 
@@ -425,6 +439,7 @@ impl ListStore {
             own_block,
             block_feeds,
             warn,
+            ip_block,
         }
     }
 
@@ -974,6 +989,9 @@ impl ListStore {
                 // Warn (NRD) feeds never enter the blocker: they are consumed by
                 // the phishing detector via `resolved().warn`, not here.
                 ListKind::Warn => {}
+                // IP feeds never enter the domain blocker: they are consumed on
+                // the answer path via `resolved().ip_block`, not here.
+                ListKind::BlockIp => {}
             }
         }
 
@@ -1188,6 +1206,47 @@ mod tests {
             !store.block_feed_catalog()[0].enabled,
             "the catalogue reflects the disabled flag",
         );
+    }
+
+    #[test]
+    fn ip_feed_fills_the_response_ip_block_set_and_stays_out_of_the_domain_blocker() {
+        let (_dir, store, _blocker) = store();
+        let id = store
+            .add_subscription(
+                "Threat IPs",
+                "https://example.invalid/threat-ips-v4.txt",
+                ListKind::BlockIp,
+            )
+            .unwrap();
+        // Seed the cache as a real fetch would, then resolve from it.
+        store
+            .write_cache(&id, "1.2.3.4\n10.0.0.0/8\n# comment\n")
+            .unwrap();
+
+        let resolved = store.resolved();
+        assert!(resolved.ip_block.contains("1.2.3.4".parse().unwrap()));
+        assert!(resolved.ip_block.contains("10.9.8.7".parse().unwrap()));
+        assert!(!resolved.ip_block.contains("8.8.8.8".parse().unwrap()));
+
+        // An IP feed is not a domain block feed and never enters the blocker.
+        assert!(
+            store.block_feed_catalog().is_empty(),
+            "IP feeds are not listed as domain block feeds"
+        );
+
+        // Disabling it empties the response-IP set.
+        store.set_subscription_enabled(&id, false).unwrap();
+        assert!(store.resolved().ip_block.is_empty());
+    }
+
+    #[test]
+    fn block_ip_kind_round_trips_through_serde() {
+        assert_eq!(
+            serde_json::to_value(ListKind::BlockIp).unwrap(),
+            serde_json::Value::String("blockip".to_owned()),
+        );
+        let kind: ListKind = serde_json::from_str("\"blockip\"").unwrap();
+        assert_eq!(kind, ListKind::BlockIp);
     }
 
     #[test]
