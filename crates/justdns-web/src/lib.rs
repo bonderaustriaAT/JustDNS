@@ -530,23 +530,31 @@ pub async fn serve(
     // expiry, a device's blocked-lookup spike) and posts to the configured
     // webhook. It reads the live config each pass, so it does nothing until the
     // admin turns notifications on — and uses the blocking `ureq` client, so it
-    // runs on its own thread like the checkers above.
+    // runs on its own thread like the checkers above. A timed pass covers the
+    // polled conditions; a phishing hit also wakes it at once (via the store's
+    // alert signal), so that webhook goes out in a moment instead of waiting up
+    // to a full interval. Each pass flushes the query log first so the just-
+    // recorded hit is already queryable.
     {
         let state = app_state.clone();
         std::thread::spawn(move || {
+            let store = state.store.clone();
             let evaluator = notify::AlertEvaluator::new(
                 state.config.clone(),
                 state.ha.clone(),
                 state.update.clone(),
                 state.certs.clone(),
-                state.store.clone(),
+                store.clone(),
                 state.clients.clone(),
                 state.geo.clone(),
             );
-            std::thread::sleep(Duration::from_secs(60));
+            // Let the node settle before the first pass (a nudge can cut it short).
+            let mut seen = store.alert_generation();
+            store.wait_for_alert(&mut seen, Duration::from_secs(15));
             loop {
+                store.flush_blocking();
                 evaluator.evaluate();
-                std::thread::sleep(ALERT_CHECK_INTERVAL);
+                store.wait_for_alert(&mut seen, ALERT_CHECK_INTERVAL);
             }
         });
     }

@@ -7,7 +7,7 @@
 //! never blocked on disk I/O. Reads are served from the hot view.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -37,6 +37,21 @@ const CHANNEL_CAPACITY: usize = 4096;
 enum WriterMsg {
     Row(QueryEvent, String),
     Prune(i64),
+    /// Flush the pending batch now and acknowledge, so a caller can be sure every
+    /// queued row is queryable through the history reader before it reads.
+    Flush(std::sync::mpsc::Sender<()>),
+}
+
+/// A wake signal for the alert evaluator. The evaluator runs a pass on a timer,
+/// but a freshly recorded alert-worthy event (a phishing hit) bumps the
+/// generation and wakes any waiter at once, so the notification webhook goes out
+/// in a moment instead of waiting for the next tick. A monotonic generation
+/// counter (rather than a bare notify) means a nudge that lands between passes is
+/// not lost: the waiter compares against the generation it last saw.
+#[derive(Default)]
+struct AlertWaker {
+    generation: Mutex<u64>,
+    changed: Condvar,
 }
 
 /// A cloneable handle to the query store.
@@ -44,6 +59,8 @@ enum WriterMsg {
 pub struct Store {
     recorder: Arc<Recorder>,
     writer: mpsc::Sender<WriterMsg>,
+    /// Wakes the alert evaluator the moment an alert-worthy event is recorded.
+    alert: Arc<AlertWaker>,
     /// A second DuckDB connection for reading the full history. Cloned from the
     /// writer's connection before it was moved into the writer task, so it sees
     /// flushed rows. Behind a `Mutex` because a DuckDB connection is `!Sync`; a
@@ -84,6 +101,7 @@ impl Store {
                 recorder,
                 writer,
                 reader,
+                alert: Arc::new(AlertWaker::default()),
             },
             handle,
         ))
@@ -93,6 +111,9 @@ impl Store {
     /// durable log with an empty origin (this node). A full queue drops the durable
     /// write rather than blocking.
     pub fn record(&self, event: QueryEvent) {
+        // A phishing hit is what the notification evaluator alerts on, so wake it
+        // at once instead of letting the alert wait for the next timed pass.
+        let alert_worthy = event.phishing.is_some();
         self.recorder.record(event.clone());
         if self
             .writer
@@ -100,6 +121,47 @@ impl Store {
             .is_err()
         {
             warn!("query-log writer queue full; dropping a durable log entry");
+        }
+        if alert_worthy {
+            self.nudge_alert();
+        }
+    }
+
+    /// The current alert generation, captured once before a wait so a nudge that
+    /// lands during a pass is still seen on the next [`wait_for_alert`].
+    pub fn alert_generation(&self) -> u64 {
+        *self.alert.generation.lock().expect("alert waker poisoned")
+    }
+
+    /// Block until an alert-worthy event is recorded (the generation moves past
+    /// `*seen`) or `timeout` elapses, then store the generation reached in `*seen`.
+    /// This is how the notification evaluator paces itself: a timed pass for the
+    /// conditions it polls, plus an immediate wake when a phishing hit lands.
+    pub fn wait_for_alert(&self, seen: &mut u64, timeout: Duration) {
+        let guard = self.alert.generation.lock().expect("alert waker poisoned");
+        let (guard, _) = self
+            .alert
+            .changed
+            .wait_timeout_while(guard, timeout, |generation| *generation == *seen)
+            .expect("alert waker poisoned");
+        *seen = *guard;
+    }
+
+    fn nudge_alert(&self) {
+        let mut generation = self.alert.generation.lock().expect("alert waker poisoned");
+        *generation = generation.wrapping_add(1);
+        self.alert.changed.notify_all();
+    }
+
+    /// Flush the pending write batch to the durable log and wait for it, so a
+    /// caller that is about to read the history sees every row recorded so far.
+    /// Best-effort: if the writer queue is full the flush is skipped, and if the
+    /// writer does not acknowledge within a few seconds the wait gives up rather
+    /// than blocking the caller.
+    pub fn flush_blocking(&self) {
+        let (ack, done) = std::sync::mpsc::channel();
+        if self.writer.try_send(WriterMsg::Flush(ack)).is_ok() {
+            let _ = done.recv_timeout(Duration::from_secs(5));
         }
     }
 
@@ -332,6 +394,12 @@ async fn writer_loop(duck: DuckStore, mut rx: mpsc::Receiver<WriterMsg>) {
                         Err(error) => warn!(%error, "failed to prune the query log"),
                     }
                 }
+                // Flush on demand and acknowledge, so a caller waiting on the flush
+                // knows every queued row is now in the log and queryable.
+                Some(WriterMsg::Flush(ack)) => {
+                    flush(&duck, &mut batch);
+                    let _ = ack.send(());
+                }
                 None => {
                     flush(&duck, &mut batch);
                     break;
@@ -396,6 +464,40 @@ mod tests {
 
         assert_eq!(store.stats().total, 2);
         assert_eq!(store.recent(10).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_phishing_hit_nudges_the_alert_waker_but_a_plain_query_does_not() {
+        let (store, _writer) = Store::in_memory(100).unwrap();
+        let before = store.alert_generation();
+
+        // A plain query never wakes the notification evaluator.
+        store.record(event(1));
+        assert_eq!(
+            store.alert_generation(),
+            before,
+            "a plain query does not nudge the alert waker"
+        );
+
+        // A phishing hit does, so the webhook goes out at once.
+        let mut hit = event(2);
+        hit.phishing = Some(crate::PhishingFlag {
+            kind: crate::PhishingKind::Nrd,
+            blocked: true,
+            brand: None,
+        });
+        store.record(hit);
+        assert_ne!(
+            store.alert_generation(),
+            before,
+            "a phishing hit nudges the alert waker"
+        );
+
+        // A waiter that last saw `before` returns at once rather than waiting out
+        // the timeout, because the generation has moved.
+        let mut seen = before;
+        store.wait_for_alert(&mut seen, Duration::from_secs(5));
+        assert_ne!(seen, before, "the waiter observes the nudge immediately");
     }
 
     #[tokio::test]
