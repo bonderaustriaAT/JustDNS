@@ -1022,6 +1022,16 @@ impl ConfigStore {
         let until = self.inner.blocking_pause_until.load(Ordering::Relaxed);
         (until != 0 && now_ms() < until).then_some(until)
     }
+
+    /// The raw stored pause deadline (0 when never armed), without the
+    /// expired-reads-as-`None` interpretation of
+    /// [`blocking_pause_until_ms`](Self::blocking_pause_until_ms). Used by the HA
+    /// apply path to decide whether a synced deadline is actually a *new* one, so a
+    /// steady sync that keeps re-setting the same deadline — even one the local
+    /// clock already considers expired — never repeatedly flushes the cache.
+    pub fn pause_until_raw(&self) -> u64 {
+        self.inner.blocking_pause_until.load(Ordering::Relaxed)
+    }
 }
 
 /// Wall-clock milliseconds since the Unix epoch, for the blocking-pause

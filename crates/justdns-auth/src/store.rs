@@ -35,6 +35,11 @@ pub struct Mfa {
     pub confirmed: bool,
     #[serde(default)]
     pub recovery: Vec<String>,
+    /// The highest TOTP time-step already accepted for this user, so a code cannot
+    /// be replayed within its validity window (RFC 6238 §5.2). `None` until the
+    /// first successful verification. Travels with the record across the cluster.
+    #[serde(default)]
+    pub last_step: Option<u64>,
 }
 
 /// A single account. The hash is a PHC string (algorithm, parameters and salt
@@ -387,6 +392,7 @@ impl UserStore {
             secret: secret.to_owned(),
             confirmed: false,
             recovery,
+            last_step: None,
         });
         self.persist(&users)
     }
@@ -448,15 +454,27 @@ impl UserStore {
     /// Verify a TOTP `code` against the user's stored secret (confirmed or not,
     /// so the same call confirms an enrolment and authenticates a login).
     pub fn verify_totp(&self, username: &str, code: &str) -> bool {
-        let users = self.read();
-        match users
-            .iter()
+        let mut users = self.write();
+        let Some(mfa) = users
+            .iter_mut()
             .find(|u| u.username == username)
-            .and_then(|u| u.mfa.as_ref())
-        {
-            Some(m) => mfa::verify_totp(&m.secret, code),
-            None => false,
+            .and_then(|u| u.mfa.as_mut())
+        else {
+            return false;
+        };
+        let Some(step) = mfa::verify_totp_step(&mfa.secret, code) else {
+            return false;
+        };
+        // Reject a replay: the same (or an earlier) time-step must not pass twice.
+        if mfa.last_step.is_some_and(|last| step <= last) {
+            return false;
         }
+        mfa.last_step = Some(step);
+        // Persist the advanced step best-effort: a failed write only means the
+        // replay guard falls back to in-memory until the next restart, so a valid
+        // code must still be accepted.
+        let _ = self.persist(&users);
+        true
     }
 
     /// Check a recovery `code`; on a match remove it (single use) and persist.
@@ -742,6 +760,23 @@ mod tests {
 
         store.clear_mfa("admin").unwrap();
         assert!(!store.mfa_enabled("admin"));
+    }
+
+    #[test]
+    fn a_totp_code_cannot_be_replayed() {
+        let (_dir, store) = store();
+        store.create_admin("admin", "hunter2hunter2").unwrap();
+        let secret = mfa::generate_secret();
+        let codes = mfa::generate_recovery_codes();
+        store.begin_mfa("admin", &secret, &codes).unwrap();
+        store.confirm_mfa("admin").unwrap();
+
+        let code = mfa::current_code(&secret);
+        assert!(store.verify_totp("admin", &code), "first use is accepted");
+        assert!(
+            !store.verify_totp("admin", &code),
+            "the same code must not pass a second time (replay)"
+        );
     }
 
     #[test]

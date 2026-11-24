@@ -297,6 +297,33 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             }
         }
 
+        // IPv6 companion to the response-IP filter. The filter above only reads A
+        // (IPv4) records, so a threat domain that also publishes AAAA would stay
+        // reachable over IPv6 (Happy Eyeballs). When this is an AAAA answer and the
+        // same name's A record — already cached from its own lookup — lands on the
+        // block set, refuse the AAAA too. Best-effort: it closes the common case
+        // (the A is normally resolved alongside or before the AAAA); AAAA-off
+        // remains the complete protection, since the threat intel is IPv4-only.
+        if block_reason.is_none()
+            && matches!(answered.source, AnswerSource::Upstream | AnswerSource::Cache)
+            && !self.blocking_paused()
+            && query.query_type() == RecordType::AAAA
+            && !response.answers.is_empty()
+        {
+            if let Some(ip_block) = &self.options.ip_block {
+                let ip_allow = self.options.ip_allow.as_deref();
+                if !ip_block.is_empty()
+                    && self.sibling_a_hits_ip_block(&query, ip_block, ip_allow).await
+                {
+                    response.answers.clear();
+                    response.metadata.response_code = ResponseCode::NoError;
+                    self.write_block_answer(&query, &mut response);
+                    answered = Answered::local(AnswerSource::Blocked);
+                    block_reason = Some("threat-ip");
+                }
+            }
+        }
+
         if let Some(observer) = &self.observer {
             observer.observe(QueryRecord {
                 client,
@@ -454,6 +481,36 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         }
 
         Answered::upstream(resolver, dnssec)
+    }
+
+    /// Whether the IPv4 (A) answer for `query`'s name — read from the cache only,
+    /// with no extra upstream lookup — lands on the response-IP block set. Used to
+    /// carry an IPv4 response-IP block over to the name's AAAA answer so the block
+    /// is not bypassed over IPv6. Returns `false` when the A record is not cached
+    /// (nothing to decide on) or is allow-listed.
+    async fn sibling_a_hits_ip_block(
+        &self,
+        query: &Query,
+        ip_block: &IpBlocker,
+        ip_allow: Option<&IpBlocker>,
+    ) -> bool {
+        let key = CacheKey::new(query.name(), RecordType::A);
+        let Some(hit) = self.cache.get(&key).await else {
+            return false;
+        };
+        let CachedResponse::Positive(records) = hit.response else {
+            return false;
+        };
+        records.iter().any(|record| match &record.data {
+            RData::A(a) => {
+                let ip = a.0;
+                if ip_allow.is_some_and(|allow| allow.contains(ip)) {
+                    return false;
+                }
+                ip_block.contains(ip)
+            }
+            _ => false,
+        })
     }
 
     /// Whether the troubleshooting pause is in force right now: armed (a non-zero
@@ -1026,6 +1083,63 @@ mod tests {
         let answer = pipe.handle(&req, CLIENT).await;
         assert_eq!(answer.response_code, ResponseCode::NoError);
         assert_eq!(answer.answers[0].data, RData::A(A(clean)));
+    }
+
+    #[tokio::test]
+    async fn an_aaaa_answer_is_blocked_when_its_sibling_a_is_on_the_block_set() {
+        // Response-IP only reads A records, so without this an AAAA answer for a
+        // threat domain would stay reachable over IPv6 (Happy Eyeballs). The name's
+        // A record is already cached (from its own lookup) and lands on the block
+        // set, so the AAAA is refused too.
+        let blocked_v4 = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
+        let options = options_with_ip_block("45.83.0.0/16\n");
+        options.ipv6_enabled.store(true, Ordering::Relaxed);
+        let (pipe, _calls) = pipeline(
+            Reply::Aaaa(Ipv6Addr::new(0x2606, 0x2800, 0, 0, 0, 0, 0, 1)),
+            options,
+        );
+        let name = Name::from_ascii("malware.example.").unwrap();
+
+        // Prime the sibling A record in the cache, as its own A lookup would have.
+        pipe.cache
+            .insert(
+                CacheKey::new(&name, RecordType::A),
+                CachedEntry::positive(
+                    vec![Record::from_rdata(name.clone(), 120, RData::A(A(blocked_v4)))],
+                    Duration::from_secs(120),
+                ),
+            )
+            .await;
+
+        let aaaa = pipe
+            .handle(&request("malware.example.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(aaaa.response_code, ResponseCode::NXDomain);
+        assert!(
+            aaaa.answers.is_empty(),
+            "the AAAA is refused because the sibling A is blocked"
+        );
+
+        // A name whose sibling A is not blocked still resolves over IPv6.
+        let clean = Name::from_ascii("ok.example.").unwrap();
+        pipe.cache
+            .insert(
+                CacheKey::new(&clean, RecordType::A),
+                CachedEntry::positive(
+                    vec![Record::from_rdata(
+                        clean,
+                        120,
+                        RData::A(A(Ipv4Addr::new(93, 184, 216, 34))),
+                    )],
+                    Duration::from_secs(120),
+                ),
+            )
+            .await;
+        let ok = pipe
+            .handle(&request("ok.example.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(ok.response_code, ResponseCode::NoError);
+        assert_eq!(ok.answers.len(), 1, "unblocked AAAA passes through");
     }
 
     #[tokio::test]

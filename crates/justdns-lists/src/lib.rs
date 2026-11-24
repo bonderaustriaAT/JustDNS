@@ -12,9 +12,11 @@
 //!
 //! [`Blocker`]: justdns_filter::Blocker
 
+mod net_guard;
 mod presets;
 mod store;
 
+pub use net_guard::host_is_disallowed;
 pub use presets::{Preset, preset, presets};
 pub use store::{
     BlockFeedEntry, ListEntry, ListError, ListObject, ListStore, ListsView, PresetView,

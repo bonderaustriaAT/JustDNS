@@ -1082,14 +1082,31 @@ fn count_rules(text: &str) -> usize {
 
 /// Download `url` as text, with a timeout and a size cap.
 fn fetch(url: &str) -> Result<String, String> {
+    // SSRF guard: a hand-added subscription URL is fetched by the node itself, so
+    // refuse one that aims at the cloud metadata endpoint or another link-local
+    // address before any connection is made.
+    if crate::net_guard::host_is_disallowed(url) {
+        return Err("feed URL points at a link-local/metadata address and is not allowed".to_owned());
+    }
     // ureq 3 moved timeouts onto the config; a per-request override keeps the
     // default agent (and its connection pool) instead of building a fresh one.
+    // Redirects are not followed: otherwise a public URL could 302 to the metadata
+    // endpoint and slip past the host guard above. A feed that redirects surfaces
+    // as a fetch error (shown in the UI) and the operator uses the final URL.
     let response = ureq::get(url)
         .config()
         .timeout_global(Some(FETCH_TIMEOUT))
+        .max_redirects(0)
         .build()
         .call()
         .map_err(|error| error.to_string())?;
+    // With redirects disabled a 3xx is returned rather than followed; treat any
+    // non-success status as a fetch failure so a redirected feed never reads as an
+    // empty (zero-rule) list.
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("feed fetch returned HTTP {}", status.as_u16()));
+    }
     let mut body = String::new();
     response
         .into_body()

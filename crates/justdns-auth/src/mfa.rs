@@ -57,12 +57,31 @@ pub fn otpauth_uri(secret: &str, issuer: &str, account: &str) -> Result<String, 
         .map_err(|e| format!("cannot build otpauth URL: {e}"))
 }
 
-/// Whether `code` is a valid TOTP for `secret` right now (±1 window).
+/// The matched time-step when `code` is a valid TOTP for `secret` right now (±1
+/// window), or `None` when it is not. The step is returned so the caller can
+/// reject a replay: RFC 6238 §5.2 requires a code be accepted only once, and
+/// totp-rs leaves that to the caller. A later accepted step must be strictly
+/// greater than the last one stored for the user.
+pub fn verify_totp_step(secret: &str, code: &str) -> Option<u64> {
+    totp_for(secret, "JustDNS", "user")
+        .ok()?
+        .check(code.trim(), now_unix())
+}
+
+/// Whether `code` is a valid TOTP for `secret` right now (±1 window). Carries no
+/// replay protection on its own — use [`verify_totp_step`] and track the step for
+/// anything that authenticates a login.
 pub fn verify_totp(secret: &str, code: &str) -> bool {
-    match totp_for(secret, "JustDNS", "user") {
-        Ok(totp) => totp.check(code.trim(), now_unix()).is_some(),
-        Err(_) => false,
-    }
+    verify_totp_step(secret, code).is_some()
+}
+
+/// The current valid TOTP code for `secret`, for tests that drive the login flow.
+#[cfg(test)]
+pub(crate) fn current_code(secret: &str) -> String {
+    totp_for(secret, "JustDNS", "user")
+        .unwrap()
+        .generate(now_unix())
+        .to_string()
 }
 
 /// Render an `otpauth://` URI as a scannable QR code in SVG, so the secret stays

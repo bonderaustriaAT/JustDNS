@@ -61,9 +61,13 @@ const PHISHING_COOLDOWN_MS: i64 = 60 * 60 * 1_000;
 pub fn send(cfg: &Notifications, title: &str, body: &str) -> Result<(), String> {
     let req = build_request(cfg, title, body)?;
     guard_target(&req.url)?;
+    // Redirects are not followed: the guard above only vets the initial host, so a
+    // target that 302-redirects to the metadata endpoint would otherwise slip past
+    // it. A webhook that genuinely needs a redirect surfaces as a delivery error.
     let mut call = ureq::post(&req.url)
         .config()
         .timeout_global(Some(HTTP_TIMEOUT))
+        .max_redirects(0)
         .build()
         .header("Content-Type", req.content_type);
     if let Some((name, value)) = &req.extra_header {

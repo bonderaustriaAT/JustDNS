@@ -929,16 +929,16 @@ async fn require_auth(
     }
 
     // Read-only follower gate: when this node is a read-only follower of the
-    // designated primary, refuse writes so the cluster is managed from one place. Two
-    // surfaces stay writable: the cluster control plane (`/api/ha`), so a follower
-    // can still be repaired or take over a dead primary, and a user's own account
-    // (`/api/account`), so anyone can still manage their own login while debugging.
-    // Reads are never blocked — a follower is a full, viewable dashboard.
+    // designated primary, refuse writes so the cluster is managed from one place.
+    // Only the cluster control plane (`/api/ha`) stays writable, so a follower can
+    // still be repaired or take over a dead primary. Account writes are NOT exempt:
+    // the authoritative sync replaces the whole user store from the primary every
+    // cycle, so a password or MFA change made on a follower would be silently
+    // reverted seconds later (and could lock the user out of the credential they
+    // just set). Account changes must be made on the primary; reads are never
+    // blocked — a follower is a full, viewable dashboard.
     let is_write = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    let exempt = path == "/api/ha"
-        || path.starts_with("/api/ha/")
-        || path == "/api/account"
-        || path.starts_with("/api/account/");
+    let exempt = path == "/api/ha" || path.starts_with("/api/ha/");
     if is_write && !exempt {
         let role = cluster_role(&state);
         if !role.is_primary {
@@ -4517,9 +4517,12 @@ fn ha_apply(
                 serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
             // Flush the cache when this node newly enters (or re-targets) a pause,
             // so it clears stale or negative cache entries exactly like the node the
-            // pause was armed on. The guard keeps a steady sync cycle, which re-sets
-            // the same deadline every time, from clearing the cache repeatedly.
-            if state.config.blocking_pause_until_ms() != Some(pause.until_ms) {
+            // pause was armed on. Compare against the *raw* stored deadline, not the
+            // expired-reads-as-None view: a steady sync re-sends the same deadline
+            // every cycle, and once the local clock passes it the None view would
+            // make every cycle look like a fresh pause and flush the cache on each
+            // one. The raw value stays equal, so a re-sent deadline never re-flushes.
+            if state.config.pause_until_raw() != pause.until_ms {
                 state.cache.clear();
             }
             state.config.set_blocking_pause_until(pause.until_ms);
