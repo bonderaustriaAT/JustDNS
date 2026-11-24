@@ -4,6 +4,20 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.47.2] - 2026-11-24
+
+- Geaendert: **Warnungen gehen sofort raus, sobald eine Bedrohung greift.** Der Benachrichtigungs-Webhook
+  fuer einen Phishing- oder NRD-Block wartete bisher auf eine periodische Pruefung und konnte bis zu
+  einer Minute brauchen. Ein Block weckt den Melder jetzt sofort, der Webhook kommt in Sekunden. Die
+  periodische Pruefung bleibt als Fallback fuer die Bedingungen, die nicht an einen einzelnen Block
+  haengen.
+- Behoben: **Haertung aus einem kompletten Security-Review.** Mehrere Schutzkorrekturen: Listen-Feeds
+  und Benachrichtigungs-Webhooks lassen sich nicht mehr auf interne Metadata- oder Link-Local-Adressen
+  richten und folgen keinen Redirects mehr (SSRF-Schutz); ein Response-IP-Block erfasst jetzt auch eine
+  AAAA-Antwort, deren Geschwister-A-Record auf der Blockliste steht; ein Read-Only-Follower nimmt keine
+  Account-Aenderungen mehr an, die der autoritative Sync der Hauptnode sonst still zurueckgesetzt
+  haette; und ein TOTP-Einmalcode laesst sich innerhalb seines Zeitschritts nicht mehr erneut einloesen.
+
 ## [0.47.1] - 2026-11-22
 
 - Behoben: **Schutz pausieren gilt jetzt fuer den ganzen Cluster.** Wenn du den Schutz voruebergehend

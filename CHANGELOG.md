@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.47.2] - 2026-11-24
+
+- Changed: **Alerts fire the moment a threat is caught.** The notification webhook for a phishing or
+  newly-registered-domain block used to wait for a periodic check and could take up to a minute to go
+  out. A block now wakes the notifier immediately, so the webhook arrives within seconds. The periodic
+  check stays as a fallback for the conditions that are not tied to a single block.
+- Fixed: **Hardening from a full security review.** Several defensive fixes: list feeds and
+  notification webhooks can no longer be pointed at internal metadata or link-local addresses and no
+  longer follow redirects (SSRF guard); a response-IP block now also catches an AAAA answer whose
+  sibling A record is on the block list; a read-only follower no longer accepts account changes, which
+  the authoritative sync from the primary would silently revert; and a one-time TOTP code can no longer
+  be replayed within its time step.
+
 ## [0.47.1] - 2026-11-22
 
 - Fixed: **Pausing protection now covers the whole cluster.** When you temporarily turn protection off
