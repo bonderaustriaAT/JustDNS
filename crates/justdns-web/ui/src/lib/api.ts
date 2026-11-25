@@ -721,6 +721,44 @@ export type QuerySource = "cache" | "upstream" | "local" | "rewrite" | "blocked"
  *  `DnssecStatus` (snake_case on the wire). */
 export type DnssecStatus = "secure" | "insecure" | "bogus" | "indeterminate";
 
+/** Why a query was acted on, as a coarse category for the log's reason tag:
+ *  `blocklist` (a name or CNAME-cloak block), `phishing` (a phishing block),
+ *  `threat_ip` (a response-IP block) or `warning` (a warn-only phishing hit that
+ *  still resolved). Absent on an ordinary resolved query. Matches the Rust
+ *  `ReasonCategory` (snake_case on the wire). */
+export type ReasonCategory = "blocklist" | "phishing" | "threat_ip" | "warning";
+
+/** A stage in the resolver's decision pipeline, in the order it runs. Matches
+ *  the Rust `TraceStage`. */
+export type TraceStage =
+  | "name_block"
+  | "phishing"
+  | "source"
+  | "cname_uncloak"
+  | "response_ip"
+  | "dnssec"
+  | "answer";
+
+/** What a stage did: `pass` (ran, let the query through), `hit` (this stage made
+ *  the decisive block), `warn` (flagged but let through) or `info` (a neutral
+ *  note, like the answer source). Matches the Rust `TraceOutcome`. */
+export type TraceOutcome = "pass" | "hit" | "warn" | "info";
+
+/** One stage of the decision trace: which stage, what it did, and an optional
+ *  short detail (a resolver name, an imitated brand, a response code). */
+export interface TraceStep {
+  stage: TraceStage;
+  outcome: TraceOutcome;
+  detail?: string;
+}
+
+/** The decision trace for one query: whether the troubleshooting pause was on
+ *  (so the protective stages were skipped) and the ordered stages that ran. */
+export interface QueryTrace {
+  paused: boolean;
+  steps: TraceStep[];
+}
+
 export interface QueryRow {
   at_ms: number;
   client: string;
@@ -739,6 +777,9 @@ export interface QueryRow {
   dnssec?: DnssecStatus;
   /** The phishing verdict, present only when the detector fired on this query. */
   phishing?: PhishingFlag;
+  /** The reason tag for the log row, present only when the query was blocked or
+   *  warned. The full per-stage trace is fetched on demand via `queryTrace`. */
+  reason?: ReasonCategory;
   /** The node this row came from in a high-availability cluster: absent for this
    *  node's own queries, a peer's node id for one pulled over the mesh. */
   origin?: string;
@@ -1563,6 +1604,22 @@ export const api = {
     if (geo?.country) params.set("country", geo.country);
     if (geo?.asn != null) params.set("asn", String(geo.asn));
     return getJson<QueryRow[]>(`/api/queries?${params}`, signal);
+  },
+  /** The decision trace for one log entry, read from the durable log on demand
+   *  when its detail opens. Identified by the row's time, client, name and
+   *  record type. `null` when the row has no stored trace (an older row) or no
+   *  row matches. */
+  queryTrace: (
+    row: { at_ms: number; client: string; name: string; record_type: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({
+      atMs: String(row.at_ms),
+      client: row.client,
+      name: row.name,
+      recordType: String(row.record_type),
+    });
+    return getJson<QueryTrace | null>(`/api/queries/trace?${params}`, signal);
   },
   /** A filtered, paginated page of the **full durable history** (DuckDB), newest
    *  first — the explorer behind `/protokoll`, able to page back past the live

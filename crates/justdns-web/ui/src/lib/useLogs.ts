@@ -8,6 +8,7 @@ import {
   type PhishingFlag,
   type QueryRow,
   type QuerySource,
+  type ReasonCategory,
 } from "./api";
 import {
   displayName,
@@ -66,7 +67,12 @@ export interface LogRow {
   /** The device name of the client, when one is set. */
   deviceName?: string;
   name: string;
+  /** The raw stored name (with trailing dot), as the trace lookup needs it to
+   *  match the durable row; `name` is the display form. */
+  rawName: string;
   type: string;
+  /** The numeric record type, for the trace lookup; `type` is the label. */
+  recordTypeNum: number;
   typeDesc?: string;
   /** Raw source, kept for styling; `sourceText` is what we print. */
   source: QuerySource;
@@ -91,6 +97,8 @@ export interface LogRow {
   origin?: string;
   /** The phishing verdict, present only when the detector fired on this query. */
   phishing?: PhishingFlag;
+  /** The reason tag for the row, present only when blocked or warned. */
+  reason?: ReasonCategory;
 }
 
 function rcodeTone(responseCode: number, isBlocked: boolean): RcodeTone {
@@ -115,7 +123,9 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     client: row.client,
     deviceName: row.device_name,
     name: displayName(row.name),
+    rawName: row.name,
     type: recordTypeLabel(row.record_type),
+    recordTypeNum: row.record_type,
     typeDesc: recordTypeDescription(row.record_type, lang),
     source: row.source,
     sourceText: sourceLabel(row.source, lang),
@@ -131,6 +141,7 @@ function toLogRow(row: QueryRow, lang: Lang, fmt: ReturnType<typeof formatters>)
     durationMs: row.duration_ms,
     origin: row.origin,
     phishing: row.phishing,
+    reason: row.reason,
   };
 }
 

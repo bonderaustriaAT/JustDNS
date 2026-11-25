@@ -1,10 +1,96 @@
 import { useEffect, useState } from "react";
 
-import { api, type ClassifyResult } from "../lib/api";
+import { api, type ClassifyResult, type QueryTrace } from "../lib/api";
 import { blockListLabel } from "../lib/dns";
 import { useI18n } from "../lib/i18n";
+import { OUTCOME_KEY, STAGE_KEY } from "../lib/trace";
 import type { LogRow } from "../lib/useLogs";
 import styles from "./Logs.module.css";
+
+/** The glyph that leads a trace step, by outcome: a block hit, a warning, a
+ *  passed gate, or a neutral note. */
+const OUTCOME_MARK: Record<QueryTrace["steps"][number]["outcome"], string> = {
+  hit: "✕",
+  warn: "!",
+  pass: "✓",
+  info: "·",
+};
+
+/** The decision trace for one entry: the ordered stages the resolver ran, read
+ *  from the durable log on demand. The decisive stage (a block hit or a warn)
+ *  and the neutral notes (source, answer) show at once; the gates that merely
+ *  passed fold behind a toggle, so a plain answer stays quiet. */
+function TraceView({ row }: { row: LogRow }) {
+  const { t } = useI18n();
+  const [trace, setTrace] = useState<QueryTrace | null | undefined>(undefined);
+  const [showPassed, setShowPassed] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .queryTrace(
+        {
+          at_ms: row.at_ms,
+          client: row.client,
+          name: row.rawName,
+          record_type: row.recordTypeNum,
+        },
+        controller.signal,
+      )
+      .then((result) => setTrace(result))
+      .catch(() => setTrace(null));
+    return () => controller.abort();
+  }, [row.at_ms, row.client, row.rawName, row.recordTypeNum]);
+
+  if (trace === undefined) {
+    return <p className={styles.reasonLoading}>{t("trace.loading")}</p>;
+  }
+  if (trace === null || trace.steps.length === 0) {
+    return <p className={styles.reasonLoading}>{t("trace.none")}</p>;
+  }
+
+  const passed = trace.steps.filter((step) => step.outcome === "pass");
+  const visible = showPassed
+    ? trace.steps
+    : trace.steps.filter((step) => step.outcome !== "pass");
+
+  return (
+    <div className={styles.trace}>
+      <h3 className={styles.traceTitle}>{t("trace.title")}</h3>
+      {trace.paused ? (
+        <p className={styles.tracePause} role="status">
+          {t("trace.paused")}
+        </p>
+      ) : null}
+      <ol className={styles.traceSteps}>
+        {visible.map((step, index) => (
+          <li key={index} className={styles.traceStep} data-outcome={step.outcome}>
+            <span className={styles.traceMark} aria-hidden="true">
+              {OUTCOME_MARK[step.outcome]}
+            </span>
+            <span className={styles.traceStage}>{t(STAGE_KEY[step.stage])}</span>
+            {step.detail ? <span className={styles.traceDetail}>{step.detail}</span> : null}
+            <span className={styles.traceOutcome}>{t(OUTCOME_KEY[step.outcome])}</span>
+          </li>
+        ))}
+      </ol>
+      {passed.length > 0 ? (
+        <button
+          type="button"
+          className={styles.traceToggle}
+          onClick={() => setShowPassed((value) => !value)}
+        >
+          {showPassed ? t("trace.hidePassed") : t("trace.showPassed")}
+        </button>
+      ) : null}
+      {row.origin ? (
+        <p className={styles.traceNode}>
+          {t("trace.node")}: {row.origin.slice(0, 8)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 type ActionState = "idle" | "pending" | "done" | "error";
 
@@ -161,6 +247,8 @@ export function LogDetail({ row }: { row: LogRow }) {
         <Field label={t("logDetail.duration")} value={`${row.durationMs} ms`} />
         <Field label={t("logDetail.time")} value={row.fullTime} />
       </dl>
+
+      <TraceView row={row} />
 
       <ListAction name={row.name} blocked={row.isBlocked} />
     </div>
