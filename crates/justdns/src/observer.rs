@@ -288,4 +288,85 @@ mod tests {
         observer.observe(sample());
         assert_eq!(store.recent(16).len(), 1, "the switch is live");
     }
+
+    fn has(trace: &QueryTrace, stage: TraceStage, outcome: TraceOutcome) -> bool {
+        trace
+            .steps
+            .iter()
+            .any(|step| step.stage == stage && step.outcome == outcome)
+    }
+
+    #[test]
+    fn trace_marks_a_name_block() {
+        let record = sample(); // a name block by default
+        let (reason, trace) = build_trace(&record);
+        assert_eq!(reason, Some(ReasonCategory::Blocklist));
+        assert!(has(&trace, TraceStage::NameBlock, TraceOutcome::Hit));
+        assert_eq!(trace.steps.last().unwrap().stage, TraceStage::Answer);
+    }
+
+    #[test]
+    fn trace_marks_a_threat_ip_block() {
+        let mut record = sample();
+        record.block_stage = Some(BlockStage::ResponseIp);
+        record.block_reason = Some("threat-ip");
+        let (reason, trace) = build_trace(&record);
+        assert_eq!(reason, Some(ReasonCategory::ThreatIp));
+        assert!(has(&trace, TraceStage::ResponseIp, TraceOutcome::Hit));
+    }
+
+    #[test]
+    fn trace_passes_a_clean_answer() {
+        let mut record = sample();
+        record.source = AnswerSource::Upstream;
+        record.block_stage = None;
+        record.addresses = vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))];
+        record.resolver = Some("dns.example".to_owned());
+        let (reason, trace) = build_trace(&record);
+        assert_eq!(reason, None);
+        assert!(has(&trace, TraceStage::NameBlock, TraceOutcome::Pass));
+        assert!(has(&trace, TraceStage::Phishing, TraceOutcome::Pass));
+        assert!(has(&trace, TraceStage::Source, TraceOutcome::Info));
+        assert!(has(&trace, TraceStage::ResponseIp, TraceOutcome::Pass));
+    }
+
+    #[test]
+    fn trace_flags_a_phishing_warning() {
+        let mut record = sample();
+        record.source = AnswerSource::Upstream;
+        record.block_stage = None;
+        record.phishing = Some(PhishingHit {
+            kind: FilterPhishingKind::Nrd,
+            mode: PhishingMode::Warn,
+        });
+        let (reason, trace) = build_trace(&record);
+        assert_eq!(reason, Some(ReasonCategory::Warning));
+        assert!(has(&trace, TraceStage::Phishing, TraceOutcome::Warn));
+    }
+
+    #[test]
+    fn trace_notes_a_pause_and_skips_the_gates() {
+        let mut record = sample();
+        record.source = AnswerSource::Upstream;
+        record.block_stage = None;
+        record.paused = true;
+        let (_reason, trace) = build_trace(&record);
+        assert!(trace.paused);
+        assert!(
+            !trace.steps.iter().any(|step| step.stage == TraceStage::NameBlock),
+            "the protective gates are skipped while paused"
+        );
+        assert_eq!(trace.steps.last().unwrap().stage, TraceStage::Answer);
+    }
+
+    #[test]
+    fn trace_is_minimal_for_a_rewrite() {
+        let mut record = sample();
+        record.source = AnswerSource::Rewrite;
+        record.block_stage = None;
+        let (reason, trace) = build_trace(&record);
+        assert_eq!(reason, None);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.steps[0].stage, TraceStage::Answer);
+    }
 }

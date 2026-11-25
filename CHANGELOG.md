@@ -3,6 +3,18 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.48.0] - 2026-11-25
+
+- New: **See why a query was acted on (decision trace).** Every entry in the query log now records the
+  path the resolver took through its decision stages. Open an entry and the detail panel shows the
+  ordered stages (block list, phishing, source, CNAME uncloak, response-IP, DNSSEC, answer): the stage
+  that made the decision is called out, the gates that merely passed fold away behind a toggle, and a
+  banner shows when the troubleshooting pause was in effect. A coloured reason tag on the row marks the
+  cause at a glance (block list, threat IP, phishing or a warning). The decisive stage links straight
+  to the page that governs it, so a false positive is one click from the fix. The full trace is kept
+  only in the durable log on disk and read on demand, so it adds nothing to the resolver's memory on
+  the query path.
+
 ## [0.47.2] - 2026-11-24
 
 - Changed: **Alerts fire the moment a threat is caught.** The notification webhook for a phishing or

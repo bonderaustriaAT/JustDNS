@@ -4,6 +4,19 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.48.0] - 2026-11-25
+
+- Neu: **Sehen, warum eine Anfrage geblockt wurde (Entscheidungs-Trace).** Jeder Eintrag im
+  Anfrage-Protokoll haelt jetzt fest, welchen Weg der Resolver durch seine Entscheidungsstufen
+  genommen hat. Oeffne einen Eintrag, und die Detailansicht zeigt die Stufen in Reihenfolge
+  (Blockliste, Phishing, Quelle, CNAME-Enttarnung, Antwort-IP, DNSSEC, Antwort): die entscheidende
+  Stufe ist hervorgehoben, die nur bestandenen Stufen klappen hinter einem Schalter weg, und ein
+  Banner zeigt an, wenn die Schutz-Pause aktiv war. Ein farbiges Grund-Tag in der Zeile markiert die
+  Ursache auf einen Blick (Blockliste, Threat-IP, Phishing oder eine Warnung). Die entscheidende Stufe
+  verlinkt direkt auf die Seite, die sie verwaltet, sodass ein Fehlalarm nur einen Klick von der
+  Korrektur entfernt ist. Der vollstaendige Trace liegt nur im dauerhaften Protokoll auf der Platte
+  und wird bei Bedarf gelesen, kostet also keinen zusaetzlichen Arbeitsspeicher auf dem Anfrage-Pfad.
+
 ## [0.47.2] - 2026-11-24
 
 - Geaendert: **Warnungen gehen sofort raus, sobald eine Bedrohung greift.** Der Benachrichtigungs-Webhook
