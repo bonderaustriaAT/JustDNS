@@ -27,6 +27,21 @@ pub enum DnssecStatus {
     Indeterminate,
 }
 
+/// Which decision stage refused a blocked answer. Set only when the answer was
+/// blocked (source [`AnswerSource::Blocked`]); it names the stage for the query
+/// log's decision trace and reason tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockStage {
+    /// A name block from the filtering policy, before any lookup.
+    NameBlock,
+    /// A block-mode phishing hit on the queried name.
+    Phishing,
+    /// A CNAME-cloaked tracker uncovered in the resolved answer.
+    CnameUncloak,
+    /// The resolved answer carried an IP on a response-IP block list.
+    ResponseIp,
+}
+
 /// Where a query's answer came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnswerSource {
@@ -80,6 +95,12 @@ pub struct QueryRecord {
     /// block, as a short stable label; `None` otherwise. Currently only
     /// `"threat-ip"`: the resolved answer carried an IP on an IP block list.
     pub block_reason: Option<&'static str>,
+    /// Which stage refused a blocked answer, for the query log's decision trace;
+    /// `None` when the answer was not blocked.
+    pub block_stage: Option<BlockStage>,
+    /// Whether the troubleshooting pause was in effect, so the protective stages
+    /// were skipped for this query. Recorded so the trace can show it.
+    pub paused: bool,
 }
 
 /// Something that records handled queries. Implementations must not block for

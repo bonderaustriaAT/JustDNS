@@ -12,11 +12,13 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 
-use duckdb::{Connection, ToSql, params, params_from_iter};
+use duckdb::{Connection, OptionalExt, ToSql, params, params_from_iter};
 
 use std::collections::HashMap;
 
-use crate::event::{DnssecStatus, PhishingFlag, QueryEvent, QuerySource};
+use crate::event::{
+    DnssecStatus, PhishingFlag, QueryEvent, QuerySource, QueryTrace, ReasonCategory,
+};
 use crate::recorder::{HourBucket, LATENCY_BOUNDS_MS, Stats};
 
 /// One hour in milliseconds, used to bucket activity in SQL.
@@ -38,7 +40,9 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS queries (
     dnssec        VARCHAR DEFAULT '',
     origin        VARCHAR DEFAULT '',
     phishing      VARCHAR DEFAULT '',
-    block_reason  VARCHAR DEFAULT ''
+    block_reason  VARCHAR DEFAULT '',
+    reason        VARCHAR DEFAULT '',
+    trace         VARCHAR DEFAULT ''
 );";
 
 /// Schema upgrades for a log written by an older build, applied in order. Each
@@ -60,10 +64,16 @@ const MIGRATIONS: &str = "\
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS dnssec VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT '';
     ALTER TABLE queries ADD COLUMN IF NOT EXISTS phishing VARCHAR DEFAULT '';
-    ALTER TABLE queries ADD COLUMN IF NOT EXISTS block_reason VARCHAR DEFAULT '';";
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS block_reason VARCHAR DEFAULT '';
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS reason VARCHAR DEFAULT '';
+    ALTER TABLE queries ADD COLUMN IF NOT EXISTS trace VARCHAR DEFAULT '';";
 
+/// The columns read for the list and the hot-view rehydration. `reason` (the
+/// one-glance tag category) is here; `trace` is deliberately not, so a list read
+/// never pulls the heavy per-query trace into memory. The trace is read on its
+/// own, for one entry, by [`DuckStore::trace_for`].
 const SELECT_COLUMNS: &str = "at_ms, client, name, record_type, response_code, source, \
-    duration_ms, answers, addresses, resolver, dnssec, phishing, block_reason";
+    duration_ms, answers, addresses, resolver, dnssec, phishing, block_reason, reason";
 
 /// Cap DuckDB's memory and thread use, and point its temp spill at `temp_dir`, so
 /// a heavy aggregate (a report over a day or week) cannot take the process down.
@@ -226,6 +236,15 @@ impl DuckStore {
                 .map(PhishingFlag::label)
                 .unwrap_or_default();
             let block_reason = event.block_reason.as_deref().unwrap_or("");
+            let reason = event.reason.map(ReasonCategory::label).unwrap_or("");
+            // The full trace is serialized to its own column as JSON. It is never
+            // read back on the list path, only for one entry on demand, so it does
+            // not weigh on the common reads.
+            let trace = event
+                .trace
+                .as_ref()
+                .and_then(|trace| serde_json::to_string(trace).ok())
+                .unwrap_or_default();
             appender.append_row(params![
                 event.at_ms,
                 client,
@@ -241,6 +260,8 @@ impl DuckStore {
                 origin,
                 phishing,
                 block_reason,
+                reason,
+                trace,
             ])?;
         }
         if any {
@@ -635,8 +656,10 @@ impl DuckReader {
         let rows = stmt
             .query_map(params_from_iter(binds.iter()), |row| {
                 let event = row_to_event(row)?;
-                let origin: String = row.get::<_, Option<String>>(13)?.unwrap_or_default();
-                let rowid: i64 = row.get(14)?;
+                // `origin` and `rowid` follow the SELECT_COLUMNS set (14 columns,
+                // indices 0..=13), so they sit at 14 and 15.
+                let origin: String = row.get::<_, Option<String>>(14)?.unwrap_or_default();
+                let rowid: i64 = row.get(15)?;
                 Ok(HistoryRow {
                     event,
                     origin,
@@ -645,6 +668,34 @@ impl DuckReader {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// The decision trace for one log entry, matched by its time, client, name and
+    /// record type. Read on its own, off the list path, so the heavy trace never
+    /// weighs on a list read. Returns `None` when the row has no stored trace (an
+    /// older row, or a peer row whose trace did not sync), or when no row matches.
+    pub fn trace_for(
+        &self,
+        at_ms: i64,
+        client: &str,
+        name: &str,
+        record_type: u16,
+    ) -> Result<Option<QueryTrace>, StoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT trace FROM queries \
+             WHERE at_ms = ? AND client = ? AND name = ? AND record_type = ? \
+             ORDER BY rowid DESC LIMIT 1",
+        )?;
+        let trace: Option<String> = stmt
+            .query_row(
+                params![at_ms, client, name, i32::from(record_type)],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(trace
+            .filter(|json| !json.is_empty())
+            .and_then(|json| serde_json::from_str(&json).ok()))
     }
 
     /// This node's own (`origin = ''`) events with `at_ms >= since_ms`, **oldest
@@ -991,6 +1042,13 @@ fn row_to_event(row: &duckdb::Row<'_>) -> duckdb::Result<QueryEvent> {
         block_reason: row
             .get::<_, Option<String>>(12)?
             .filter(|label| !label.is_empty()),
+        reason: row
+            .get::<_, Option<String>>(13)?
+            .as_deref()
+            .and_then(ReasonCategory::from_label),
+        // The list and hot-view reads never carry the full trace; it is read on
+        // its own by `trace_for`.
+        trace: None,
     })
 }
 
@@ -1035,6 +1093,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -1170,6 +1230,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1216,6 +1278,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1269,6 +1333,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1464,6 +1530,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1523,6 +1591,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let a = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 10));
         let b = IpAddr::V4(Ipv4Addr::new(192, 168, 20, 11));
@@ -1578,6 +1648,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let noisy = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
         let quiet = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
@@ -1625,6 +1697,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store
@@ -1706,6 +1780,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         };
         let store = DuckStore::open_in_memory().unwrap();
         store

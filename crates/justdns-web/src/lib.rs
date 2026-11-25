@@ -44,7 +44,7 @@ use justdns_schedule::{
 };
 use justdns_store::{
     ActivityBucket, Cursor, DnssecStatus, DomainCount, PhishingFilter, QueryEvent, QueryFilter,
-    QuerySource, ResolverStat, Store,
+    QuerySource, QueryTrace, ResolverStat, Store,
 };
 use reports::{
     REPORT_TOP_N, RenderLang, Report, ReportPeriod, ReportStore, ReportSummary, adhoc_window,
@@ -639,6 +639,7 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/queries/history", get(queries_history))
+        .route("/api/queries/trace", get(query_trace))
         .route("/api/privacy/trackers", get(privacy_trackers))
         .route("/api/privacy/networks", get(privacy_networks))
         .route("/api/privacy/block", post(privacy_block))
@@ -7547,6 +7548,40 @@ async fn queries(
     Json(named)
 }
 
+/// Identifies one log entry whose decision trace the drawer wants: its time,
+/// client, name and record type, exactly as the row carries them.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TraceParams {
+    at_ms: i64,
+    client: String,
+    name: String,
+    record_type: u16,
+}
+
+/// The decision trace for one log entry, read from the durable log on demand
+/// when its detail drawer opens. The trace is stored only on disk (never in the
+/// hot ring), so this blocking DuckDB read runs on a blocking thread. Returns
+/// `null` when the row has no stored trace or no row matches.
+async fn query_trace(
+    State(store): State<Store>,
+    Query(params): Query<TraceParams>,
+) -> Json<Option<QueryTrace>> {
+    let trace = tokio::task::spawn_blocking(move || {
+        store.trace_for(
+            params.at_ms,
+            &params.client,
+            &params.name,
+            params.record_type,
+        )
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .flatten();
+    Json(trace)
+}
+
 /// Query parameters for the history explorer. All optional; omitting every one
 /// returns the newest page of the whole log. `source` is a comma-separated list
 /// of source labels (OR). `beforeMs`+`beforeRow` together are the keyset cursor
@@ -8489,6 +8524,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -9519,7 +9556,10 @@ mod tests {
         // the whole cluster pauses, not just the node the admin clicked.
         let until = paused.config.pause_blocking(600);
         let cols = ha_collections(&paused);
-        assert!(cols.contains_key("blockingPause"), "an active pause is shared");
+        assert!(
+            cols.contains_key("blockingPause"),
+            "an active pause is shared"
+        );
         ha_apply(&peer, &cols).unwrap();
         assert_eq!(
             peer.config.blocking_pause_until_ms(),
@@ -9530,7 +9570,10 @@ mod tests {
         // Resuming on that node drops the entry, so the peer resumes too.
         paused.config.resume_blocking();
         let cols = ha_collections(&paused);
-        assert!(!cols.contains_key("blockingPause"), "resume removes the entry");
+        assert!(
+            !cols.contains_key("blockingPause"),
+            "resume removes the entry"
+        );
         ha_apply(&peer, &cols).unwrap();
         assert!(
             peer.config.blocking_pause_until_ms().is_none(),

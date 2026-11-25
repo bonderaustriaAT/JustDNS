@@ -18,7 +18,7 @@ use crate::duck::{
     Cursor, DuckReader, DuckStore, HistoryRow, PeriodReport, QueryFilter, StoreError,
     TrackerScanRow, natural_key,
 };
-use crate::event::QueryEvent;
+use crate::event::{QueryEvent, QueryTrace};
 use crate::recorder::{
     ActivityBucket, ClientActivity, ClientCount, DayStats, DomainCount, Recorder, ResolverStat,
     Stats,
@@ -35,7 +35,7 @@ const CHANNEL_CAPACITY: usize = 4096;
 /// A message to the background writer: a log row (event + its origin, empty for a
 /// locally answered query) or a retention prune up to a cutoff.
 enum WriterMsg {
-    Row(QueryEvent, String),
+    Row(Box<QueryEvent>, String),
     Prune(i64),
     /// Flush the pending batch now and acknowledge, so a caller can be sure every
     /// queued row is queryable through the history reader before it reads.
@@ -114,10 +114,15 @@ impl Store {
         // A phishing hit is what the notification evaluator alerts on, so wake it
         // at once instead of letting the alert wait for the next timed pass.
         let alert_worthy = event.phishing.is_some();
-        self.recorder.record(event.clone());
+        // The hot view never carries the heavy decision trace; only the durable
+        // log on disk does. The reason tag (tiny) stays, so the live list can
+        // colour it without a read.
+        let mut hot = event.clone();
+        hot.trace = None;
+        self.recorder.record(hot);
         if self
             .writer
-            .try_send(WriterMsg::Row(event, String::new()))
+            .try_send(WriterMsg::Row(Box::new(event), String::new()))
             .is_err()
         {
             warn!("query-log writer queue full; dropping a durable log entry");
@@ -189,7 +194,7 @@ impl Store {
             }
             if self
                 .writer
-                .try_send(WriterMsg::Row(event.clone(), origin.to_owned()))
+                .try_send(WriterMsg::Row(Box::new(event.clone()), origin.to_owned()))
                 .is_err()
             {
                 warn!("query-log writer queue full; pausing peer ingest for this cycle");
@@ -240,6 +245,21 @@ impl Store {
             .then(|| rows.last().map(|row| (row.event.at_ms, row.rowid)))
             .flatten();
         Ok((rows, next))
+    }
+
+    /// The decision trace for one log entry (matched by time, client, name and
+    /// record type), read from the durable log on demand when its detail is opened.
+    /// `None` when the row has no stored trace or no row matches. A quick blocking
+    /// read; callers on an async runtime should wrap it in `spawn_blocking`.
+    pub fn trace_for(
+        &self,
+        at_ms: i64,
+        client: &str,
+        name: &str,
+        record_type: u16,
+    ) -> Result<Option<QueryTrace>, StoreError> {
+        let reader = self.reader.lock().expect("history reader mutex poisoned");
+        reader.trace_for(at_ms, client, name, record_type)
     }
 
     /// This node's own (locally answered) events with `at_ms >= since_ms`, oldest
@@ -376,7 +396,7 @@ async fn writer_loop(duck: DuckStore, mut rx: mpsc::Receiver<WriterMsg>) {
         tokio::select! {
             received = rx.recv() => match received {
                 Some(WriterMsg::Row(event, origin)) => {
-                    batch.push((event, origin));
+                    batch.push((*event, origin));
                     if batch.len() >= FLUSH_BATCH {
                         flush(&duck, &mut batch);
                     }
@@ -444,6 +464,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 

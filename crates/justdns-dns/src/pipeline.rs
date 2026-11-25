@@ -22,7 +22,7 @@ use justdns_filter::{IpBlocker, PhishingDetector, PhishingHit, PhishingMode, Pol
 use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
-use crate::observer::{AnswerSource, DnssecStatus, QueryObserver, QueryRecord};
+use crate::observer::{AnswerSource, BlockStage, DnssecStatus, QueryObserver, QueryRecord};
 use crate::router::Resolve;
 use crate::safesearch;
 
@@ -142,6 +142,8 @@ struct Answered {
     /// The DNSSEC verdict for an upstream answer when validation was on; `None`
     /// for a local answer or when validation is off.
     dnssec: Option<DnssecStatus>,
+    /// Which stage refused the answer, when `source` is [`AnswerSource::Blocked`].
+    block_stage: Option<BlockStage>,
 }
 
 impl Answered {
@@ -152,6 +154,17 @@ impl Answered {
             source,
             resolver: None,
             dnssec: None,
+            block_stage: None,
+        }
+    }
+
+    /// A blocked answer refused at `stage`.
+    fn blocked(stage: BlockStage) -> Self {
+        Self {
+            source: AnswerSource::Blocked,
+            resolver: None,
+            dnssec: None,
+            block_stage: Some(stage),
         }
     }
 
@@ -163,6 +176,7 @@ impl Answered {
             source: AnswerSource::Upstream,
             resolver,
             dnssec,
+            block_stage: None,
         }
     }
 }
@@ -291,7 +305,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                     response.answers.clear();
                     response.metadata.response_code = ResponseCode::NoError;
                     self.write_block_answer(&query, &mut response);
-                    answered = Answered::local(AnswerSource::Blocked);
+                    answered = Answered::blocked(BlockStage::ResponseIp);
                     block_reason = Some("threat-ip");
                 }
             }
@@ -305,7 +319,10 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         // (the A is normally resolved alongside or before the AAAA); AAAA-off
         // remains the complete protection, since the threat intel is IPv4-only.
         if block_reason.is_none()
-            && matches!(answered.source, AnswerSource::Upstream | AnswerSource::Cache)
+            && matches!(
+                answered.source,
+                AnswerSource::Upstream | AnswerSource::Cache
+            )
             && !self.blocking_paused()
             && query.query_type() == RecordType::AAAA
             && !response.answers.is_empty()
@@ -313,12 +330,14 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if let Some(ip_block) = &self.options.ip_block {
                 let ip_allow = self.options.ip_allow.as_deref();
                 if !ip_block.is_empty()
-                    && self.sibling_a_hits_ip_block(&query, ip_block, ip_allow).await
+                    && self
+                        .sibling_a_hits_ip_block(&query, ip_block, ip_allow)
+                        .await
                 {
                     response.answers.clear();
                     response.metadata.response_code = ResponseCode::NoError;
                     self.write_block_answer(&query, &mut response);
-                    answered = Answered::local(AnswerSource::Blocked);
+                    answered = Answered::blocked(BlockStage::ResponseIp);
                     block_reason = Some("threat-ip");
                 }
             }
@@ -338,6 +357,8 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 dnssec: answered.dnssec,
                 phishing,
                 block_reason,
+                block_stage: answered.block_stage,
+                paused: self.blocking_paused(),
             });
         }
 
@@ -377,7 +398,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if let Some(engine) = &self.policy_engine {
                 if engine.blocks(client, &query.name().to_string()) {
                     self.write_block_answer(query, response);
-                    return Answered::local(AnswerSource::Blocked);
+                    return Answered::blocked(BlockStage::NameBlock);
                 }
             }
         }
@@ -389,7 +410,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if let Some(hit) = phishing {
                 if hit.mode == PhishingMode::Block {
                     self.write_block_answer(query, response);
-                    return Answered::local(AnswerSource::Blocked);
+                    return Answered::blocked(BlockStage::Phishing);
                 }
             }
         }
@@ -561,7 +582,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         response.answers.clear();
         response.metadata.response_code = ResponseCode::NoError;
         self.write_block_answer(query, response);
-        Some(Answered::local(AnswerSource::Blocked))
+        Some(Answered::blocked(BlockStage::CnameUncloak))
     }
 
     /// Refresh `key` from upstream in the background and store the fresh answer,
@@ -1076,8 +1097,10 @@ mod tests {
     #[tokio::test]
     async fn answer_resolving_to_an_unlisted_ip_passes_through() {
         let clean = Ipv4Addr::new(93, 184, 216, 34);
-        let (pipe, _calls) =
-            pipeline(Reply::A(clean), options_with_ip_block("45.83.0.0/16\n203.0.113.9\n"));
+        let (pipe, _calls) = pipeline(
+            Reply::A(clean),
+            options_with_ip_block("45.83.0.0/16\n203.0.113.9\n"),
+        );
         let req = request("example.com.", RecordType::A);
 
         let answer = pipe.handle(&req, CLIENT).await;
@@ -1105,7 +1128,11 @@ mod tests {
             .insert(
                 CacheKey::new(&name, RecordType::A),
                 CachedEntry::positive(
-                    vec![Record::from_rdata(name.clone(), 120, RData::A(A(blocked_v4)))],
+                    vec![Record::from_rdata(
+                        name.clone(),
+                        120,
+                        RData::A(A(blocked_v4)),
+                    )],
                     Duration::from_secs(120),
                 ),
             )

@@ -1738,6 +1738,7 @@ version = "0.1.0"
 dependencies = [
  "duckdb",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

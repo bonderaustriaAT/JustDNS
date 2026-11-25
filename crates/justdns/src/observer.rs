@@ -9,10 +9,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use justdns_dns::observer::{
-    AnswerSource, DnssecStatus as DnsDnssecStatus, QueryObserver, QueryRecord,
+    AnswerSource, BlockStage, DnssecStatus as DnsDnssecStatus, QueryObserver, QueryRecord,
 };
 use justdns_filter::{PhishingHit, PhishingKind as FilterPhishingKind, PhishingMode};
-use justdns_store::{DnssecStatus, PhishingFlag, PhishingKind, QueryEvent, QuerySource, Store};
+use justdns_store::{
+    DnssecStatus, PhishingFlag, PhishingKind, QueryEvent, QuerySource, QueryTrace, ReasonCategory,
+    Store, TraceOutcome, TraceStage, TraceStep,
+};
 
 pub struct StoreObserver {
     store: Store,
@@ -33,6 +36,9 @@ impl QueryObserver for StoreObserver {
         if !self.query_log.load(Ordering::Relaxed) {
             return;
         }
+        // Build the decision trace and reason tag from the raw signals before the
+        // fields are moved into the event.
+        let (reason, trace) = build_trace(&record);
         self.store.record(QueryEvent {
             at_ms: now_ms(),
             client: record.client,
@@ -47,8 +53,148 @@ impl QueryObserver for StoreObserver {
             dnssec: record.dnssec.map(map_dnssec),
             phishing: record.phishing.map(map_phishing),
             block_reason: record.block_reason.map(str::to_owned),
+            reason,
+            trace: Some(trace),
         });
     }
+}
+
+/// One trace step.
+fn step(stage: TraceStage, outcome: TraceOutcome, detail: Option<String>) -> TraceStep {
+    TraceStep {
+        stage,
+        outcome,
+        detail,
+    }
+}
+
+/// The response code as its wire name, for the answer step's detail.
+fn rcode_label(code: u16) -> Option<String> {
+    Some(
+        match code {
+            0 => "NOERROR",
+            1 => "FORMERR",
+            2 => "SERVFAIL",
+            3 => "NXDOMAIN",
+            5 => "REFUSED",
+            other => return Some(other.to_string()),
+        }
+        .to_owned(),
+    )
+}
+
+/// A short detail for a phishing step: the imitated brand, or `NRD` for a
+/// newly registered domain.
+fn phishing_label(hit: &PhishingHit) -> Option<String> {
+    match &hit.kind {
+        FilterPhishingKind::Lookalike { brand } | FilterPhishingKind::Punycode { brand } => {
+            Some(brand.clone())
+        }
+        FilterPhishingKind::Nrd => Some("NRD".to_owned()),
+    }
+}
+
+/// The DNSSEC step's outcome and label from the verdict.
+fn dnssec_step(status: DnsDnssecStatus) -> TraceStep {
+    let (outcome, label) = match status {
+        DnsDnssecStatus::Secure => (TraceOutcome::Pass, "Secure"),
+        DnsDnssecStatus::Insecure => (TraceOutcome::Info, "Insecure"),
+        DnsDnssecStatus::Bogus => (TraceOutcome::Hit, "Bogus"),
+        DnsDnssecStatus::Indeterminate => (TraceOutcome::Info, "Indeterminate"),
+    };
+    step(TraceStage::Dnssec, outcome, Some(label.to_owned()))
+}
+
+/// Reconstruct the pipeline's decision as an ordered trace plus the reason tag
+/// for the query log row, from the raw signals the resolver reported. Pass steps
+/// are listed so the drawer can show every gate that ran; the decisive stage of
+/// a block carries the `Hit`, and the reason tag mirrors it.
+fn build_trace(record: &QueryRecord) -> (Option<ReasonCategory>, QueryTrace) {
+    let paused = record.paused;
+    let mut steps: Vec<TraceStep> = Vec::new();
+
+    // A local rewrite is trusted and skips every gate.
+    if record.source == AnswerSource::Rewrite {
+        steps.push(step(
+            TraceStage::Answer,
+            TraceOutcome::Info,
+            rcode_label(record.response_code),
+        ));
+        return (None, QueryTrace { paused, steps });
+    }
+
+    // A blocked answer: the decisive stage carries the hit, then the answer.
+    if record.source == AnswerSource::Blocked {
+        let reason = match record.block_stage {
+            Some(BlockStage::NameBlock) => {
+                steps.push(step(TraceStage::NameBlock, TraceOutcome::Hit, None));
+                Some(ReasonCategory::Blocklist)
+            }
+            Some(BlockStage::Phishing) => {
+                let detail = record.phishing.as_ref().and_then(phishing_label);
+                steps.push(step(TraceStage::Phishing, TraceOutcome::Hit, detail));
+                Some(ReasonCategory::Phishing)
+            }
+            Some(BlockStage::CnameUncloak) => {
+                steps.push(step(TraceStage::CnameUncloak, TraceOutcome::Hit, None));
+                Some(ReasonCategory::Blocklist)
+            }
+            Some(BlockStage::ResponseIp) => {
+                steps.push(step(TraceStage::ResponseIp, TraceOutcome::Hit, None));
+                Some(ReasonCategory::ThreatIp)
+            }
+            None => Some(ReasonCategory::Blocklist),
+        };
+        steps.push(step(
+            TraceStage::Answer,
+            TraceOutcome::Info,
+            rcode_label(record.response_code),
+        ));
+        return (reason, QueryTrace { paused, steps });
+    }
+
+    // A delivered answer. The protective gates ran unless blocking was paused.
+    let mut reason = None;
+    if !paused {
+        steps.push(step(TraceStage::NameBlock, TraceOutcome::Pass, None));
+        match &record.phishing {
+            Some(hit) => {
+                reason = Some(ReasonCategory::Warning);
+                steps.push(step(
+                    TraceStage::Phishing,
+                    TraceOutcome::Warn,
+                    phishing_label(hit),
+                ));
+            }
+            None => steps.push(step(TraceStage::Phishing, TraceOutcome::Pass, None)),
+        }
+    }
+
+    let source_detail = match record.source {
+        AnswerSource::Cache => Some("Cache".to_owned()),
+        AnswerSource::Upstream => record.resolver.clone(),
+        AnswerSource::Local => Some("lokal".to_owned()),
+        _ => None,
+    };
+    steps.push(step(TraceStage::Source, TraceOutcome::Info, source_detail));
+
+    if !paused
+        && matches!(record.source, AnswerSource::Cache | AnswerSource::Upstream)
+        && !record.addresses.is_empty()
+    {
+        steps.push(step(TraceStage::ResponseIp, TraceOutcome::Pass, None));
+    }
+
+    if let Some(status) = record.dnssec {
+        steps.push(dnssec_step(status));
+    }
+
+    steps.push(step(
+        TraceStage::Answer,
+        TraceOutcome::Info,
+        rcode_label(record.response_code),
+    ));
+    (reason, QueryTrace { paused, steps })
 }
 
 fn map_source(source: AnswerSource) -> QuerySource {
@@ -115,6 +261,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            block_stage: Some(BlockStage::NameBlock),
+            paused: false,
         }
     }
 

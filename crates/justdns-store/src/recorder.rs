@@ -738,6 +738,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -890,6 +892,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -1057,6 +1061,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -1120,6 +1126,8 @@ mod tests {
             dnssec: None,
             phishing: None,
             block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
