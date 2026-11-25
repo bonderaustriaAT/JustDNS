@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api, type ClassifyResult, type QueryTrace } from "../lib/api";
 import { blockListLabel } from "../lib/dns";
 import { useI18n } from "../lib/i18n";
-import { OUTCOME_KEY, STAGE_KEY } from "../lib/trace";
+import { OUTCOME_KEY, STAGE_KEY, STAGE_LINK } from "../lib/trace";
 import type { LogRow } from "../lib/useLogs";
 import styles from "./Logs.module.css";
 
@@ -63,16 +64,26 @@ function TraceView({ row }: { row: LogRow }) {
         </p>
       ) : null}
       <ol className={styles.traceSteps}>
-        {visible.map((step, index) => (
-          <li key={index} className={styles.traceStep} data-outcome={step.outcome}>
-            <span className={styles.traceMark} aria-hidden="true">
-              {OUTCOME_MARK[step.outcome]}
-            </span>
-            <span className={styles.traceStage}>{t(STAGE_KEY[step.stage])}</span>
-            {step.detail ? <span className={styles.traceDetail}>{step.detail}</span> : null}
-            <span className={styles.traceOutcome}>{t(OUTCOME_KEY[step.outcome])}</span>
-          </li>
-        ))}
+        {visible.map((step, index) => {
+          const decisive = step.outcome === "hit" || step.outcome === "warn";
+          const link = decisive ? STAGE_LINK[step.stage] : undefined;
+          return (
+            <li key={index} className={styles.traceStep} data-outcome={step.outcome}>
+              <span className={styles.traceMark} aria-hidden="true">
+                {OUTCOME_MARK[step.outcome]}
+              </span>
+              <span className={styles.traceStage}>{t(STAGE_KEY[step.stage])}</span>
+              {step.detail ? <span className={styles.traceDetail}>{step.detail}</span> : null}
+              {link ? (
+                <Link className={styles.traceLink} to={link.to}>
+                  {t(link.label)}
+                </Link>
+              ) : (
+                <span className={styles.traceOutcome}>{t(OUTCOME_KEY[step.outcome])}</span>
+              )}
+            </li>
+          );
+        })}
       </ol>
       {passed.length > 0 ? (
         <button

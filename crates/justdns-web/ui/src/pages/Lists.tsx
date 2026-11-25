@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { InfoHint } from "../components/InfoHint";
 import { Modal } from "../components/Modal";
@@ -142,6 +142,7 @@ function NoteEditor({
  *  Each entry can carry an optional note, shown under the name and edited in
  *  place; the add field has its own optional note input beside the domain. */
 function EntryEditor({
+  id,
   title,
   hint,
   accent,
@@ -153,6 +154,7 @@ function EntryEditor({
   onRemove,
   onSetNote,
 }: {
+  id?: string;
   title: string;
   hint: string;
   accent: "allow" | "block";
@@ -179,7 +181,12 @@ function EntryEditor({
   }
 
   return (
-    <section className={styles.editor} data-accent={accent} aria-labelledby={`${accent}-title`}>
+    <section
+      id={id}
+      className={styles.editor}
+      data-accent={accent}
+      aria-labelledby={`${accent}-title`}
+    >
       <div className={styles.editorHead}>
         <h3 id={`${accent}-title`} className={styles.editorTitle}>
           {title}
@@ -361,6 +368,8 @@ export function Lists({ section }: { section: ListsSection }) {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [presetFilter, setPresetFilter] = useState<string>("all");
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus");
   // The list currently open in the dry-run dialog, or null when it is closed.
   const [simTarget, setSimTarget] = useState<{
     kind: "preset" | "subscription";
@@ -384,6 +393,28 @@ export function Lists({ section }: { section: ListsSection }) {
       });
     return () => controller.abort();
   }, [t]);
+
+  // A deep-link from the query log's decision trace carries a `focus` so the page
+  // opens on the rule behind a block: the allow editor for a name block, the
+  // threat-IP presets for a response-IP block. Scroll it into view and pulse it
+  // once the list has loaded (so the target is in the DOM).
+  useEffect(() => {
+    if (!view || !focus) return;
+    let targetId: string | null = null;
+    if (section === "mine" && focus === "allow") {
+      targetId = "list-allow";
+    } else if (section === "presets" && focus === "threatip") {
+      setPresetFilter("threatip");
+      targetId = "preset-cards";
+    }
+    if (!targetId) return;
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add(styles.focusPulse);
+    const timer = setTimeout(() => el.classList.remove(styles.focusPulse), 2200);
+    return () => clearTimeout(timer);
+  }, [view, focus, section]);
 
   function mark(key: string, on: boolean) {
     setPending((prev) => {
@@ -513,6 +544,7 @@ export function Lists({ section }: { section: ListsSection }) {
       {section === "mine" ? (
       <div className={styles.editors}>
         <EntryEditor
+          id="list-allow"
           title={t("lists.allowTitle")}
           hint={t("lists.allowHint")}
           accent="allow"
@@ -565,7 +597,7 @@ export function Lists({ section }: { section: ListsSection }) {
           ))}
         </div>
 
-        <div className={styles.cards}>
+        <div id="preset-cards" className={styles.cards}>
           {visiblePresets.map((preset) => (
             <PresetCard
               key={preset.key}

@@ -302,6 +302,9 @@ const de = {
   "trace.outcome.hit": "Treffer",
   "trace.outcome.warn": "Warnung",
   "trace.outcome.info": "Info",
+  "trace.linkLists": "In Listen verwalten →",
+  "trace.linkPhishing": "Phishing-Schutz öffnen →",
+  "trace.linkThreatIp": "Threat-IP-Liste öffnen →",
 
   // DNSSEC page.
   "dnssec.title": "DNSSEC-Validierung",
@@ -1976,6 +1979,9 @@ const en: Catalog = {
   "trace.outcome.hit": "hit",
   "trace.outcome.warn": "warning",
   "trace.outcome.info": "info",
+  "trace.linkLists": "Manage in lists →",
+  "trace.linkPhishing": "Open phishing protection →",
+  "trace.linkThreatIp": "Open threat-IP list →",
 
   "dnssec.title": "DNSSEC validation",
   "dnssec.intro": "DNSSEC checks that an answer reached you unaltered and genuine. Every forwarded query gets a verdict; tampered answers are refused.",

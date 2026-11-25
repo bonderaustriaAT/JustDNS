@@ -1022,6 +1022,21 @@
   text-transform: lowercase;
 }
 
+/* The deep-link that sits where a decisive stage's outcome would, pointing to
+   the page that governs the rule (the lists, the phishing page). */
+.traceLink {
+  margin-inline-start: auto;
+  font-size: var(--step--2);
+  font-weight: 600;
+  color: var(--signal-strong);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.traceLink:hover {
+  text-decoration: underline;
+}
+
 .traceToggle {
   align-self: start;
   font: inherit;
