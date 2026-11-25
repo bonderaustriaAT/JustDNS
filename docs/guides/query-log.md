@@ -20,7 +20,8 @@ Each entry shows:
   - **Upstream** — looked up at your resolvers.
   - **Local** — answered by JustDNS itself.
   - **Rewrite** — answered by one of your [rewrites](rewrites.md).
-  - **Blocked** — stopped by a filter.
+  - **Blocked** — stopped by a filter. A coloured **reason tag** says why at a glance, and
+    expanding the row shows the full [decision trace](decision-trace.md).
 - **Phishing** — if [phishing detection](phishing.md) fired, the row carries a marker
   right next to the name: **amber** for a warning, **red** for a block.
 - **Addresses** it resolved to (empty for a block or a non-address record).

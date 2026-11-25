@@ -21,7 +21,9 @@ Jeder Eintrag zeigt:
   - **Upstream** — bei deinen Resolvern nachgefragt.
   - **Lokal** — von JustDNS selbst beantwortet.
   - **Rewrite** — von einem deiner [Rewrites](rewrites.de.md) beantwortet.
-  - **Geblockt** — von einem Filter gestoppt.
+  - **Geblockt** — von einem Filter gestoppt. Ein farbiges **Grund-Tag** sagt auf einen
+    Blick warum, und das Aufklappen der Zeile zeigt den vollständigen
+    [Entscheidungs-Trace](decision-trace.de.md).
 - **Phishing** — hat die [Phishing-Erkennung](phishing.de.md) angeschlagen, trägt die
   Zeile direkt neben dem Namen eine Markierung: **gelb** für eine Warnung, **rot** für
   eine Sperre.
