@@ -123,8 +123,9 @@ impl SmbTransport {
         if !self.domain.is_empty() {
             body.push_str(&format!("\ndomain = {}", self.domain));
         }
-        std::fs::write(&path, body.as_bytes())
-            .map_err(|error| scrub(&format!("Anmeldedatei nicht schreibbar: {error}"), &self.password))?;
+        std::fs::write(&path, body.as_bytes()).map_err(|error| {
+            scrub(&format!("Anmeldedatei nicht schreibbar: {error}"), &self.password)
+        })?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
