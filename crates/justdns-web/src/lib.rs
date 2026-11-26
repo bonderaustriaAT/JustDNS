@@ -394,6 +394,10 @@ pub async fn serve(
     metrics_token: Option<Arc<str>>,
     geo: Option<Arc<GeoDb>>,
     resolver: justdns_dns::router::SharedRouter,
+    // Seals the secret-bearing state files the web layer owns itself: ha.json,
+    // which carries the cluster sync key. The same machine key the binary
+    // already uses for the account and settings stores.
+    sealer: justdns_secret::Sealer,
 ) -> std::io::Result<()> {
     // The update checker reads GitHub (public tags) and mediates the on-disk
     // protocol the updater sidecar watches. The periodic check runs on its own
@@ -416,7 +420,9 @@ pub async fn serve(
 
     // High-availability sync. The manager loads its node-local state from
     // `<data>/ha.json`; it is inert until the user enables HA and pairs a peer.
-    let ha = Arc::new(ha::Ha::from_env(status.version()));
+    // The state file carries the sync key, so it is sealed at rest like the
+    // other secret-bearing files.
+    let ha = Arc::new(ha::Ha::from_env(status.version(), sealer));
 
     // Generated summary reports, loaded from the data volume (empty on first run).
     let reports = ReportStore::load(&reports_path);
@@ -8469,7 +8475,10 @@ mod tests {
             log_level: LogLevelControl::disabled("normal"),
             metrics_token: None,
             update: Arc::new(UpdateChecker::from_env("v0.0.0-test")),
-            ha: Arc::new(ha::Ha::from_env("v0.0.0-test")),
+            ha: Arc::new(ha::Ha::from_env(
+                "v0.0.0-test",
+                justdns_secret::Sealer::ephemeral(),
+            )),
             reports: test_reports(),
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
             geo: None,

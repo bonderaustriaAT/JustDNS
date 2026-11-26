@@ -619,7 +619,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone(), shared_router.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone(), shared_router.clone(), sealer.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
