@@ -24,6 +24,16 @@ use crate::role::{Role, default_admin};
 /// opened with the subkey of another sealed file.
 const PURPOSE: &str = "auth-v1";
 
+/// Shortest password every entry point accepts.
+const MIN_PASSWORD_CHARS: usize = 8;
+/// Longest password accepted anywhere. Far beyond any real passphrase, small
+/// enough that hashing one stays cheap and a giant submission is refused
+/// before it costs anything.
+const MAX_PASSWORD_CHARS: usize = 1024;
+/// Longest username accepted. Names appear in logs and the audit trail; a
+/// bound keeps them sane.
+const MAX_NAME_CHARS: usize = 64;
+
 /// Per-user second-factor state. The base32 TOTP `secret` is shared with the
 /// user's authenticator app; `confirmed` is false until the user proves they can
 /// produce a code; `recovery` holds Argon2 hashes of one-time recovery codes
@@ -223,14 +233,21 @@ impl UserStore {
 
     /// Check a login. Returns the matched username on success so the caller can
     /// start a session, or `None` for an unknown user or a wrong password. The
-    /// password is always verified against *some* hash to keep the timing of a
-    /// wrong username and a wrong password alike.
+    /// candidate hash is copied out under the read lock and verified outside it,
+    /// so a flood of logins never holds the lock while hashing and an
+    /// administrator's change is never stuck behind one. The password is always
+    /// verified against *some* hash to keep the timing of a wrong username and
+    /// a wrong password alike.
     pub fn verify(&self, username: &str, password: &str) -> Option<String> {
-        let users = self.read();
-        match users.iter().find(|user| user.username == username) {
-            Some(user) if password::verify(password, &user.password_hash) => {
-                Some(user.username.clone())
-            }
+        let candidate = {
+            let users = self.read();
+            users
+                .iter()
+                .find(|user| user.username == username)
+                .map(|user| (user.username.clone(), user.password_hash.clone()))
+        };
+        match candidate {
+            Some((name, hash)) if password::verify(password, &hash) => Some(name),
             Some(_) => None,
             None => {
                 // Verify against a throwaway hash so a missing user costs the
@@ -562,15 +579,28 @@ fn validate_username(username: &str) -> Result<String, AuthError> {
     if username.is_empty() {
         return Err(AuthError::Invalid("username must not be empty".into()));
     }
+    if username.len() > MAX_NAME_CHARS {
+        return Err(AuthError::Invalid(format!(
+            "a username is at most {MAX_NAME_CHARS} characters"
+        )));
+    }
     Ok(username.to_owned())
 }
 
-/// Enforce the minimum password length shared by every entry point.
+/// Enforce the password bounds shared by every entry point: at least
+/// [`MIN_PASSWORD_CHARS`], at most [`MAX_PASSWORD_CHARS`] — a bound costs a
+/// legitimate user nothing and keeps an oversized submission from being hashed
+/// wholesale.
 fn validate_password(password: &str) -> Result<(), AuthError> {
-    if password.len() < 8 {
+    if password.len() < MIN_PASSWORD_CHARS {
         return Err(AuthError::Invalid(
             "password must be at least 8 characters".into(),
         ));
+    }
+    if password.len() > MAX_PASSWORD_CHARS {
+        return Err(AuthError::Invalid(format!(
+            "a password is at most {MAX_PASSWORD_CHARS} characters"
+        )));
     }
     Ok(())
 }
@@ -588,8 +618,9 @@ fn hash_recovery(codes: &[String]) -> Result<Vec<String>, AuthError> {
 const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$cnxHBvex1fxUfB7TBjNOAw$SNdG2C5F+eV/ccnN/9oCtBZiK+YMaMuFUFeUBIucL1E";
 
 /// Write `bytes` (the sealed account file) to `path` atomically: write a sibling
-/// temp file, then rename over the target so a crash mid-write never leaves a
-/// half-written file that could lock everyone out.
+/// temp file, flush it to disk, then rename over the target — so a crash
+/// mid-write leaves either the old or the new file, never a half-written one
+/// that could lock everyone out.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> {
     let io_err = |source| AuthError::Io {
         path: path.to_path_buf(),
@@ -603,12 +634,20 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), AuthError> {
     }
 
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|source| AuthError::Io {
+    write_and_sync(&tmp, bytes).map_err(|source| AuthError::Io {
         path: tmp.clone(),
         source,
     })?;
     std::fs::rename(&tmp, path).map_err(io_err)?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), io::Error> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
