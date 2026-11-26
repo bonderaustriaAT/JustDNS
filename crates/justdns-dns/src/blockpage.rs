@@ -224,7 +224,9 @@ pub async fn serve_https(
 /// Handle any request. A `POST /request-access` is the visitor asking to have a
 /// blocked domain released (routed to the access sink); every other request
 /// resolves the host it was sent to and the query string and dispatches through
-/// [`build_response`].
+/// [`build_response`]. The page chrome is rendered in the visitor's language
+/// (German by default, English when the browser prefers it); the operator's
+/// own heading and message are shown as written either way.
 async fn handle(
     req: Request<hyper::body::Incoming>,
     content: &SharedContent,
@@ -237,7 +239,8 @@ async fn handle(
     }
     let host = effective_host(req.headers(), req.uri(), content.trust_forwarded);
     let query = req.uri().query().unwrap_or("").to_owned();
-    build_response(&host, &query, &content)
+    let labels = page_lang(req.headers());
+    build_response(&host, &query, &content, labels)
 }
 
 /// Handle `POST /request-access`: read the small form body, work out the client
@@ -375,12 +378,17 @@ fn effective_host(headers: &HeaderMap, uri: &Uri, trust_forwarded: bool) -> Stri
 /// * Hosted mode, request **to any other host** (a blocked domain that was
 ///   pointed here) → `302` to the landing URL with the blocked host as `?d=`.
 /// * Local mode (no landing) → render the page in place (`451`).
-fn build_response(host: &str, query: &str, content: &BlockContent) -> Response<Full<Bytes>> {
+fn build_response(
+    host: &str,
+    query: &str,
+    content: &BlockContent,
+    labels: &PageLabels,
+) -> Response<Full<Bytes>> {
     if let Some(landing) = &content.landing {
         if same_host(host, &landing.host) {
             // This IS the landing page, served on its own valid-certificate host.
             let domain = domain_from_query(query);
-            return page_response(&domain, content, StatusCode::OK);
+            return page_response(&domain, content, StatusCode::OK, labels);
         }
         // A blocked domain reached us: send the browser on to the landing page,
         // carrying the domain it tried to reach so the page can name it.
@@ -395,7 +403,12 @@ fn build_response(host: &str, query: &str, content: &BlockContent) -> Response<F
         }
         // An un-encodable location is not expected; fall back to the local page.
     }
-    page_response(host, content, StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS)
+    page_response(
+        host,
+        content,
+        StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS,
+        labels,
+    )
 }
 
 /// Render the page for `domain` with the given status and the no-store headers.
@@ -403,8 +416,9 @@ fn page_response(
     domain: &str,
     content: &BlockContent,
     status: StatusCode,
+    labels: &PageLabels,
 ) -> Response<Full<Bytes>> {
-    let html = render_page(domain, &content.title, &content.message);
+    let html = render_page(domain, &content.title, &content.message, labels);
     Response::builder()
         .status(status)
         .header(CONTENT_TYPE, "text/html; charset=utf-8")
@@ -485,9 +499,84 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The fixed chrome of the block page, per language. The heading and the
+/// explanatory line are the operator's own text (`BlockContent`) and are shown
+/// as written regardless of language; these labels are everything else a
+/// visitor sees, so the page is always fully German or fully English.
+struct PageLabels {
+    /// The button that opens the request panel.
+    open: &'static str,
+    /// The label over the reason textarea.
+    reason: &'static str,
+    /// The textarea's placeholder.
+    reason_hint: &'static str,
+    /// The button that submits the ask.
+    send: &'static str,
+    /// The confirmation after a recorded ask.
+    sent: &'static str,
+    /// The error when the domain is not blocked or no sink is wired.
+    not_blocked: &'static str,
+    /// The error when delivery failed.
+    send_failed: &'static str,
+    /// The word before the product name in the footer.
+    brand: &'static str,
+}
+
+/// German page chrome — the default, matching the operator's usual audience.
+static DE: PageLabels = PageLabels {
+    open: "Seite freigeben lassen",
+    reason: "Begr\u{00fc}ndung (optional)",
+    reason_hint: "Warum brauchst du diese Seite?",
+    send: "Anfrage senden",
+    sent: "Anfrage gesendet \u{2014} der Administrator entscheidet.",
+    not_blocked: "Nicht geblockt oder nicht sendbar.",
+    send_failed: "Konnte nicht gesendet werden.",
+    brand: "gesch\u{fc}tzt durch",
+};
+
+/// English page chrome, for a browser that prefers English.
+static EN: PageLabels = PageLabels {
+    open: "Ask to unblock this page",
+    reason: "Reason (optional)",
+    reason_hint: "Why do you need this site?",
+    send: "Send request",
+    sent: "Request sent \u{2014} the administrator decides.",
+    not_blocked: "Not blocked, or requests are unavailable.",
+    send_failed: "The request could not be sent.",
+    brand: "protected by",
+};
+
+/// The visitor's page language: German unless the browser's language list names
+/// English first. Only the primary subtag is considered, so `de-AT`, `de-DE`
+/// and `de` all pick German and `en-US` picks English; anything else keeps the
+/// German default.
+fn page_lang(headers: &HeaderMap) -> &'static PageLabels {
+    let Some(accept) = headers
+        .get("accept-language")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return &DE;
+    };
+    for part in accept.split(',') {
+        let tag = part
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if tag.starts_with("de") {
+            return &DE;
+        }
+        if tag.starts_with("en") {
+            return &EN;
+        }
+    }
+    &DE
+}
+
 /// Render the self-contained block page. All dynamic values are HTML-escaped so
 /// a crafted host or a configured title/message can never inject markup.
-fn render_page(host: &str, title: &str, message: &str) -> String {
+fn render_page(host: &str, title: &str, message: &str, labels: &PageLabels) -> String {
     let title = escape(title);
     let message = escape(message);
     let host = escape(host);
@@ -504,19 +593,24 @@ fn render_page(host: &str, title: &str, message: &str) -> String {
     } else {
         format!(
             "<div class=\"rq\" id=\"rq\" data-domain=\"{host}\">\
-<button type=\"button\" class=\"rqbtn\" id=\"rqOpen\">Seite freigeben lassen</button>\
+<button type=\"button\" class=\"rqbtn\" id=\"rqOpen\">{open}</button>\
 <div class=\"rqpanel\" id=\"rqPanel\" hidden>\
-<label class=\"rqlbl\" for=\"rqReason\">Begr\u{00fc}ndung (optional)</label>\
+<label class=\"rqlbl\" for=\"rqReason\">{reason}</label>\
 <textarea id=\"rqReason\" class=\"rqta\" rows=\"3\" maxlength=\"280\" \
-placeholder=\"Warum brauchst du diese Seite?\"></textarea>\
-<button type=\"button\" class=\"rqbtn rqsend\" id=\"rqSend\">Anfrage senden</button>\
+placeholder=\"{hint}\"></textarea>\
+<button type=\"button\" class=\"rqbtn rqsend\" id=\"rqSend\">{send}</button>\
 <p class=\"rqmsg\" id=\"rqMsg\"></p></div>\
-<p class=\"rqdone\" id=\"rqDone\" hidden>Anfrage gesendet — der Administrator entscheidet.</p>\
-</div>"
+<p class=\"rqdone\" id=\"rqDone\" hidden>{sent}</p>\
+</div>",
+            open = labels.open,
+            reason = labels.reason,
+            hint = labels.reason_hint,
+            send = labels.send,
+            sent = labels.sent,
         )
     };
     let script = if host.is_empty() {
-        ""
+        String::new()
     } else {
         "<script>(function(){var r=document.getElementById('rq');if(!r)return;\
 var o=document.getElementById('rqOpen'),p=document.getElementById('rqPanel'),\
@@ -528,11 +622,13 @@ var b='domain='+encodeURIComponent(d)+'&reason='+encodeURIComponent(t.value||'')
 fetch('/request-access',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b})\
 .then(function(x){return x.json().catch(function(){return{ok:false};});})\
 .then(function(j){if(j&&j.ok){p.hidden=true;dn.hidden=false;}else{s.disabled=false;\
-m.textContent='Nicht geblockt oder nicht sendbar.';}})\
-.catch(function(){s.disabled=false;m.textContent='Konnte nicht gesendet werden.';});});})();</script>"
+m.textContent='{NOT_BLOCKED}';}})\
+.catch(function(){s.disabled=false;m.textContent='{SEND_FAILED}';});});})();</script>"
+            .replace("{NOT_BLOCKED}", labels.not_blocked)
+            .replace("{SEND_FAILED}", labels.send_failed)
     };
     format!(
-        "<!doctype html>\n<html lang=\"de\"><head><meta charset=\"utf-8\">\
+        "<!doctype html>\n<html lang=\"{lang_attr}\"><head><meta charset=\"utf-8\">\
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>{title}</title>\
 <style>:root{{color-scheme:dark}}\
@@ -574,7 +670,13 @@ letter-spacing:.14em}}\
 .brand b{{color:#37a97e;font-weight:700}}</style></head>\
 <body><main><span class=\"dot\"></span><h1>{title}</h1><p>{message}</p>{host_block}\
 {request_block}\
-<p class=\"brand\">gesch\u{00fc}tzt durch <b>JustDNS</b></p></main>{script}</body></html>"
+<p class=\"brand\">{brand} <b>JustDNS</b></p></main>{script}</body></html>",
+        lang_attr = if std::ptr::eq(labels, &EN) { "en" } else { "de" },
+        title = title,
+        message = message,
+        host_block = host_block,
+        request_block = request_block,
+        brand = labels.brand,
     )
 }
 
@@ -620,7 +722,7 @@ mod tests {
 
     #[test]
     fn renders_host_and_text() {
-        let page = render_page("ads.example.com", "Gesperrt", "Blockiert.");
+        let page = render_page("ads.example.com", "Gesperrt", "Blockiert.", &DE);
         assert!(page.contains("<h1>Gesperrt</h1>"));
         assert!(page.contains("Blockiert."));
         assert!(page.contains("ads.example.com"));
@@ -629,7 +731,7 @@ mod tests {
 
     #[test]
     fn escapes_injection_attempts() {
-        let page = render_page("<script>evil()</script>", "a&b", "x<y");
+        let page = render_page("<script>evil()</script>", "a&b", "x<y", &DE);
         assert!(!page.contains("<script>evil"));
         assert!(page.contains("&lt;script&gt;"));
         assert!(page.contains("a&amp;b"));
@@ -638,13 +740,13 @@ mod tests {
 
     #[test]
     fn empty_host_omits_the_block() {
-        let page = render_page("", "T", "M");
+        let page = render_page("", "T", "M", &DE);
         assert!(!page.contains("class=\"host\""));
     }
 
     #[test]
     fn local_mode_serves_the_page() {
-        let resp = build_response("ads.example.com", "", &content(None));
+        let resp = build_response("ads.example.com", "", &content(None), &DE);
         assert_eq!(resp.status(), StatusCode::UNAVAILABLE_FOR_LEGAL_REASONS);
         assert!(resp.headers().get(LOCATION).is_none());
     }
@@ -652,7 +754,7 @@ mod tests {
     #[test]
     fn hosted_mode_redirects_a_blocked_domain() {
         let landing = Landing::parse("https://justdns.justfuture.at/blockpage").unwrap();
-        let resp = build_response("ads.example.com", "", &content(Some(landing)));
+        let resp = build_response("ads.example.com", "", &content(Some(landing)), &DE);
         assert_eq!(resp.status(), StatusCode::FOUND);
         assert_eq!(
             resp.headers().get(LOCATION).unwrap(),
@@ -663,7 +765,7 @@ mod tests {
     #[test]
     fn hosted_mode_appends_with_ampersand_when_url_has_a_query() {
         let landing = Landing::parse("https://host.example/bp?src=dns").unwrap();
-        let resp = build_response("ads.example.com", "", &content(Some(landing)));
+        let resp = build_response("ads.example.com", "", &content(Some(landing)), &DE);
         assert_eq!(
             resp.headers().get(LOCATION).unwrap(),
             "https://host.example/bp?src=dns&d=ads.example.com"
@@ -678,6 +780,7 @@ mod tests {
             "justdns.justfuture.at",
             "d=ads.example.com",
             &content(Some(landing)),
+            &DE,
         );
         assert_eq!(resp.status(), StatusCode::OK);
         assert!(resp.headers().get(LOCATION).is_none());
@@ -691,6 +794,7 @@ mod tests {
             "justdns.justfuture.at:443",
             "",
             &content(Some(landing.clone())),
+            &DE,
         );
         assert_eq!(resp.status(), StatusCode::OK);
     }
@@ -760,7 +864,7 @@ mod tests {
             .parse()
             .unwrap();
         let host = effective_host(&h, &uri, c.trust_forwarded);
-        let resp = build_response(&host, uri.query().unwrap_or(""), &c);
+        let resp = build_response(&host, uri.query().unwrap_or(""), &c, &DE);
         assert_eq!(resp.status(), StatusCode::OK);
         assert!(resp.headers().get(LOCATION).is_none());
     }
@@ -777,8 +881,34 @@ mod tests {
         ]);
         let uri: Uri = "/blockpage?d=ads.example".parse().unwrap();
         let host = effective_host(&h, &uri, c.trust_forwarded);
-        let resp = build_response(&host, uri.query().unwrap_or(""), &c);
+        let resp = build_response(&host, uri.query().unwrap_or(""), &c, &DE);
         assert_eq!(resp.status(), StatusCode::OK);
         assert!(resp.headers().get(LOCATION).is_none());
+    }
+
+    #[test]
+    fn page_is_german_by_default_and_english_when_the_browser_prefers_it() {
+        // No header, or a German-speaking browser: the German chrome.
+        assert!(std::ptr::eq(page_lang(&HeaderMap::new()), &DE));
+        let de_at = headers(&[("accept-language", "de-AT,de;q=0.9,en;q=0.8")]);
+        assert!(std::ptr::eq(page_lang(&de_at), &DE));
+        let page = render_page("ads.example.com", "Gesperrt", "Blockiert.", &DE);
+        assert!(page.contains("Seite freigeben lassen"));
+        assert!(page.contains("<html lang=\"de\">"));
+
+        // An English-speaking browser gets the English chrome, with the
+        // operator's own heading and message shown as written either way.
+        let en = headers(&[("accept-language", "en-US,en;q=0.9,de;q=0.8")]);
+        let labels = page_lang(&en);
+        assert!(std::ptr::eq(labels, &EN));
+        let page = render_page("ads.example.com", "Gesperrt", "Blockiert.", labels);
+        assert!(page.contains("Ask to unblock this page"));
+        assert!(page.contains("<html lang=\"en\">"));
+        assert!(page.contains("<h1>Gesperrt</h1>"), "the operator text is shared");
+
+        // A language the page does not carry, with no English fallback in the
+        // list, keeps the German default.
+        let fr = headers(&[("accept-language", "fr-FR,fr;q=0.9")]);
+        assert!(std::ptr::eq(page_lang(&fr), &DE));
     }
 }
