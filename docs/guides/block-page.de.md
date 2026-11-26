@@ -308,3 +308,9 @@ dasselbe Zertifikat benennt. Nur die **Server-IPs** bleiben **knotenlokal**: jed
 Knoten lenkt geblockte Namen auf sich selbst, eine Synchronisierung trägt sie also
 nie zwischen Knoten (pro Knoten einstellbar bleibt es). Mit geteilter Landing-URL
 leitet jeder Knoten auf dieselbe saubere Seite.
+
+**Seitensprache.** Die festen Texte der Seite — der Freigabe-Knopf, das
+Begründungsfeld und die Bestätigungen — folgen der Browsersprache des Besuchers:
+Deutsch standardmäßig, Englisch für einen Browser, der es bevorzugt. Deine eigene
+Überschrift und dein Text erscheinen in jedem Fall wie geschrieben — schreibe sie
+also in der Sprache, die dein Netzwerk spricht.

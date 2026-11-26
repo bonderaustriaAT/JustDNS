@@ -19,7 +19,9 @@ nichts selbst; er fragt nur an.
 Der Knopf erscheint, sobald die Block-Seite weiß, welche Seite gesperrt wurde (Hosted-
 und Reverse-Proxy-Modus, wo der geblockte Hostname mitgeführt wird). Für einen Namen,
 der gar nicht gesperrt ist, tut er nichts — so lassen sich keine beliebigen Einträge
-unterschieben.
+unterschieben. Die Warteschlange behält die neuesten **500** Anfragen; darüber hinaus
+fallen die ältesten Einträge zugunsten frischer, damit eine skriptierte Flut sie nicht
+endlos wachsen lässt.
 
 ## Was eine Anfrage festhält
 

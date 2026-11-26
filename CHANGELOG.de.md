@@ -4,6 +4,36 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.48.1] - 2026-11-26
+
+- Behoben: **Haertung aus einem zweiten kompletten Security-Review.** Mehrere
+  Schutzkorrekturen. Der gemeinsame Sync-Schluessel eines Hochverfuegbarkeits-Clusters
+  liegt jetzt **im Ruhezustand verschluesselt** wie die anderen Geheimnisse; eine kopierte
+  oder gestohlene Daten-Partition gibt den Schluessel, der allein den Cluster oeffnet,
+  also nicht mehr her. Passwort-Pruefungen laufen vom Async-Thread auf den
+  Hintergrund-Pool, und wiederholt fehlgeschlagene Anmeldungen werden zusaetzlich zum
+  Nutzernamen **je Quell-Adresse** begrenzt — weder eine Flut paralleler Logins noch
+  erfundene Nutzernamen in Serie koennen die Box ausbremsen oder zuspammen. Die
+  Ersteinrichtung — das Anlegen des allerersten Admins — ist nur aus dem lokalen Netzwerk
+  erreichbar. Ein Passwort-Reset, das Loeschen fremden MFAs oder das Entfernen eines Kontos
+  meldet jetzt die uebrigen Sitzungen dieses Kontos ab, ein Reset als Reaktion auf eine
+  kompromittierte Anmeldung greift also sofort. Die Anfrage-Warteschlange der Blockseite
+  behaelt eine begrenzte Zahl Eintraege, der CSV-Report-Export neutralisiert Namen, die eine
+  Tabellenkalkulation als Formel lesen wuerde, geplante SMB-Backups tragen das
+  Share-Passwort nicht mehr auf der Kommandozeile, wo eine Prozessliste es sehen koennte,
+  und jede gespeicherte Datei wird vor dem atomaren Ersetzen auf die Platte gespuelt — ein
+  Crash hinterlaesst den alten oder den neuen Zustand, nie eine halb geschriebene Datei.
+  Zwei Abhaengigkeits-Advisories (`cookie`, `url`) sind mit den Upstream-Updates behoben.
+- Neu: **Ein `Secure`-Schalter fuer das Sitzungs-Cookie.** Liegt HTTPS vor deinem
+  Dashboard (eigenes Zertifikat oder Reverse Proxy), setze `JUSTDNS_COOKIE_SECURE=1`, und
+  das Login-Cookie wird nur noch ueber die verschluesselte Verbindung gesendet.
+  Standardmaessig aus: ueber einfaches HTTP — der uebliche Weg zu einem Dashboard im
+  Heimnetz — wuerde der Browser ein Secure-Cookie stillschweigend verwerfen.
+- Neu: **Die Blockseite spricht Englisch, wenn der Browser es tut.** Ihre festen Texte —
+  der Freigabe-Knopf, das Begruendungsfeld, die Bestaetigungen — folgen der
+  Browsersprache des Besuchers, standardmaessig Deutsch. Deine eigene Ueberschrift und
+  dein Text erscheinen immer wie geschrieben.
+
 ## [0.48.0] - 2026-11-25
 
 - Neu: **Sehen, warum eine Anfrage geblockt wurde (Entscheidungs-Trace).** Jeder Eintrag im

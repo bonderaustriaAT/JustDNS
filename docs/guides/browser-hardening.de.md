@@ -25,6 +25,10 @@ dich nichts.
   irgendwohin klickst.
 - **Abgeriegelte Permissions-Policy.** `Permissions-Policy` schaltet Kamera, Mikrofon,
   Standort und die Werbe-Themen-API für die Seite ab – das Dashboard braucht nichts davon.
+- **Ein Cookie, der an seinem Platz bleibt.** Das Login-Cookie ist `HttpOnly` (kein Skript
+  kann es lesen) und `SameSite=Strict` (es wird nicht mitgeschickt, wenn du von einer
+  fremden Seite kommst), sodass es sich nicht durch eine besuchte Seite abschöpfen lässt.
+  Den `Secure`-Schalter für HTTPS vor dem Dashboard beschreibt der letzte Abschnitt.
 
 ## Was es (noch) *nicht* tut
 
@@ -65,3 +69,11 @@ auf Privatsphäre bedachtes Produkt.
 **Wo es greift.** Die Header-Schicht umhüllt den gesamten Dashboard-Router (die Daten-API,
 die Auth-Endpunkte und die eingebettete Oberfläche). Die DNS-Listener und die optionale
 Blockseite, die anderswo ausgeliefert werden, berührt sie nicht.
+
+**Der `Secure`-Schalter fürs Cookie.** Das Sitzungs-Cookie ist bewusst standardmäßig *nicht*
+als `Secure` markiert: Über einfaches HTTP – der übliche Weg zu einem Dashboard im Heimnetz –
+verwirft der Browser ein `Secure`-Cookie stillschweigend, und eine Anmeldung wäre gar nicht
+möglich. Stellst du HTTPS vor das Dashboard (ein eigenes Zertifikat oder ein Reverse Proxy,
+der es abschließt), setze `JUSTDNS_COOKIE_SECURE=1`, und das Cookie wird ab dann nur noch über
+die verschlüsselte Verbindung gesendet. Die Variable wird beim Start des Containers einmal
+gelesen.

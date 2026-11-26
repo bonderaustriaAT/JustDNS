@@ -3,6 +3,32 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.48.1] - 2026-11-26
+
+- Fixed: **Hardening from a second full security review.** Several defensive fixes. The
+  shared sync key of a high-availability cluster is now stored **encrypted at rest** like
+  the other secrets, so a copied or stolen data volume no longer hands over the one key
+  that unlocks the cluster. Password checks run off the async runtime, and repeated failed
+  sign-ins are rate-limited **per source address in addition to per username** — neither a
+  flood of parallel logins nor a rotation of made-up usernames can stall or spam the box.
+  First-run setup — creating the very first admin — is only reachable from the local
+  network. Changing a password, clearing someone's MFA or deleting an account now signs
+  out that account's other sessions, so a reset in response to a compromised login takes
+  effect immediately. The block page's request queue keeps a bounded number of entries,
+  the CSV report export neutralises names a spreadsheet would read as formulas, scheduled
+  SMB backups no longer carry the share password on the command line where a process
+  listing could see it, and every stored file is flushed to disk before its atomic
+  replace, so a crash leaves the old or the new state, never a half-written one. Two
+  dependency advisories (`cookie`, `url`) are resolved with the upstream updates.
+- Added: **A `Secure` switch for the session cookie.** If HTTPS is in front of your
+  dashboard (your own certificate or a reverse proxy), set `JUSTDNS_COOKIE_SECURE=1` and
+  the login cookie is sent only over the encrypted connection. Off by default, because
+  over plain HTTP — the usual way to reach a LAN dashboard — the browser would silently
+  drop a Secure cookie.
+- Added: **The block page speaks English when the visitor's browser does.** Its fixed
+  texts — the request button, the reason box, the confirmations — follow the browser
+  language, German by default. Your own heading and message always appear as written.
+
 ## [0.48.0] - 2026-11-25
 
 - New: **See why a query was acted on (decision trace).** Every entry in the query log now records the

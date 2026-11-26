@@ -104,9 +104,12 @@ Jede Zeile erlaubt dir:
 - Die **Rolle** im Auswahlmenü ändern.
 - Den Schalter in der Spalte **Pflicht** umlegen, um MFA für die Person zu verlangen
   (hinter **Erzwungen** verborgen, solange die globale Pflicht oben an ist).
-- **Passwort zurücksetzen** – ein neues setzen (z. B. nach einer Aussperrung).
+- **Passwort zurücksetzen** – ein neues setzen (z. B. nach einer Aussperrung). Jede
+  Sitzung dieses Kontos wird sofort abgemeldet, ein Reset als Reaktion auf eine
+  kompromittierte Anmeldung greift also tatsächlich.
 - **Zwei-Faktor zurücksetzen** – MFA nach einem verlorenen Handy löschen. Ist MFA
-  weiter Pflicht, richtet die Person es bei der nächsten Anmeldung neu ein.
+  weiter Pflicht, richtet die Person es bei der nächsten Anmeldung neu ein. Auch ihre
+  Sitzungen werden abgemeldet, da der zweite Faktor nun nicht mehr wacht.
 - Das Konto **löschen**. Dein eigenes kannst du nicht löschen, und der letzte
   Administrator ist geschützt.
 
@@ -125,8 +128,14 @@ passiert ist. Damit beantwortest du „wer hat das wann geändert".
 
 - Sitzungen liegen nicht auf der Platte, ein **Neustart von JustDNS meldet also alle
   ab** – sie melden sich einfach neu an. MFA und die Konten selbst bleiben erhalten.
+- Ein eigenes Passwort zu ändern (oder das eigene MFA abzuschalten) behält die Sitzung,
+  aus der du die Änderung machst, und **meldet jedes weitere Gerät dieses Kontos ab**.
 - Wiederholt falsche Passwörter oder Codes werden einige Minuten **ratenbegrenzt**,
-  um Rateversuche auszubremsen.
+  um Rateversuche auszubremsen – je Nutzername und je Quell-Adresse, sodass erfundene
+  Nutzernamen in Serie das nicht umgehen.
+- Die Ersteinrichtung – das Anlegen des allerersten Admins auf einer frischen Box –
+  ist nur aus dem lokalen Netzwerk erreichbar, sodass eine frisch ins Internet
+  gestellte Instanz nicht von dem beansprucht werden kann, der sie zuerst findet.
 - Konten und MFA sind **nicht** Teil eines Konfigurations-Backups – bewusst: ein
   Backup, das du weitergibst, soll keine Passwort-Hashes enthalten. Ein Restore
   rührt die Kontenliste nie an.

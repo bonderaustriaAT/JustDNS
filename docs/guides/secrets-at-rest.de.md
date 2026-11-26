@@ -3,8 +3,10 @@
 *An English version of this guide is in [secrets-at-rest.md](secrets-at-rest.md).*
 
 JustDNS bewahrt einige Geheimnisse auf seinem Datenträger auf: die Kontenliste
-(Passwort-Hashes, TOTP-Secrets, Wiederherstellungscodes) und die geheimen Teile deiner
-Einstellungen (ein Benachrichtigungs-Webhook oder Bot-Token). Ab dieser Version liegen
+(Passwort-Hashes, TOTP-Secrets, Wiederherstellungscodes), die geheimen Teile deiner
+Einstellungen (ein Benachrichtigungs-Webhook oder Bot-Token) und — falls du einen
+[Hochverfügbarkeits](high-availability.de.md)-Cluster nutzt — den geteilten Sync-Schlüssel,
+der allein die Peer-API und ihren Zugangsdaten-Snapshot öffnet. Ab dieser Version liegen
 diese Dateien **verschlüsselt auf der Platte** — eine kopierte Daten-Partition, ein
 Backup oder ein VM-Snapshot ist ohne den Schlüssel wertlos.
 
@@ -40,9 +42,9 @@ ist der ganze Sinn, damit ein kopiertes Daten-Volume nicht auch den Schlüssel p
 
 ## Beim Update
 
-Beim ersten Start der neuen Version liest sie dein vorhandenes Klartext-`auth.json` und
-`config.json`, schreibt sie **verschlüsselt** zurück und macht weiter. Du tust nichts,
-und am Anmelden oder am Umgang mit dem Dashboard ändert sich nichts.
+Beim ersten Start der neuen Version liest sie dein vorhandenes Klartext-`auth.json`,
+`config.json` und `ha.json`, schreibt sie **verschlüsselt** zurück und macht weiter. Du
+tust nichts, und am Anmelden oder am Umgang mit dem Dashboard ändert sich nichts.
 
 Das ist ein Einwegschritt. Eine **ältere** JustDNS-Version kann die verschlüsselten
 Dateien nicht lesen; sobald ein Knoten auf dieser Version läuft, rolle sein Image also

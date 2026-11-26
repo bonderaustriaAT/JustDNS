@@ -290,3 +290,8 @@ certificate on every node. Only the **server IPs** stay **node-local**: each nod
 points blocked names at itself, so a sync never carries them between nodes (you can
 still set them per node). With a shared landing URL, every node redirects to the
 same clean page.
+
+**Page language.** The page's fixed chrome — the request button, the reason box and
+the confirmations — follows the visitor's browser language: German by default,
+English for a browser that prefers it. Your own heading and message are shown as
+written either way, so write them in whatever language your network speaks.
