@@ -602,8 +602,9 @@ fn upsert_alias(aliases: &mut Vec<Alias>, name: String, ips: Vec<IpAddr>) -> Ali
     }
 }
 
-/// Write `stored` to `path` as pretty JSON, atomically (temp file then rename),
-/// creating the parent directory if needed.
+/// Write `stored` to `path` as pretty JSON, atomically: a sibling temp file is
+/// written, flushed to disk, then renamed over the target, so a crash leaves
+/// either the old or the new state — never a half-written one.
 fn write_atomic(path: &Path, stored: &StoredRewrites) -> Result<(), RewriteError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -618,7 +619,7 @@ fn write_atomic(path: &Path, stored: &StoredRewrites) -> Result<(), RewriteError
         source,
     })?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|source| RewriteError::Io {
+    write_and_sync(&tmp, &json).map_err(|source| RewriteError::Io {
         path: tmp.clone(),
         source,
     })?;
@@ -627,6 +628,14 @@ fn write_atomic(path: &Path, stored: &StoredRewrites) -> Result<(), RewriteError
         source,
     })?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]

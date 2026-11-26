@@ -171,7 +171,7 @@ fn now_rfc3339() -> String {
 }
 
 /// Rewrite the whole log to `path` atomically: serialise every entry as one JSON
-/// line to a sibling temp file, then rename over the target.
+/// line to a sibling temp file, flush it to disk, then rename over the target.
 fn persist(path: &Path, entries: &VecDeque<AuditEntry>) -> Result<(), AuditError> {
     let io_err = |source| AuditError::Io {
         path: path.to_path_buf(),
@@ -192,12 +192,20 @@ fn persist(path: &Path, entries: &VecDeque<AuditEntry>) -> Result<(), AuditError
     }
 
     let tmp = path.with_extension("log.tmp");
-    std::fs::write(&tmp, buf.as_bytes()).map_err(|source| AuditError::Io {
+    write_and_sync(&tmp, buf.as_bytes()).map_err(|source| AuditError::Io {
         path: tmp.clone(),
         source,
     })?;
     std::fs::rename(&tmp, path).map_err(io_err)?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
