@@ -25,6 +25,10 @@ configure — in the spirit of the other invisible hardening, it costs you nothi
 - **A locked-down permissions policy.** `Permissions-Policy` switches off the camera,
   microphone, geolocation and the ad-topics API for the page — the dashboard needs none of
   them.
+- **A cookie that stays put.** The login cookie is `HttpOnly` (no script can read it) and
+  `SameSite=Strict` (it is not sent along on a click from another site), so it cannot be
+  lifted by a page you happen to visit. See below for the `Secure` switch when the
+  dashboard is served over HTTPS.
 
 ## What it does *not* do (yet)
 
@@ -63,3 +67,10 @@ from talking to Google at all — a worthwhile follow-up for a privacy-minded pr
 **Where it is applied.** The header layer wraps the whole dashboard router (the data API,
 the auth endpoints and the embedded UI). It does not touch the DNS listeners or the
 optional block page, which are served elsewhere.
+
+**The `Secure` cookie switch.** The session cookie is deliberately *not* marked `Secure` by
+default: over plain HTTP — the usual way to reach a LAN dashboard — a browser silently
+drops a `Secure` cookie, and you could not log in at all. If you put HTTPS in front of the
+dashboard (your own certificate, or a reverse proxy that terminates it), set
+`JUSTDNS_COOKIE_SECURE=1` and the cookie is sent only over the encrypted connection from
+then on. It is a startup variable, read once when the container starts.
