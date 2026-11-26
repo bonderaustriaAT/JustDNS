@@ -21,6 +21,12 @@ type OnChange = Arc<dyn Fn() + Send + Sync>;
 /// The longest reason text kept, in characters.
 const MAX_REASON_CHARS: usize = 280;
 
+/// How many pending asks the queue keeps. The block page fills it from the
+/// network, so it needs a bound: past this, the oldest entries are dropped in
+/// favour of fresh ones, which keeps the file (rewritten whole on every new
+/// ask) from growing without end.
+const MAX_PENDING: usize = 500;
+
 /// Errors from loading, saving or editing the access-request queue.
 #[derive(Debug, thiserror::Error)]
 pub enum AccessError {
@@ -161,13 +167,21 @@ impl AccessStore {
     }
 
     /// Record an ask. The id is derived from client + domain, so re-asking
-    /// refreshes the one entry with the latest reason and time.
+    /// refreshes the one entry with the latest reason and time. The queue is
+    /// capped: past [`MAX_PENDING`] the oldest entries are dropped, so a
+    /// visitor scripting the public endpoint cannot grow the file without end.
     pub fn record(&self, req: AccessRequest) -> Result<AccessRequest, AccessError> {
         let clean = clean_request(req)?;
         self.mutate(|state| {
             match state.requests.iter_mut().find(|r| r.id == clean.id) {
                 Some(slot) => *slot = clean.clone(),
-                None => state.requests.push(clean.clone()),
+                None => {
+                    state.requests.push(clean.clone());
+                    if state.requests.len() > MAX_PENDING {
+                        let excess = state.requests.len() - MAX_PENDING;
+                        state.requests.drain(..excess);
+                    }
+                }
             }
             Ok(clean)
         })
@@ -310,7 +324,9 @@ fn clean_state(stored: StoredRequests) -> StoredRequests {
 }
 
 /// Write `stored` to `path` as pretty JSON, atomically (temp file then rename),
-/// creating the parent directory if needed.
+/// creating the parent directory if needed. The temp file is flushed to disk
+/// before the rename, so a crash cannot leave the target empty or half-written
+/// — only the old or the new state.
 fn write_atomic(path: &Path, stored: &StoredRequests) -> Result<(), AccessError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -325,7 +341,7 @@ fn write_atomic(path: &Path, stored: &StoredRequests) -> Result<(), AccessError>
         source,
     })?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|source| AccessError::Io {
+    write_and_sync(&tmp, &json).map_err(|source| AccessError::Io {
         path: tmp.clone(),
         source,
     })?;
@@ -334,6 +350,14 @@ fn write_atomic(path: &Path, stored: &StoredRequests) -> Result<(), AccessError>
         source,
     })?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -375,6 +399,27 @@ mod tests {
         assert_eq!(
             reopened.get(&a.id).unwrap().reason.as_deref(),
             Some("need it")
+        );
+    }
+
+    #[test]
+    fn queue_is_capped_and_drops_the_oldest() {
+        let (_dir, store) = store();
+        for i in 0..(MAX_PENDING + 25) {
+            store
+                .record(req(
+                    "192.168.20.30",
+                    &format!("host{i}.example"),
+                    None,
+                    1_000 + i as i64,
+                ))
+                .unwrap();
+        }
+        assert_eq!(store.count(), MAX_PENDING, "the queue never grows past the cap");
+        // The oldest asks were the ones dropped; the newest survive.
+        assert!(
+            store.view().iter().all(|r| r.created_ms >= 25),
+            "the first 25 (created_ms < 25) were dropped"
         );
     }
 
