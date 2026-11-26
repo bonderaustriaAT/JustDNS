@@ -1064,8 +1064,8 @@ fn decode(
 }
 
 /// Write `bytes` (the sealed config) to `path` atomically: write a sibling temp
-/// file first, then rename over the target so a crash mid-write never leaves a
-/// half-written config.
+/// file, flush it to disk, then rename over the target so a crash leaves either
+/// the old or the new config — never a half-written one.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     let io_err = |source| ConfigError::Io {
         path: path.to_path_buf(),
@@ -1079,12 +1079,20 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     }
 
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|source| ConfigError::Io {
+    write_and_sync(&tmp, bytes).map_err(|source| ConfigError::Io {
         path: tmp.clone(),
         source,
     })?;
     std::fs::rename(&tmp, path).map_err(io_err)?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
