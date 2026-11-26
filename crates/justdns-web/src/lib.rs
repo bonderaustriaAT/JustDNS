@@ -10,7 +10,7 @@
 //! debug build compiles even before the UI is built.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -105,8 +105,18 @@ const ACTIVE_CLIENT_WINDOW: usize = 1000;
 /// How many failed login/second-factor attempts for one username within the
 /// window before further attempts are refused.
 const MAX_LOGIN_ATTEMPTS: u32 = 10;
+/// How many failed attempts one source address may make against the login and
+/// second-factor endpoints within the window. Generous for a household signing
+/// in a few devices, tight enough that scripted guessing has to spread over
+/// many addresses instead of hiding behind ever-fresh usernames.
+const MAX_IP_LOGIN_ATTEMPTS: u32 = 40;
 /// The rolling window over which failed attempts are counted.
 const LOGIN_WINDOW: Duration = Duration::from_secs(300);
+/// Cap on distinct throttle keys held at once, so a spray of made-up usernames
+/// cannot grow the map without bound. Expired entries sweep themselves out;
+/// this is the backstop, and a fresh unknown key past it is quietly not
+/// counted rather than a live one being evicted.
+const MAX_THROTTLE_KEYS: usize = 4096;
 
 /// Smallest sync key the wizard accepts. The key alone authorises the peer
 /// snapshot, which from HA Stage B carries every password hash and TOTP secret,
@@ -121,16 +131,26 @@ const MIN_SYNC_KEY_LEN: usize = 16;
 const HA_PEER_THROTTLE_KEY: &str = "ha-peer";
 
 /// A soft, in-memory rate limiter for the login and second-factor endpoints,
-/// keyed by username. It slows an online guess of a password, TOTP or recovery
-/// code; it is not persisted, so a restart clears it (acceptable for a LAN box).
+/// keyed by username (or by source address, for the per-address budget). It
+/// slows an online guess of a password, TOTP or recovery code; it is not
+/// persisted, so a restart clears it (acceptable for a LAN box).
 #[derive(Clone)]
 struct LoginThrottle {
+    /// How many failures within the window lock the key.
+    max_attempts: u32,
     inner: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
 }
 
 impl LoginThrottle {
     fn new() -> Self {
+        Self::with_limit(MAX_LOGIN_ATTEMPTS)
+    }
+
+    /// A throttle with its own failure budget, for a limiter that is not about
+    /// usernames (the per-address login budget).
+    fn with_limit(max_attempts: u32) -> Self {
         Self {
+            max_attempts,
             inner: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -145,7 +165,7 @@ impl LoginThrottle {
                     map.remove(key);
                     false
                 } else {
-                    *count >= MAX_LOGIN_ATTEMPTS
+                    *count >= self.max_attempts
                 }
             }
             None => false,
@@ -156,6 +176,16 @@ impl LoginThrottle {
     /// one has elapsed.
     fn note_failure(&self, key: &str) {
         let mut map = self.inner.lock().expect("throttle lock poisoned");
+        // A flood of distinct keys (made-up usernames) must not grow the map
+        // without bound; sweep what has expired and, still at the cap, skip an
+        // unknown fresh key instead of evicting a live one.
+        if map.len() >= MAX_THROTTLE_KEYS {
+            let now = Instant::now();
+            map.retain(|_, (_, started)| now.duration_since(*started) < LOGIN_WINDOW);
+            if map.len() >= MAX_THROTTLE_KEYS && !map.contains_key(key) {
+                return;
+            }
+        }
         let entry = map.entry(key.to_owned()).or_insert((0, Instant::now()));
         if entry.1.elapsed() > LOGIN_WINDOW {
             *entry = (0, Instant::now());
@@ -209,6 +239,14 @@ struct AppState {
     /// which alone unlocks the credential-bearing peer snapshot — cannot be
     /// brute-forced against the peer API at line rate.
     peer_auth_throttle: LoginThrottle,
+    /// Per-address budget for the unauthenticated login endpoints, so scripted
+    /// guessing cannot hide behind ever-fresh usernames (the per-username
+    /// throttle above never bites those).
+    ip_throttle: LoginThrottle,
+    /// Mark the session cookie `Secure`. Off by default, because the dashboard
+    /// is commonly served over plain HTTP on a LAN; set for installs that put
+    /// HTTPS in front (a certificate of their own or a reverse proxy).
+    cookie_secure: bool,
     /// The shared certificate store backing DoT/DoH and the block page. `None`
     /// when TLS could not be prepared at startup, in which case the `/api/certs`
     /// and `/api/tls` endpoints report it as unavailable rather than failing.
@@ -442,6 +480,11 @@ pub async fn serve(
         audit,
         throttle: LoginThrottle::new(),
         peer_auth_throttle: LoginThrottle::new(),
+        ip_throttle: LoginThrottle::with_limit(MAX_IP_LOGIN_ATTEMPTS),
+        // Off by default: the dashboard is commonly plain HTTP on a LAN, where
+        // a Secure cookie would be dropped. Set JUSTDNS_COOKIE_SECURE=1 when
+        // HTTPS is in front (own certificate or reverse proxy).
+        cookie_secure: env_flag("JUSTDNS_COOKIE_SECURE"),
         certs,
         cert_reload,
         dot_port,
@@ -572,7 +615,14 @@ pub async fn serve(
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
-    axum::serve(listener, router(app_state)).await
+    // Connection info travels with each request so the login endpoints can
+    // budget attempts per source address; the handlers read it softly, so a
+    // router driven without it (the test suite) simply opts out.
+    axum::serve(
+        listener,
+        router(app_state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 /// The Content-Security-Policy served with every response. It is deliberately
@@ -975,11 +1025,16 @@ async fn require_auth(
 
 /// Build the session cookie carrying `token`. Short-lived cookies are session
 /// cookies in the browser; the server-side expiry is what really bounds a login.
-fn session_cookie(token: String) -> Cookie<'static> {
+fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE, token);
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Strict);
     cookie.set_path("/");
+    // Only set for installs that serve the dashboard over HTTPS; over plain
+    // HTTP a Secure cookie would be silently dropped by the browser.
+    if secure {
+        cookie.set_secure(true);
+    }
     cookie
 }
 
@@ -1147,43 +1202,109 @@ fn auth_error(error: AuthError) -> (StatusCode, String) {
     (status, error.to_string())
 }
 
-/// Wrap an internal error message as a 500.
+/// Wrap an error as a 500.
 fn internal(message: String) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, message)
 }
 
+/// Run a CPU-heavy secret operation (an Argon2 hash or a password-keyed backup
+/// seal) on the blocking pool. Each such call costs tens of milliseconds and
+/// tens of megabytes; running it on an async worker would let a handful of
+/// parallel requests stall every other connection on the box. A panic in the
+/// task surfaces as a 500 rather than taking the handler down.
+async fn blocking<T, F>(task: F) -> Result<T, (StatusCode, String)>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|error| internal(format!("background task failed: {error}")))
+}
+
+/// The calling socket's address, when the server was built with connection
+/// info. Extracting softly (rather than via [`axum::extract::ConnectInfo`])
+/// keeps the router usable without it — the test suite drives handlers
+/// directly — and `None` simply opts a caller out of the per-address budget.
+struct ClientAddr(Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let ip = parts
+            .extensions
+            .get::<axum::extract::connect_info::ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.ip());
+        Ok(ClientAddr(ip))
+    }
+}
+
+/// Whether `ip` belongs to a local or private network: loopback, RFC 1918, a
+/// IPv6 unique-local or link-local address. First-run setup is restricted to
+/// these, so a fresh instance exposed to the internet cannot be claimed by a
+/// stranger who happens to reach it first. A reverse proxy on the same LAN
+/// presents its own private address and stays allowed.
+fn is_private_source(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+        }
+    }
+}
+
+/// Read a boolean environment switch: present and anything but `0`, `false` or
+/// empty counts as on.
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| !matches!(value.trim(), "" | "0" | "false"))
+        .unwrap_or(false)
+}
+
 /// Create the first administrator on an unconfigured box and log them straight
-/// in. Refused once an admin exists, so this cannot be used to take over.
+/// in. Refused once an admin exists, so this cannot be used to take over. The
+/// claim is also restricted to local/private source addresses: a fresh instance
+/// that reaches the internet before its admin does cannot be claimed by a
+/// stranger who gets there first.
 async fn auth_setup(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
-    match state.users.create_admin(&creds.username, &creds.password) {
-        Ok(()) => {
-            let token = state.sessions.create(&creds.username);
-            record(
-                &state,
-                AuditEntry::success(&creds.username, "setup.admin").target(&creds.username),
-            );
-            Ok((
-                jar.add(session_cookie(token)),
-                Json(LoginResponse {
-                    username: creds.username,
-                    status: LoginStatus::Authenticated,
-                }),
-            ))
-        }
-        Err(error) => Err(auth_error(error)),
+    if addr.is_some_and(|ip| !is_private_source(ip)) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "first-run setup is only available from the local network".into(),
+        ));
     }
+    let users = state.users.clone();
+    let username = creds.username.clone();
+    let password = creds.password.clone();
+    blocking(move || users.create_admin(&username, &password).map_err(auth_error)).await??;
+    let token = state.sessions.create(&creds.username);
+    record(
+        &state,
+        AuditEntry::success(&creds.username, "setup.admin").target(&creds.username),
+    );
+    Ok((
+        jar.add(session_cookie(token, state.cookie_secure)),
+        Json(LoginResponse {
+            username: creds.username,
+            status: LoginStatus::Authenticated,
+        }),
+    ))
 }
 
 /// Step one of signing in: check the username and password. On success the
 /// response says whether the login is finished or a second factor is still
-/// needed (a code, or first setting MFA up). Repeated failures are throttled.
+/// needed (a code, or first setting MFA up). Repeated failures are throttled
+/// per username and per source address.
 async fn auth_login(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
     if state.throttle.is_locked(&creds.username) {
@@ -1196,9 +1317,27 @@ async fn auth_login(
             "too many attempts, try again in a few minutes".into(),
         ));
     }
+    let ip_key = addr.map(|ip| format!("ip:{ip}"));
+    if let Some(key) = &ip_key {
+        if state.ip_throttle.is_locked(key) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many attempts from this address, try again in a few minutes".into(),
+            ));
+        }
+    }
 
-    let Some(username) = state.users.verify(&creds.username, &creds.password) else {
+    // The Argon2 verification is deliberately off the async runtime (see
+    // `blocking`), so a flood of login requests cannot stall the box.
+    let users = state.users.clone();
+    let username = creds.username.clone();
+    let password = creds.password.clone();
+    let verified = blocking(move || users.verify(&username, &password)).await?;
+    let Some(username) = verified else {
         state.throttle.note_failure(&creds.username);
+        if let Some(key) = &ip_key {
+            state.ip_throttle.note_failure(key);
+        }
         record(
             &state,
             AuditEntry::failure(&creds.username, "login.failure")
@@ -1217,7 +1356,7 @@ async fn auth_login(
             .sessions
             .create_pending(&username, SessionState::PendingMfa);
         return Ok((
-            jar.add(session_cookie(token)),
+            jar.add(session_cookie(token, state.cookie_secure)),
             Json(LoginResponse {
                 username,
                 status: LoginStatus::Mfa,
@@ -1229,7 +1368,7 @@ async fn auth_login(
             .sessions
             .create_pending(&username, SessionState::PendingEnroll);
         return Ok((
-            jar.add(session_cookie(token)),
+            jar.add(session_cookie(token, state.cookie_secure)),
             Json(LoginResponse {
                 username,
                 status: LoginStatus::Enroll,
@@ -1239,13 +1378,16 @@ async fn auth_login(
 
     // No second factor needed — finish here.
     state.throttle.clear(&username);
+    if let Some(key) = &ip_key {
+        state.ip_throttle.clear(key);
+    }
     let token = state.sessions.create(&username);
     record(
         &state,
         AuditEntry::success(&username, "login.success").target(&username),
     );
     Ok((
-        jar.add(session_cookie(token)),
+        jar.add(session_cookie(token, state.cookie_secure)),
         Json(LoginResponse {
             username,
             status: LoginStatus::Authenticated,
@@ -1258,6 +1400,7 @@ async fn auth_login(
 async fn auth_mfa(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(body): Json<CodeBody>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
     let Some((username, SessionState::PendingMfa)) = current_pending(&state, &jar) else {
@@ -1269,17 +1412,36 @@ async fn auth_mfa(
             "too many attempts, try again in a few minutes".into(),
         ));
     }
+    let ip_key = addr.map(|ip| format!("ip:{ip}"));
+    if let Some(key) = &ip_key {
+        if state.ip_throttle.is_locked(key) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many attempts from this address, try again in a few minutes".into(),
+            ));
+        }
+    }
 
-    let code = body.code.trim();
-    let method = if state.users.verify_totp(&username, code) {
-        Some("mfa")
-    } else if state.users.consume_recovery(&username, code) {
-        Some("recovery")
-    } else {
-        None
-    };
+    // Checking a recovery code hashes it against every stored code hash, so the
+    // attempt runs on the blocking pool like the password check.
+    let code = body.code.trim().to_owned();
+    let users = state.users.clone();
+    let for_task = username.clone();
+    let method = blocking(move || {
+        if users.verify_totp(&for_task, &code) {
+            Some("mfa")
+        } else if users.consume_recovery(&for_task, &code) {
+            Some("recovery")
+        } else {
+            None
+        }
+    })
+    .await?;
     let Some(method) = method else {
         state.throttle.note_failure(&username);
+        if let Some(key) = &ip_key {
+            state.ip_throttle.note_failure(key);
+        }
         record(
             &state,
             AuditEntry::failure(&username, "login.failure")
@@ -1292,6 +1454,9 @@ async fn auth_mfa(
     let token = cookie_token(&jar).expect("pending session had a cookie");
     state.sessions.promote(&token);
     state.throttle.clear(&username);
+    if let Some(key) = &ip_key {
+        state.ip_throttle.clear(key);
+    }
     record(
         &state,
         AuditEntry::success(&username, "login.success")
@@ -1316,7 +1481,12 @@ async fn auth_enroll_begin(
     let Some((username, SessionState::PendingEnroll)) = current_pending(&state, &jar) else {
         return Err((StatusCode::UNAUTHORIZED, "no pending enrolment".into()));
     };
-    Ok(Json(begin_enrollment(&state, &username)?))
+    // Hashing the fresh recovery codes is Argon2 work: run it on the blocking
+    // pool like every other secret computation on the login path.
+    let for_task = state.clone();
+    let name = username.clone();
+    let payload = blocking(move || begin_enrollment(&for_task, &name)).await??;
+    Ok(Json(payload))
 }
 
 /// Finish the pending user's enrolment: verify a code against the fresh secret,
@@ -1414,29 +1584,42 @@ struct ChangePasswordBody {
     new_password: String,
 }
 
-/// Change one's own password after proving the current one.
+/// Change one's own password after proving the current one. Both the verify
+/// and the new hash are Argon2 work, so the pair runs on the blocking pool;
+/// every other session of this account is ended (the current one is kept, so
+/// the change does not log its author out).
 async fn change_own_password(
     State(state): State<AppState>,
     identity: Identity,
+    jar: CookieJar,
     Json(body): Json<ChangePasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if !state
-        .users
-        .verify_password(&identity.username, &body.current_password)
-    {
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let current = body.current_password.clone();
+    let new = body.new_password.clone();
+    let outcome = blocking(move || -> Result<(), (StatusCode, String)> {
+        if !users.verify_password(&username, &current) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "current password is incorrect".into(),
+            ));
+        }
+        users.set_password(&username, &new).map_err(auth_error)
+    })
+    .await?;
+    // Keep the audit trail for a wrong password (as before), without holding
+    // the closure to it.
+    if matches!(&outcome, Err((StatusCode::UNAUTHORIZED, _))) {
         record(
             &state,
             AuditEntry::failure(&identity.username, "account.password").target(&identity.username),
         );
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "current password is incorrect".into(),
-        ));
     }
+    outcome?;
     state
-        .users
-        .set_password(&identity.username, &body.new_password)
-        .map_err(auth_error)?;
+        .sessions
+        .remove_user_except(&identity.username, &cookie_token(&jar).unwrap_or_default());
     record(
         &state,
         AuditEntry::success(&identity.username, "account.password").target(&identity.username),
@@ -1445,12 +1628,17 @@ async fn change_own_password(
 }
 
 /// Begin enrolling oneself in MFA voluntarily. Returns the secret, QR and
-/// recovery codes to show once; MFA is not active until confirmed.
+/// recovery codes to show once; MFA is not active until confirmed. The
+/// recovery-code hashing runs on the blocking pool, like every other Argon2
+/// computation the handlers trigger.
 async fn account_mfa_begin(
     State(state): State<AppState>,
     identity: Identity,
 ) -> Result<Json<MfaSetupPayload>, (StatusCode, String)> {
-    Ok(Json(begin_enrollment(&state, &identity.username)?))
+    let for_task = state.clone();
+    let name = identity.username.clone();
+    let payload = blocking(move || begin_enrollment(&for_task, &name)).await??;
+    Ok(Json(payload))
 }
 
 /// Confirm one's own enrolment with a code, turning MFA on.
@@ -1483,10 +1671,13 @@ struct PasswordBody {
     password: String,
 }
 
-/// Turn one's own MFA off, unless it is required for the account.
+/// Turn one's own MFA off, unless it is required for the account. Other
+/// sessions of the account are ended (the current one is kept); the password
+/// check runs on the blocking pool.
 async fn account_mfa_disable(
     State(state): State<AppState>,
     identity: Identity,
+    jar: CookieJar,
     Json(body): Json<PasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if effective_require_mfa(&state, &identity.username) {
@@ -1495,16 +1686,20 @@ async fn account_mfa_disable(
             "MFA is required for your account and cannot be turned off".into(),
         ));
     }
-    if !state
-        .users
-        .verify_password(&identity.username, &body.password)
-    {
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let password = body.password.clone();
+    let verified = blocking(move || users.verify_password(&username, &password)).await?;
+    if !verified {
         return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
     }
     state
         .users
         .clear_mfa(&identity.username)
         .map_err(auth_error)?;
+    state
+        .sessions
+        .remove_user_except(&identity.username, &cookie_token(&jar).unwrap_or_default());
     record(
         &state,
         AuditEntry::success(&identity.username, "mfa.disable").target(&identity.username),
@@ -1512,7 +1707,9 @@ async fn account_mfa_disable(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Replace one's own recovery codes, after proving the password.
+/// Replace one's own recovery codes, after proving the password. Both the
+/// verify and the batch of fresh code hashes are Argon2 work, so the pair
+/// runs on the blocking pool.
 async fn account_mfa_regenerate_recovery(
     State(state): State<AppState>,
     identity: Identity,
@@ -1521,17 +1718,18 @@ async fn account_mfa_regenerate_recovery(
     if !state.users.mfa_enabled(&identity.username) {
         return Err((StatusCode::CONFLICT, "MFA is not set up".into()));
     }
-    if !state
-        .users
-        .verify_password(&identity.username, &body.password)
-    {
-        return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
-    }
-    let recovery_codes = justdns_auth::mfa::generate_recovery_codes();
-    state
-        .users
-        .replace_recovery(&identity.username, &recovery_codes)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let password = body.password.clone();
+    let recovery_codes = blocking(move || -> Result<Vec<String>, (StatusCode, String)> {
+        if !users.verify_password(&username, &password) {
+            return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
+        }
+        let codes = justdns_auth::mfa::generate_recovery_codes();
+        users.replace_recovery(&username, &codes).map_err(auth_error)?;
+        Ok(codes)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "mfa.recovery").target(&identity.username),
@@ -1562,10 +1760,17 @@ async fn add_user(
     identity: Identity,
     Json(body): Json<NewUserBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .users
-        .add_user(&body.username, &body.password, body.role, body.mfa_required)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let username = body.username.clone();
+    let password = body.password.clone();
+    let role = body.role;
+    let mfa_required = body.mfa_required;
+    blocking(move || {
+        users
+            .add_user(&username, &password, role, mfa_required)
+            .map_err(auth_error)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "user.create")
@@ -1607,17 +1812,19 @@ struct NewPasswordBody {
 }
 
 /// Reset a user's password (an admin action; the user is not asked for the old
-/// one).
+/// one). Every session of that account is ended, so a reset in response to a
+/// compromised login actually kicks the attacker out.
 async fn reset_user_password(
     State(state): State<AppState>,
     identity: Identity,
     Path(username): Path<String>,
     Json(body): Json<NewPasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .users
-        .set_password(&username, &body.new_password)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let target = username.clone();
+    let new_password = body.new_password.clone();
+    blocking(move || users.set_password(&target, &new_password).map_err(auth_error)).await??;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.password").target(&username),
@@ -1651,13 +1858,16 @@ async fn set_user_mfa_required(
 }
 
 /// Clear a user's MFA (an admin reset after a lost device). If MFA is still
-/// required for them, they must enrol again at next login.
+/// required for them, they must enrol again at next login. Their other
+/// sessions are ended — a device the second factor protected is re-proven
+/// against the password alone from here on.
 async fn reset_user_mfa(
     State(state): State<AppState>,
     identity: Identity,
     Path(username): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     state.users.clear_mfa(&username).map_err(auth_error)?;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.mfaReset").target(&username),
@@ -1679,6 +1889,7 @@ async fn delete_user(
         ));
     }
     state.users.remove_user(&username).map_err(auth_error)?;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.delete").target(&username),
@@ -3513,7 +3724,10 @@ async fn export_backup(
     redact_settings_secrets(&mut backup.settings);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let sealed = justdns_secret::seal_backup(&request.password, &json);
+    // Sealing derives its key from the password with Argon2id — a deliberate
+    // tens-of-milliseconds cost — so it runs on the blocking pool.
+    let password = request.password.clone();
+    let sealed = blocking(move || justdns_secret::seal_backup(&password, &json)).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
@@ -3558,7 +3772,8 @@ async fn restore_backup(
             )
         })?;
     // An encrypted backup needs its password; a legacy plaintext backup restores
-    // as-is, so old exports keep working.
+    // as-is, so old exports keep working. The password-to-key derivation is
+    // Argon2id, so the open runs on the blocking pool.
     let json_bytes = if justdns_secret::is_backup_encrypted(&raw) {
         let password = request.password.unwrap_or_default();
         if password.is_empty() {
@@ -3567,12 +3782,15 @@ async fn restore_backup(
                 "this backup is encrypted — enter its password".to_owned(),
             ));
         }
-        justdns_secret::open_backup(&password, &raw).map_err(|error| match error {
-            justdns_secret::BackupError::WrongPassword => {
-                (StatusCode::BAD_REQUEST, "wrong backup password".to_owned())
-            }
-            other => (StatusCode::BAD_REQUEST, other.to_string()),
-        })?
+        blocking(move || {
+            justdns_secret::open_backup(&password, &raw).map_err(|error| match error {
+                justdns_secret::BackupError::WrongPassword => {
+                    (StatusCode::BAD_REQUEST, "wrong backup password".to_owned())
+                }
+                other => (StatusCode::BAD_REQUEST, other.to_string()),
+            })
+        })
+        .await??
     } else {
         raw
     };
@@ -5235,13 +5453,24 @@ async fn ha_remote_update(
     };
     let backup_path = state.update.data_dir().join(HA_UPDATE_BACKUP_FILE);
     let requested_by = format!("ha:{}", caller.node_id);
-    match perform_update(
-        &state,
-        &backup_path,
-        &request.password,
-        &requested_by,
-        request.target_version.as_deref(),
-    ) {
+    // The safety backup's Argon2id seal belongs on the blocking pool, like the
+    // local one-click update.
+    let for_task = state.clone();
+    let password = request.password.clone();
+    let target_version = request.target_version.clone();
+    let requested_by_for_task = requested_by.clone();
+    let outcome = blocking(move || {
+        perform_update(
+            &for_task,
+            &backup_path,
+            &password,
+            &requested_by_for_task,
+            target_version.as_deref(),
+        )
+    })
+    .await
+    .unwrap_or_else(Err);
+    match outcome {
         Ok(target) => {
             record(
                 &state,
@@ -5996,6 +6225,13 @@ fn perform_update(
         }
     };
 
+    if !update::is_valid_release(&target) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("'{target}' is not a valid release version"),
+        ));
+    }
+
     if password.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -6067,7 +6303,15 @@ async fn start_update(
     Json(body): Json<StartUpdate>,
 ) -> Result<Json<UpdateView>, (StatusCode, String)> {
     let path = std::path::PathBuf::from(&body.backup_path);
-    let target = perform_update(&state, &path, &body.password, &identity.username, None)?;
+    // The safety backup is password-sealed (Argon2id), and the update check
+    // itself does file I/O: run the whole thing on the blocking pool.
+    let for_task = state.clone();
+    let password = body.password.clone();
+    let requested_by = identity.username.clone();
+    let target = blocking(move || {
+        perform_update(&for_task, &path, &password, &requested_by, None)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "update.start").target(&target),
@@ -8466,6 +8710,8 @@ mod tests {
             audit: test_audit(),
             throttle: LoginThrottle::new(),
             peer_auth_throttle: LoginThrottle::new(),
+            ip_throttle: LoginThrottle::with_limit(MAX_IP_LOGIN_ATTEMPTS),
+            cookie_secure: false,
             certs: None,
             cert_reload: None,
             dot_port: 853,

@@ -124,6 +124,22 @@ impl SessionStore {
             .remove(token);
     }
 
+    /// End every session of `username`. Called when an administrator resets a
+    /// password, clears MFA or deletes an account, so a session minted before
+    /// the change cannot outlive it.
+    pub fn remove_user(&self, username: &str) {
+        let mut sessions = self.inner.lock().expect("session lock poisoned");
+        sessions.retain(|_, session| session.username != username);
+    }
+
+    /// End every session of `username` except `keep`. Self-service changes keep
+    /// their author signed in on the device they made the change from, while
+    /// every other session — a stolen laptop's cookie, say — is dropped.
+    pub fn remove_user_except(&self, username: &str, keep: &str) {
+        let mut sessions = self.inner.lock().expect("session lock poisoned");
+        sessions.retain(|token, session| session.username != username || token == keep);
+    }
+
     fn insert(&self, username: &str, state: SessionState, ttl: Duration) -> String {
         let token = random_token();
         let now = Instant::now();
@@ -173,6 +189,30 @@ mod tests {
         let token = store.create("admin");
         store.remove(&token);
         assert_eq!(store.username_for(&token), None);
+    }
+
+    #[test]
+    fn remove_user_ends_every_session_of_that_user_only() {
+        let store = SessionStore::new(DEFAULT_SESSION_TTL);
+        let a1 = store.create("ann");
+        let a2 = store.create("ann");
+        let b = store.create("bob");
+        store.remove_user("ann");
+        assert_eq!(store.username_for(&a1), None);
+        assert_eq!(store.username_for(&a2), None, "every session of the user");
+        assert_eq!(store.username_for(&b), Some("bob".to_owned()));
+    }
+
+    #[test]
+    fn remove_user_except_keeps_only_the_current_token() {
+        let store = SessionStore::new(DEFAULT_SESSION_TTL);
+        let here = store.create("ann");
+        let stolen = store.create("ann");
+        let other = store.create("bob");
+        store.remove_user_except("ann", &here);
+        assert_eq!(store.username_for(&here), Some("ann".to_owned()));
+        assert_eq!(store.username_for(&stolen), None, "other sessions drop");
+        assert_eq!(store.username_for(&other), Some("bob".to_owned()));
     }
 
     #[test]

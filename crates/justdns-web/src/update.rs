@@ -165,6 +165,14 @@ pub fn is_prerelease(tag: &str) -> bool {
     Release::parse(tag).is_some_and(|release| release.rc.is_some())
 }
 
+/// Whether `tag` is a well-formed release version (`vX.Y.Z`, optionally with an
+/// `-rcN` suffix). The version that reaches the on-disk update request — from
+/// the UI, or pinned by a managing node over the peer channel — is validated
+/// here, so nothing odd is ever queued for the sidecar.
+pub fn is_valid_release(tag: &str) -> bool {
+    Release::parse(tag).is_some()
+}
+
 /// The cached result of the most recent check.
 #[derive(Clone, Default)]
 struct Cached {
