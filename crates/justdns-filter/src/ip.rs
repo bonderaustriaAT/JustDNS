@@ -89,21 +89,27 @@ impl IpSet {
     /// Add every rule in `text` to this set, keeping what is already there.
     pub fn add_rules(&mut self, text: &str) {
         for line in text.lines() {
-            match parse_ip_rule(line) {
-                Some(IpRule::Exact(addr)) => {
-                    self.v4_exact.insert(u32::from(addr));
-                }
-                Some(IpRule::Cidr { network, prefix }) => {
-                    // `/32` is just an exact address; `/0` matches everything, so
-                    // keep it as a zero-length group with a single zero network.
-                    if prefix == 32 {
-                        self.v4_exact.insert(network);
-                    } else {
-                        self.insert_cidr(prefix, network);
-                    }
-                }
-                None => {}
+            self.add_rule(line);
+        }
+    }
+
+    /// Add one rule line to this set. Public so a large IP feed can be parsed
+    /// line-by-line from disk without its full text in memory.
+    pub fn add_rule(&mut self, line: &str) {
+        match parse_ip_rule(line) {
+            Some(IpRule::Exact(addr)) => {
+                self.v4_exact.insert(u32::from(addr));
             }
+            Some(IpRule::Cidr { network, prefix }) => {
+                // `/32` is just an exact address; `/0` matches everything, so
+                // keep it as a zero-length group with a single zero network.
+                if prefix == 32 {
+                    self.v4_exact.insert(network);
+                } else {
+                    self.insert_cidr(prefix, network);
+                }
+            }
+            None => {}
         }
     }
 
@@ -206,8 +212,8 @@ impl IpBlocker {
     }
 
     /// Replace the block set. Takes effect on the next answer.
-    pub fn publish(&self, set: IpSet) {
-        self.set.store(Arc::new(set));
+    pub fn publish(&self, set: Arc<IpSet>) {
+        self.set.store(set);
     }
 
     /// Whether the block set is empty, so the answer path can skip the check.
@@ -312,12 +318,12 @@ mod tests {
         assert!(blocker.is_empty());
         assert!(!blocker.contains("1.2.3.4".parse().unwrap()));
 
-        blocker.publish(IpSet::from_rules("1.2.3.0/24\n"));
+        blocker.publish(Arc::new(IpSet::from_rules("1.2.3.0/24\n")));
         assert!(!blocker.is_empty());
         assert!(blocker.contains("1.2.3.99".parse().unwrap()));
         assert!(!blocker.contains("1.2.4.0".parse().unwrap()));
 
-        blocker.publish(IpSet::new());
+        blocker.publish(Arc::new(IpSet::new()));
         assert!(blocker.is_empty());
     }
 }

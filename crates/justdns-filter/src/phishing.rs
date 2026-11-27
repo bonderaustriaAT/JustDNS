@@ -264,8 +264,9 @@ pub struct PhishingConfig {
     pub extra_brands: Vec<String>,
     /// Compiled-in brand ids the user switched off.
     pub disabled_builtin: Vec<String>,
-    /// The newly-registered-domain warn set.
-    pub nrd: DomainSet,
+    /// The newly-registered-domain warn set, shared with the lists store that
+    /// parsed it once — never copied per configure.
+    pub nrd: Arc<DomainSet>,
 }
 
 impl Default for PhishingConfig {
@@ -277,7 +278,7 @@ impl Default for PhishingConfig {
             nrd_mode: PhishingMode::Warn,
             extra_brands: Vec::new(),
             disabled_builtin: Vec::new(),
-            nrd: DomainSet::new(),
+            nrd: Arc::new(DomainSet::new()),
         }
     }
 }
@@ -301,7 +302,8 @@ struct State {
     /// Brand labels indexed by their skeleton, so matching a query label is one
     /// hash lookup after folding it.
     by_skeleton: HashMap<String, Vec<BrandLabel>>,
-    nrd: DomainSet,
+    /// The NRD warn set, shared with the lists store (never copied).
+    nrd: Arc<DomainSet>,
 }
 
 /// The live phishing detector the pipeline consults. Cheap to share; its state is
@@ -552,7 +554,7 @@ mod tests {
             nrd_mode: PhishingMode::Warn,
             extra_brands: vec!["meine-firma.at".to_owned()],
             disabled_builtin: Vec::new(),
-            nrd: DomainSet::from_rules("neueseite.ru\n"),
+            nrd: Arc::new(DomainSet::from_rules("neueseite.ru\n")),
         });
         d
     }
@@ -660,7 +662,7 @@ mod tests {
         d.configure(PhishingConfig {
             enabled: true,
             nrd_enabled: false,
-            nrd: DomainSet::from_rules("neueseite.ru\n"),
+            nrd: Arc::new(DomainSet::from_rules("neueseite.ru\n")),
             ..Default::default()
         });
         assert!(d.check("neueseite.ru").is_none(), "nrd switched off");

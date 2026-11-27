@@ -4,6 +4,23 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.48.3] - 2026-11-27
+
+- Behoben: **Mehrere Listen gleichzeitig aktivieren bringt die Box nicht mehr
+  um.** Eine fertige Liste einzuschalten hieß frueher: jeden aktiven Feed von der
+  Platte neu lesen und seine komplette Domain-Menge kopieren — einmal fuer den
+  Blocker, nochmal fuer die Geraete-Policies, tief kopiert fuer jede Gruppe und
+  jedes Geraet — waehrend die alten Mengen noch im Speicher lagen und die neuen
+  Feeds parallel herunterluden. Auf einer kleinen Box konnte das Stapel nach
+  Gigabyte greifen, und der Container starb an seinem Speicher-Limit: JustDNS war
+  weg, bis du neu gestartet hast. Ein Feed wird jetzt einmal geparst und geteilt:
+  Blocker, Policy-Engine und jede Geraete-Policy referenzieren dieselbe Menge,
+  statt Kopien davon zu halten. Feeds werden Zeile fuer Zeile gelesen, sodass der
+  volle Text einer Liste nie neben seiner Menge im Speicher liegt. Downloads
+  laufen nacheinander statt nebeneinander, und Policy-Neuaufbauten werden
+  serialisiert. Drei Listen hintereinander schalten ist jetzt ein paar
+  Referenz-Vertauschungen, nicht drei komplette Neu-Materialisierungen.
+
 ## [0.48.2] - 2026-11-27
 
 - Geaendert: **Update jetzt auch vom Handy aus startbar.** Das Ein-Klick-Update begann

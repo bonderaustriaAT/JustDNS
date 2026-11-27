@@ -14,6 +14,7 @@
 //! ever matches against a ready-made policy.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use justdns_clients::{ClientStore, PolicyDelta, parse_target};
 use justdns_config::Settings;
@@ -33,19 +34,23 @@ const MALWARE_ID: &str = "malware";
 struct ServiceObject {
     id: String,
     name: String,
-    set: DomainSet,
+    set: Arc<DomainSet>,
 }
 
 /// The building blocks every scope's policy is assembled from: the global allow
 /// set and own block list, the two bundled categories with their global default,
 /// the user's block feeds, and the blockable-services catalogue. Built once per
 /// rebuild and shared across scopes.
+///
+/// Every set rides behind an [`Arc`], so assembling a policy is reference
+/// counting, not copying — a deep copy per scope is what once pushed a small
+/// box past its memory limit when several large lists were switched on.
 struct Catalog {
-    allow: DomainSet,
-    own_block: DomainSet,
-    ads: DomainSet,
+    allow: Arc<DomainSet>,
+    own_block: Arc<DomainSet>,
+    ads: Arc<DomainSet>,
     ads_default: bool,
-    malware: DomainSet,
+    malware: Arc<DomainSet>,
     malware_default: bool,
     feeds: Vec<ListObject>,
     /// The whole compiled-in services catalogue, resolved to domain sets.
@@ -62,15 +67,15 @@ impl Catalog {
             .map(|service| ServiceObject {
                 id: service.object_id(),
                 name: service.name.to_owned(),
-                set: service.domain_set(),
+                set: Arc::new(service.domain_set()),
             })
             .collect();
         Self {
             allow: resolved.allow,
-            own_block: resolved.own_block,
-            ads: bundled_ads(),
+            own_block: Arc::new(resolved.own_block),
+            ads: Arc::new(bundled_ads()),
             ads_default: settings.block_ads_trackers,
-            malware: bundled_malware(),
+            malware: Arc::new(bundled_malware()),
             malware_default: settings.block_malware,
             feeds: resolved.block_feeds,
             services,
@@ -106,8 +111,9 @@ impl Catalog {
     }
 
     /// Assemble a resolved policy from the set of active list ids, extra ad-hoc
-    /// allow domains (from the applicable scopes) and extra ad-hoc block sources
-    /// (already ordered group-then-device). Block sources are ordered malware,
+    /// allow domains (from the applicable scopes, plus any global schedule
+    /// allows) and extra ad-hoc block sources (already ordered
+    /// group-then-device). Block sources are ordered malware,
     /// custom (own list, ad-hoc, feeds), ads, so a block reports the most
     /// meaningful source first.
     fn policy(
@@ -116,10 +122,12 @@ impl Catalog {
         extra_allow: &[&[String]],
         extra_block: Vec<BlockSource>,
     ) -> Policy {
-        let mut allow = self.allow.clone();
+        // Only the scope's own additions are built here; the (possibly huge)
+        // merged base set is shared behind its Arc.
+        let mut allow_extra = DomainSet::new();
         for list in extra_allow {
             for domain in *list {
-                allow.add_rules(domain);
+                allow_extra.add_rules(domain);
             }
         }
 
@@ -128,14 +136,14 @@ impl Catalog {
             sources.push(BlockSource {
                 category: BlockCategory::Malware,
                 label: "Schadsoftware".to_owned(),
-                set: self.malware.clone(),
+                set: Arc::clone(&self.malware),
             });
         }
         if !self.own_block.is_empty() {
             sources.push(BlockSource {
                 category: BlockCategory::Custom,
                 label: "Eigene Blockliste".to_owned(),
-                set: self.own_block.clone(),
+                set: Arc::clone(&self.own_block),
             });
         }
         sources.extend(extra_block);
@@ -144,7 +152,7 @@ impl Catalog {
                 sources.push(BlockSource {
                     category: BlockCategory::Custom,
                     label: feed.label.clone(),
-                    set: feed.set.clone(),
+                    set: Arc::clone(&feed.set),
                 });
             }
         }
@@ -153,7 +161,7 @@ impl Catalog {
                 sources.push(BlockSource {
                     category: BlockCategory::Custom,
                     label: service.name.clone(),
-                    set: service.set.clone(),
+                    set: Arc::clone(&service.set),
                 });
             }
         }
@@ -161,11 +169,11 @@ impl Catalog {
             sources.push(BlockSource {
                 category: BlockCategory::AdsTrackers,
                 label: "Werbung & Tracker".to_owned(),
-                set: self.ads.clone(),
+                set: Arc::clone(&self.ads),
             });
         }
 
-        Policy::new(allow, sources)
+        Policy::new(Arc::clone(&self.allow), allow_extra, sources)
     }
 }
 
@@ -193,7 +201,7 @@ fn adhoc_block(label: String, domains: &[String]) -> Option<BlockSource> {
     Some(BlockSource {
         category: BlockCategory::Custom,
         label,
-        set,
+        set: Arc::new(set),
     })
 }
 
@@ -215,7 +223,7 @@ pub fn rebuild(
     settings: &Settings,
     active: &[&Schedule],
 ) {
-    let mut catalog = Catalog::build(lists, settings);
+    let catalog = Catalog::build(lists, settings);
 
     // Partition the open schedules by the scope they target. Device targets are
     // normalised to match the stored device targets; one that does not parse is
@@ -245,22 +253,24 @@ pub fn rebuild(
     }
 
     // Fold the global schedules once: their list switches seed the global active
-    // set (so every device inherits them), their allow domains join the shared base
-    // allow set, their ad-hoc blocks become sources carried by every scope, and a
-    // global pause marks every scope paused.
+    // set (so every device inherits them), their allow domains become an extra
+    // set carried by every scope (the shared base stays untouched — sharing it
+    // is the whole point), their ad-hoc blocks become sources carried by every
+    // scope, and a global pause marks every scope paused.
     let mut global_active = catalog.global_active();
+    let mut schedule_allow: Vec<String> = Vec::new();
     let mut global_block: Vec<BlockSource> = Vec::new();
     let mut global_pause: Option<String> = None;
     for &schedule in &global_scheds {
         fold_schedule(
             schedule,
             &mut global_active,
-            &mut catalog.allow,
+            &mut schedule_allow,
             &mut global_block,
             &mut global_pause,
         );
     }
-    let mut global = catalog.policy(&global_active, &[], global_block.clone());
+    let mut global = catalog.policy(&global_active, &[&schedule_allow], global_block.clone());
     if let Some(label) = &global_pause {
         global = global.into_paused(label.clone());
     }
@@ -283,7 +293,7 @@ pub fn rebuild(
         };
 
         let mut active_ids = global_active.clone();
-        let mut extra_allow: Vec<&[String]> = Vec::new();
+        let mut extra_allow: Vec<&[String]> = vec![&schedule_allow];
         let mut extra_block: Vec<BlockSource> = global_block.clone();
         let mut pause = global_pause.clone();
 
@@ -340,7 +350,7 @@ pub fn rebuild(
             continue;
         };
         let mut active_ids = global_active.clone();
-        let mut extra_allow: Vec<&[String]> = Vec::new();
+        let mut extra_allow: Vec<&[String]> = vec![&schedule_allow];
         let mut extra_block: Vec<BlockSource> = global_block.clone();
         let mut pause = global_pause.clone();
         for &schedule in scheds.iter() {
@@ -363,12 +373,13 @@ pub fn rebuild(
 }
 
 /// Fold one active *global* schedule into the global base: list switches into
-/// `active`, allow domains into the shared `allow` set, ad-hoc blocks into
+/// `active`, allow domains into `schedule_allow` (an extra carried by every
+/// scope, so the shared base set stays untouched), ad-hoc blocks into
 /// `block`, and a pause into `pause` (first pause wins the label).
 fn fold_schedule(
     schedule: &Schedule,
     active: &mut HashSet<String>,
-    allow: &mut DomainSet,
+    schedule_allow: &mut Vec<String>,
     block: &mut Vec<BlockSource>,
     pause: &mut Option<String>,
 ) {
@@ -379,7 +390,7 @@ fn fold_schedule(
         EffectMode::Block => {
             apply_delta(active, &schedule.effect.delta);
             for domain in &schedule.effect.delta.allow {
-                allow.add_rules(domain);
+                schedule_allow.push(domain.clone());
             }
             if let Some(source) = adhoc_block(
                 format!("Zeitplan: {}", schedule.name),
@@ -523,6 +534,62 @@ mod tests {
         assert!(
             !engine.blocks(other, "example.com"),
             "others fall to the open global"
+        );
+    }
+
+    #[test]
+    fn global_schedule_allow_lifts_a_block_for_everyone() {
+        // A global schedule's allow domains used to mutate the shared base set;
+        // they now ride as a small extra on every scope. Behaviour is unchanged:
+        // everyone, named or not, stops being blocked.
+        let (_dir, lists, clients, settings) = harness();
+        let engine = PolicyEngine::new();
+        let named: IpAddr = "192.168.70.10".parse().unwrap();
+        let anonymous: IpAddr = "10.0.0.99".parse().unwrap();
+        clients
+            .set_device_policy(
+                "192.168.70.10",
+                None,
+                PolicyDelta {
+                    block: vec!["games.example".to_owned()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Without the schedule, games.example is blocked for the named device.
+        rebuild(&engine, &lists, &clients, &settings, &[]);
+        assert!(engine.blocks(named, "games.example"));
+
+        // A global block-mode schedule whose delta allows games.example lifts
+        // the block for the named device and for an unnamed client alike.
+        let sched = Schedule {
+            id: "ga".to_owned(),
+            name: "Ferien".to_owned(),
+            enabled: true,
+            days: all_days(),
+            start: "00:00".to_owned(),
+            end: "00:00".to_owned(),
+            target: ScheduleTarget {
+                scope: TargetScope::Global,
+                id: None,
+            },
+            effect: ScheduleEffect {
+                mode: EffectMode::Block,
+                delta: PolicyDelta {
+                    allow: vec!["games.example".to_owned()],
+                    ..Default::default()
+                },
+            },
+        };
+        rebuild(&engine, &lists, &clients, &settings, &[&sched]);
+        assert!(
+            !engine.blocks(named, "games.example"),
+            "the schedule's allow lifts the device's own block"
+        );
+        assert!(
+            !engine.blocks(anonymous, "games.example"),
+            "the global allow applies to unnamed clients too"
         );
     }
 

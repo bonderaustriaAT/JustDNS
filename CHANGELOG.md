@@ -3,6 +3,21 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.48.3] - 2026-11-27
+
+- Fixed: **Activating several lists at once no longer kills the box.** Switching a
+  ready-made list on used to re-read every enabled feed from disk and copy its full
+  domain set — once for the blocker, again for the per-device policies, deep-copied
+  for every group and device — while the old sets were still in memory and the new
+  feeds downloaded in parallel. On a small box that stack could reach for gigabytes,
+  and the container died at its memory limit: JustDNS was gone until you restarted
+  it. A feed is now parsed once and shared: the blocker, the policy engine and every
+  device policy reference the same set instead of holding copies of it. Feeds are
+  read line by line, so a list's full text is never in memory alongside its set.
+  Downloads run one after another instead of side by side, and policy rebuilds are
+  serialised. Toggling three lists in a row is now a few reference swaps, not three
+  full re-materialisations.
+
 ## [0.48.2] - 2026-11-27
 
 - Changed: **Updates can now be started from your phone.** The one-click update used to
