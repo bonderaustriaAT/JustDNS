@@ -642,7 +642,19 @@ function ClusterUpdatePanel() {
                   <span className={styles.fieldError}>{t("update.passwordMismatch")}</span>
                 )}
               </label>
-              {cu.error && <span className={styles.fieldError}>{cu.error}</span>}
+              <div className={styles.nodeField}>
+                <button
+                  type="button"
+                  className={styles.buttonSecondary}
+                  onClick={() => cu.downloadFile()}
+                  disabled={!cu.valid}
+                >
+                  {cu.downloaded
+                    ? t("update.downloadDone")
+                    : t("update.downloadRestore")}
+                </button>
+                {cu.error && <span className={styles.fieldError}>{cu.error}</span>}
+              </div>
             </>
           }
           confirmLabel={t("ha.cluster.updateButton")}
