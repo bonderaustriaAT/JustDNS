@@ -164,6 +164,32 @@ click on the dashboard's *System* page — see [Updating JustDNS](docs/guides/up
 > docker run -d --name justdns -p 53:53/udp -p 53:53/tcp -p 8080:8080/tcp -v justdns-data:/data ghcr.io/bonderaustriaat/justdns:latest
 > ```
 
+### Docker Hub
+
+The resolver image is also published to Docker Hub at
+[`bonderosa/justdns`](https://hub.docker.com/r/bonderosa/justdns). It is mirrored
+from the same build (identical digest), so you can pull from whichever registry you
+prefer. Single container:
+
+```bash
+docker run -d --name justdns -p 53:53/udp -p 53:53/tcp -p 8080:8080/tcp -v justdns-data:/data docker.io/bonderosa/justdns:latest
+```
+
+To use Docker Hub with the two-container bundle, point the app image at it in your
+`.env`:
+
+```bash
+JUSTDNS_IMAGE=docker.io/bonderosa/justdns
+```
+
+The updater sidecar stays on the GitHub Container Registry, and one-click updates
+keep working: the updater reads GitHub release tags and pulls the matching app image
+from whichever registry `JUSTDNS_IMAGE` names.
+
+ghcr.io stays the primary registry and the default. Docker Hub applies a pull rate
+limit to anonymous users (currently 100 pulls per 6 hours per IP address); that is
+ample for a normal install, and signing in with a free Docker ID raises it to 200.
+
 ## Configuration
 
 Everything is configurable from the web UI after setup. A few things are set at
