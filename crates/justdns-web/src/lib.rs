@@ -8721,7 +8721,8 @@ mod tests {
             log_level: LogLevelControl::disabled("normal"),
             metrics_token: None,
             update: Arc::new(UpdateChecker::from_env("v0.0.0-test")),
-            ha: Arc::new(ha::Ha::from_env(
+            ha: Arc::new(ha::Ha::from_env_at(
+                &test_ha_dir(),
                 "v0.0.0-test",
                 justdns_secret::Sealer::ephemeral(),
             )),
@@ -8752,6 +8753,21 @@ mod tests {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         ReportStore::load(&path)
+    }
+
+    /// A throwaway directory for the HA state. Without one, the HA manager
+    /// would write its state file into the working directory (the code default
+    /// when no data dir is set) or wherever a stray `JUSTDNS_DATA_DIR` points —
+    /// an untracked `ha.json` in the crate directory after every test run.
+    fn test_ha_dir() -> std::path::PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "justdns-web-ha-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     /// A router whose data API is already unlocked, plus the `Cookie` header

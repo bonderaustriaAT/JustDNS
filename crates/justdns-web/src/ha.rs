@@ -599,22 +599,27 @@ pub struct Ha {
 }
 
 impl Ha {
-    /// Build the HA manager for the running `version`, loading `<data>/ha.json`
-    /// and taking the data dir, sync key and interval from the environment. A
-    /// missing node id is minted and persisted so it is stable across restarts.
-    /// The state file — which carries the sync key — is sealed at rest under
-    /// `sealer`, like every other secret-bearing file on the volume.
+    /// Build the HA manager for the running `version`, taking the data dir,
+    /// sync key and interval from the environment.
     pub fn from_env(version: &str, sealer: Sealer) -> Self {
         let data_dir = env_nonempty("JUSTDNS_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR));
+        Self::from_env_at(&data_dir, version, sealer)
+    }
+
+    /// The same construction against an explicit data directory. The test suite
+    /// drives this with a throwaway temp dir, so running the tests never drops
+    /// a state file into the working directory (the code default) or into
+    /// wherever a stray environment variable happens to point.
+    pub fn from_env_at(data_dir: &Path, version: &str, sealer: Sealer) -> Self {
         let env_key = env_nonempty("JUSTDNS_SYNC_KEY");
         let interval = env_nonempty("JUSTDNS_SYNC_INTERVAL")
             .and_then(|value| value.parse::<u64>().ok())
             .map(|secs| Duration::from_secs(secs.max(MIN_SYNC_SECS)))
             .unwrap_or_else(|| Duration::from_secs(DEFAULT_SYNC_SECS));
 
-        let path = Self::state_path(&data_dir);
+        let path = Self::state_path(data_dir);
         let mut state = load_state(&path, &sealer).unwrap_or_default();
         fold_legacy_peer(&mut state);
         if let Some(env_id) = env_nonempty("JUSTDNS_NODE_ID") {
@@ -625,7 +630,7 @@ impl Ha {
         }
 
         let ha = Self {
-            data_dir,
+            data_dir: data_dir.to_owned(),
             env_key,
             interval,
             version: version.to_owned(),
@@ -1972,6 +1977,19 @@ mod tests {
         assert_eq!(reloaded.sync_key.as_deref(), Some("shared"));
         assert_eq!(reloaded.ledger["settings/settings"].hash, 42);
         assert!(!reloaded.sync_key.as_deref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn from_env_at_writes_into_the_given_dir_and_nowhere_else() {
+        // The test constructor pins the data directory, so a test run never
+        // drops a state file into the working directory or an env-picked one.
+        let dir = temp_dir();
+        let ha = Ha::from_env_at(&dir, "v0.0.0", Sealer::ephemeral());
+        assert!(
+            Ha::state_path(&dir).exists(),
+            "the state lands in the given dir"
+        );
+        assert_eq!(ha.node_id().len(), 24, "a fresh node id is minted");
     }
 
     #[test]
