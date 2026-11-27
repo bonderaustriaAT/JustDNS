@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.49.0] - 2026-11-27
+
+- Neu: **15 weitere fertige Listen im Katalog.** Werbung: OISD Small, OISD Big,
+  StevenBlack Unified, Hagezi Pop-Up Ads. Tracking: Hagezi Windows/Office-, Samsung-,
+  LG webOS-, Amazon-, Xiaomi- und TikTok-Telemetrie, Frogeye First-Party-Tracker
+  (CNAME-getarnt). Malware: URLhaus Malware-Domains, Phishing Filter, Phishing Army,
+  Hagezi Fake. Jede mit Fehlalarm-Einstufung, keine standardmaessig aktiv.
+
 ## [0.48.4] - 2026-11-27
 
 - Behoben: **Eine Liste aktivieren sagt dir jetzt, wie es ausging.** Ein Feed einzuschalten
