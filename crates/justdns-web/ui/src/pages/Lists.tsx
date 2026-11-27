@@ -15,6 +15,7 @@ import {
   type Subscription,
 } from "../lib/api";
 import { useI18n, type Lang } from "../lib/i18n";
+import { usePendingFeedPoll } from "../lib/usePendingFeedPoll";
 import type { MessageKey } from "../lib/messages";
 import styles from "./Lists.module.css";
 
@@ -393,6 +394,11 @@ export function Lists({ section }: { section: ListsSection }) {
       });
     return () => controller.abort();
   }, [t]);
+
+  // A freshly activated feed downloads in the background, so the view above
+  // still shows it as "loading…". Re-pull the view while that is the case, so
+  // the row resolves to a count or an error on its own.
+  usePendingFeedPoll(view?.subscriptions ?? null, setView);
 
   // A deep-link from the query log's decision trace carries a `focus` so the page
   // opens on the rule behind a block: the allow editor for a name block, the

@@ -12,6 +12,7 @@ import { HighAvailability } from "./pages/HighAvailability";
 import { Lists } from "./pages/Lists";
 import { Login } from "./pages/Login";
 import { Logs } from "./pages/Logs";
+import { NoAccess } from "./pages/NoAccess";
 import { Overview } from "./pages/Overview";
 import { Phishing } from "./pages/Phishing";
 import { Privacy } from "./pages/Privacy";
@@ -54,29 +55,28 @@ export function App() {
           <Route path="/listen/fertige" element={<Lists section="presets" />} />
           <Route
             path="/dienste"
-            element={isAdmin ? <BlockedServices /> : <Navigate to="/" replace />}
+            element={isAdmin ? <BlockedServices /> : <NoAccess />}
           />
           <Route path="/zeitplaene" element={<Zeitplaene />} />
           <Route path="/rewrites" element={<Rewrites />} />
           <Route path="/einstellungen" element={<Settings />} />
           <Route
             path="/zertifikate"
-            element={isAdmin ? <Certificates /> : <Navigate to="/" replace />}
+            element={isAdmin ? <Certificates /> : <NoAccess />}
           />
           <Route
             path="/freigaben"
-            element={isAdmin ? <AccessRequests /> : <Navigate to="/" replace />}
+            element={isAdmin ? <AccessRequests /> : <NoAccess />}
           />
           <Route path="/konto" element={<Account />} />
-          {/* Admin-only areas: fall back to the overview for anyone else. */}
-          <Route path="/benutzer" element={isAdmin ? <Users /> : <Navigate to="/" replace />} />
-          <Route path="/audit" element={isAdmin ? <AuditLog /> : <Navigate to="/" replace />} />
-          <Route path="/system" element={isAdmin ? <SystemLogs /> : <Navigate to="/" replace />} />
-          <Route path="/berichte" element={isAdmin ? <Reports /> : <Navigate to="/" replace />} />
-          <Route
-            path="/ha"
-            element={isAdmin ? <HighAvailability /> : <Navigate to="/" replace />}
-          />
+          {/* Admin-only areas: a non-admin following a deep link gets the
+              no-access page (with their role), not a silent redirect. */}
+          <Route path="/benutzer" element={isAdmin ? <Users /> : <NoAccess />} />
+          <Route path="/audit" element={isAdmin ? <AuditLog /> : <NoAccess />} />
+          <Route path="/system" element={isAdmin ? <SystemLogs /> : <NoAccess />} />
+          <Route path="/berichte" element={isAdmin ? <Reports /> : <NoAccess />} />
+          <Route path="/ha" element={isAdmin ? <HighAvailability /> : <NoAccess />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Shell>

@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
+import { trapTab } from "../lib/focus";
 import styles from "./ConfirmDialog.module.css";
 
 interface ConfirmDialogProps {
@@ -24,9 +25,10 @@ interface ConfirmDialogProps {
 }
 
 /** A small modal that asks the user to confirm a destructive action. It traps
- *  nothing fancy: Escape and a backdrop click cancel, the cancel button takes
- *  focus on open (the safe default for a delete), and the confirm button is
- *  styled as destructive. Reusable for any "are you sure?" step. */
+ *  focus like the Modal (Tab wraps inside, Escape and a backdrop click cancel,
+ *  the cancel button takes focus on open — the safe default for a delete — and
+ *  focus returns to the trigger on close), and the confirm button is styled as
+ *  destructive. Reusable for any "are you sure?" step. */
 export function ConfirmDialog({
   title,
   body,
@@ -40,6 +42,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreTo = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const bodyId = useId();
 
@@ -49,24 +52,37 @@ export function ConfirmDialog({
   // for a destructive "are you sure?". This runs on mount only: a dependency on
   // `busy`/`onCancel` (an inline arrow from the caller, new on every render)
   // would re-fire on each keystroke and yank focus out of the field — the classic
-  // "type one letter and lose the field" bug.
+  // "type one letter and lose the field" bug. Remember the trigger so closing
+  // returns the keyboard to where the user came from, like the Modal does.
   useEffect(() => {
+    restoreTo.current = document.activeElement as HTMLElement | null;
     const field = dialogRef.current?.querySelector<HTMLElement>(
       "input, textarea, select",
     );
     if (field) field.focus();
     else cancelRef.current?.focus();
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+      restoreTo.current?.focus();
+    };
   }, []);
 
-  // Escape cancels. The listener is registered once; it reads the latest
-  // `busy`/`onCancel` through refs so re-renders never re-run this effect.
+  // Escape cancels and Tab stays inside the dialog, the same trap the Modal
+  // uses. The listener is registered once; it reads the latest `busy`/`onCancel`
+  // through refs so re-renders never re-run this effect.
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
   const busyRef = useRef(busy);
   busyRef.current = busy;
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busyRef.current) onCancelRef.current();
+      const node = dialogRef.current;
+      if (event.key === "Escape" && !busyRef.current) {
+        onCancelRef.current();
+        return;
+      }
+      if (node && trapTab(node, event)) event.preventDefault();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

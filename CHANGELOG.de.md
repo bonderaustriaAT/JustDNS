@@ -4,6 +4,27 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.48.4] - 2026-11-27
+
+- Behoben: **Eine Liste aktivieren sagt dir jetzt, wie es ausging.** Ein Feed einzuschalten
+  liess seine Zeile frueher ewig auf "wird geladen …" stehen — der Download laeuft im
+  Hintergrund, und die Seite erfuhr nie davon. Die Zeile loest jetzt von selbst auf: gruen mit
+  ihrer Domain-Anzahl, wenn der Feed da ist, rot, wenn seine Quelle versagt hat. Die NRD-Feeds
+  der Phishing-Seite bekommen dieselbe Statuszeile unter ihrem Schalter.
+- Behoben: **Deep-Links in Admin-Bereiche erklaeren sich.** Wer ohne Admin-Rechte einem
+  Lesezeichen oder geteilten Link in einen Admin-Bereich folgte, landete stumm auf der
+  Uebersicht — das sah aus wie ein kaputter Link. Jetzt gibt es eine kurze "Kein Zugriff"-Seite
+  mit der eigenen Rolle und dem Weg zurueck — und auf einer Read-Only-Cluster-Node den Hinweis,
+  wo der Cluster verwaltet wird.
+- Behoben: **Dialoge halten die Tastatur bei sich.** Die Bestaetigungsdialoge fuer destruktive
+  Aktionen (Loeschen, Updaten, Cluster-Rollout) fangen Tab jetzt genau so ein wie die grossen
+  Modaldialoge es immer taten und geben den Fokus beim Schliessen an den Ausloeser zurueck —
+  kein Tabben mehr in die Seite hinter dem Overlay.
+- Geaendert: **Die Uebersetzungskataloge werden von der CI bewacht.** Ein neuer Check haelt
+  beide Sprachen im Takt — gleiche Keys, uebereinstimmende Platzhalter, kein Aufruf eines
+  unbekannten Keys — und eine erste Raeumaktion entfernte 37 tote Eintraege, die sich ueber die
+  Zeit angesammelt hatten.
+
 ## [0.48.3] - 2026-11-27
 
 - Behoben: **Mehrere Listen gleichzeitig aktivieren bringt die Box nicht mehr
