@@ -870,11 +870,12 @@ mod tests {
         let engine = PolicyEngine::new();
         engine.publish(
             Policy::new(
+                std::sync::Arc::new(DomainSet::new()),
                 DomainSet::new(),
                 vec![BlockSource {
                     category: BlockCategory::AdsTrackers,
                     label: "Werbung & Tracker".into(),
-                    set: DomainSet::from_rules("ads.example\n"),
+                    set: std::sync::Arc::new(DomainSet::from_rules("ads.example\n")),
                 }],
             ),
             vec![],
@@ -1039,7 +1040,7 @@ mod tests {
     /// Build default options with a response-IP block set loaded from `rules`.
     fn options_with_ip_block(rules: &str) -> PipelineOptions {
         let ip_block = Arc::new(IpBlocker::new());
-        ip_block.publish(IpSet::from_rules(rules));
+        ip_block.publish(std::sync::Arc::new(IpSet::from_rules(rules)));
         PipelineOptions {
             ip_block: Some(ip_block),
             ..PipelineOptions::default()
@@ -1078,9 +1079,9 @@ mod tests {
         // host still resolves.
         let shared = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
         let ip_block = Arc::new(IpBlocker::new());
-        ip_block.publish(IpSet::from_rules("45.83.0.0/16\n"));
+        ip_block.publish(std::sync::Arc::new(IpSet::from_rules("45.83.0.0/16\n")));
         let ip_allow = Arc::new(IpBlocker::new());
-        ip_allow.publish(IpSet::from_rules("45.83.1.0/24\n"));
+        ip_allow.publish(std::sync::Arc::new(IpSet::from_rules("45.83.1.0/24\n")));
         let options = PipelineOptions {
             ip_block: Some(ip_block),
             ip_allow: Some(ip_allow),
@@ -1354,7 +1355,7 @@ mod tests {
             enabled: true,
             nrd_enabled: true,
             nrd_mode: PhishingMode::Block,
-            nrd: DomainSet::from_rules("brand-new.example\n"),
+            nrd: std::sync::Arc::new(DomainSet::from_rules("brand-new.example\n")),
             ..PhishingConfig::default()
         });
         let observer = Arc::new(Recording::default());
@@ -1398,7 +1399,7 @@ mod tests {
             enabled: true,
             nrd_enabled: true,
             nrd_mode: PhishingMode::Block,
-            nrd: DomainSet::from_rules("nas.home\n"),
+            nrd: std::sync::Arc::new(DomainSet::from_rules("nas.home\n")),
             ..PhishingConfig::default()
         });
         let rewriter = Arc::new(Rewriter::new());

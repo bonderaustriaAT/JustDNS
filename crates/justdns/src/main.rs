@@ -274,6 +274,11 @@ async fn main() -> ExitCode {
     // now into one resolved policy per device plus a global default, and
     // republishes whenever any of them change (each store runs the rebuild through
     // its on-change hook; the ticker reruns it when a window opens or closes).
+    //
+    // The rebuilds are serialised: parallel feed downloads finishing close
+    // together each fire the hook, and two full rebuilds racing each other is
+    // wasted CPU (the shared sets make it memory-safe, the lock makes it calm).
+    let rebuild_lock = Arc::new(std::sync::Mutex::new(()));
     let policy_engine = Arc::new(PolicyEngine::new());
     rebuild_policies(
         &policy_engine,
@@ -306,7 +311,9 @@ async fn main() -> ExitCode {
         let detector = phishing_detector.clone();
         let ip_blocker_handle = ip_blocker.clone();
         let ip_allower_handle = ip_allower.clone();
+        let lock = rebuild_lock.clone();
         lists.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -329,7 +336,9 @@ async fn main() -> ExitCode {
         let clients_handle = clients.clone();
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
+        let lock = rebuild_lock.clone();
         clients.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -345,7 +354,9 @@ async fn main() -> ExitCode {
         let clients_handle = clients.clone();
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
+        let lock = rebuild_lock.clone();
         schedules.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -492,6 +503,7 @@ async fn main() -> ExitCode {
         let dnssec_validate = dnssec_validate.clone();
         let status = status.clone();
         let detector = phishing_detector.clone();
+        let rebuild_lock = rebuild_lock.clone();
         // Mirror of the settings the engine was last reconfigured from. Seeded with
         // the startup settings (the engine above is already built from them), so the
         // first real change decides whether a rebuild is needed.
@@ -531,6 +543,9 @@ async fn main() -> ExitCode {
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams, dnssec_validate.clone()));
             tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
+            let _serialised = rebuild_lock
+                .lock()
+                .expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -559,6 +574,7 @@ async fn main() -> ExitCode {
         clients.clone(),
         schedules.clone(),
         config_store.clone(),
+        rebuild_lock.clone(),
     );
 
     // Plain UDP/TCP DNS and the web API run in the same process (the select!
@@ -760,7 +776,7 @@ fn publish_ip_allow(ip_allower: &IpBlocker, lists: &ListStore) {
 }
 
 /// Map the stored phishing settings plus the warn set into the detector's config.
-fn phishing_config(phishing: &justdns_config::Phishing, nrd: DomainSet) -> PhishingConfig {
+fn phishing_config(phishing: &justdns_config::Phishing, nrd: Arc<DomainSet>) -> PhishingConfig {
     let mode = |mode: justdns_config::PhishingMode| match mode {
         justdns_config::PhishingMode::Warn => PhishingMode::Warn,
         justdns_config::PhishingMode::Block => PhishingMode::Block,
@@ -785,6 +801,7 @@ fn spawn_schedule_ticker(
     clients: ClientStore,
     schedules: ScheduleStore,
     config: ConfigStore,
+    rebuild_lock: Arc<std::sync::Mutex<()>>,
 ) {
     tokio::spawn(async move {
         // Align to the next minute so windows open and close close to HH:MM.
@@ -805,6 +822,9 @@ fn spawn_schedule_ticker(
             if now_ids != last {
                 last = now_ids;
                 let active = justdns_schedule::active_now(&snapshot, tz);
+                let _serialised = rebuild_lock
+                    .lock()
+                    .expect("rebuild lock poisoned");
                 policy::rebuild(&engine, &lists, &clients, &settings, &active);
                 info!(
                     open = active.len(),

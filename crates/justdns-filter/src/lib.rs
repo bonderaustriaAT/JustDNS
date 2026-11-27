@@ -94,6 +94,11 @@ pub struct BlockMatch {
 /// One named source in a resolved block set: a bundled category (ads/malware),
 /// the user's own manual list, or a single subscribed feed. Sources stay separate
 /// so a block can name the exact list that caught the query and its category.
+///
+/// The set rides behind an [`Arc`] on purpose: the same multi-million-domain
+/// feed is referenced by the blocker, the policy engine and every per-device
+/// policy at once, and a deep copy in any of those positions is what once
+/// pushed activating a large list past a small box's memory.
 #[derive(Clone, Debug)]
 pub struct BlockSource {
     /// Which broad category this source belongs to. A [`Policy`] reports this as
@@ -103,8 +108,8 @@ pub struct BlockSource {
     /// Display name shown in the dashboard, e.g. "Eigene Blockliste" or
     /// "Hagezi Normal".
     pub label: String,
-    /// The domains this source blocks.
-    pub set: DomainSet,
+    /// The domains this source blocks, shared with every other consumer.
+    pub set: Arc<DomainSet>,
 }
 
 /// The blocking engine. Holds the bundled category lists (each gated by a live
@@ -158,8 +163,8 @@ impl Blocker {
     }
 
     /// Replace the user's allow list. Takes effect on the next query.
-    pub fn set_allow(&self, allow: DomainSet) {
-        self.allow.store(Arc::new(allow));
+    pub fn set_allow(&self, allow: Arc<DomainSet>) {
+        self.allow.store(allow);
     }
 
     /// Replace the user's own block set: their manual list plus each enabled
@@ -268,7 +273,13 @@ impl Blocker {
 /// and the coordinator orders them malware, custom, ads.
 #[derive(Clone, Debug, Default)]
 pub struct Policy {
-    allow: DomainSet,
+    /// The allow set this scope shares with everyone else — user entries plus
+    /// every enabled allow feed, merged once and handed out behind an `Arc`
+    /// rather than copied per scope.
+    allow: Arc<DomainSet>,
+    /// This scope's own additions on top (a group's or device's allow entries).
+    /// Kept separate and small so sharing the base costs nothing.
+    allow_extra: DomainSet,
     block_sources: Vec<BlockSource>,
     /// When set, this scope blocks *every* name — a scheduled "internet pause".
     /// The allow set still wins, so allow-listed names stay reachable even during
@@ -277,17 +288,23 @@ pub struct Policy {
 }
 
 impl Policy {
-    /// Build a policy from an allow set and already-ordered block sources.
-    pub fn new(allow: DomainSet, block_sources: Vec<BlockSource>) -> Self {
+    /// Build a policy from the shared allow base, this scope's own allow
+    /// additions (may be empty) and already-ordered block sources.
+    pub fn new(
+        allow: Arc<DomainSet>,
+        allow_extra: DomainSet,
+        block_sources: Vec<BlockSource>,
+    ) -> Self {
         Self {
             allow,
+            allow_extra,
             block_sources,
             block_all: None,
         }
     }
 
     /// Turn this resolved policy into a paused one: block everything, keeping the
-    /// already-resolved allow set so allow-listed names still get through. `label`
+    /// allow sets so allow-listed names still get through. `label`
     /// is what a block reports (the schedule's name). Used when a schedule's pause
     /// is active for the scope.
     pub fn into_paused(mut self, label: String) -> Self {
@@ -296,11 +313,17 @@ impl Policy {
         self
     }
 
+    /// Whether `name` is allow-listed under this policy: the scope's own
+    /// additions first, then the shared base.
+    fn allows(&self, name: &str) -> bool {
+        self.allow_extra.blocks(name) || self.allow.blocks(name)
+    }
+
     /// The category that blocks `name`, or `None` if it is allowed or on no
-    /// list. The allow set is checked first and overrides every block source and
+    /// list. The allow sets are checked first and override every block source and
     /// a pause. A pause then blocks everything else as [`BlockCategory::Custom`].
     pub fn classify(&self, name: &str) -> Option<BlockCategory> {
-        if self.allow.blocks(name) {
+        if self.allows(name) {
             return None;
         }
         if self.block_all.is_some() {
@@ -318,10 +341,10 @@ impl Policy {
     }
 
     /// Explain why `name` is blocked: the category, the exact rule that matched,
-    /// and — for a custom source — the list's display name. The allow set still
-    /// wins, so an allow-listed name explains to `None`.
+    /// and — for a custom source — the list's display name. The allow sets still
+    /// win, so an allow-listed name explains to `None`.
     pub fn explain(&self, name: &str) -> Option<BlockMatch> {
-        if self.allow.blocks(name) {
+        if self.allows(name) {
             return None;
         }
         if let Some(label) = &self.block_all {
@@ -519,7 +542,7 @@ mod tests {
         let b = Blocker::with_bundled_lists(flag(true), flag(true));
         assert!(b.blocks("doubleclick.net"), "blocked before allow-listing");
 
-        b.set_allow(DomainSet::from_rules("doubleclick.net\n"));
+        b.set_allow(Arc::new(DomainSet::from_rules("doubleclick.net\n")));
         assert!(!b.blocks("doubleclick.net"), "allow list wins");
         assert!(!b.blocks("ad.doubleclick.net"), "and covers sub-domains");
         assert_eq!(b.classify("doubleclick.net"), None);
@@ -536,7 +559,7 @@ mod tests {
         b.set_block_sources(vec![BlockSource {
             category: BlockCategory::Custom,
             label: "Eigene Blockliste".into(),
-            set: DomainSet::from_rules("tracker.test\n"),
+            set: Arc::new(DomainSet::from_rules("tracker.test\n")),
         }]);
         assert_eq!(b.classify("tracker.test"), Some(BlockCategory::Custom));
         assert_eq!(b.classify("a.tracker.test"), Some(BlockCategory::Custom));
@@ -554,12 +577,12 @@ mod tests {
             BlockSource {
                 category: BlockCategory::Custom,
                 label: "Eigene Blockliste".into(),
-                set: DomainSet::from_rules("mine.test\n"),
+                set: Arc::new(DomainSet::from_rules("mine.test\n")),
             },
             BlockSource {
                 category: BlockCategory::Custom,
                 label: "Hagezi Normal".into(),
-                set: DomainSet::from_rules("ads.feed.test\n"),
+                set: Arc::new(DomainSet::from_rules("ads.feed.test\n")),
             },
         ]);
 
@@ -578,9 +601,9 @@ mod tests {
         b.set_block_sources(vec![BlockSource {
             category: BlockCategory::Custom,
             label: "Eigene Blockliste".into(),
-            set: DomainSet::from_rules("intra.test\n"),
+            set: Arc::new(DomainSet::from_rules("intra.test\n")),
         }]);
-        b.set_allow(DomainSet::from_rules("intra.test\n"));
+        b.set_allow(Arc::new(DomainSet::from_rules("intra.test\n")));
         assert!(!b.blocks("intra.test"), "allow wins over custom block");
     }
 
@@ -605,44 +628,51 @@ mod tests {
         BlockSource {
             category,
             label: label.to_owned(),
-            set: DomainSet::from_rules(rules),
+            set: Arc::new(DomainSet::from_rules(rules)),
         }
+    }
+
+    /// A policy from allow rules (none when empty) and block sources, sharing
+    /// the base allow set the way production code does.
+    fn policy(allow: &str, sources: Vec<BlockSource>) -> Policy {
+        Policy::new(
+            Arc::new(DomainSet::from_rules(allow)),
+            DomainSet::new(),
+            sources,
+        )
     }
 
     #[test]
     fn policy_allow_wins_and_reports_the_source_category() {
-        let policy = Policy::new(
-            DomainSet::from_rules("safe.example\n"),
+        let guarded = policy("safe.example\n",
             vec![
                 source(BlockCategory::Malware, "Malware", "evil.example\n"),
                 source(BlockCategory::Custom, "Eigene Blockliste", "ads.example\n"),
             ],
         );
         assert_eq!(
-            policy.classify("evil.example"),
+            guarded.classify("evil.example"),
             Some(BlockCategory::Malware)
         );
         assert_eq!(
-            policy.classify("x.ads.example"),
+            guarded.classify("x.ads.example"),
             Some(BlockCategory::Custom)
         );
         // The allow set wins even when a block source would catch the name.
-        let policy = Policy::new(
-            DomainSet::from_rules("ads.example\n"),
+        let overridden = policy("ads.example\n",
             vec![source(
                 BlockCategory::Custom,
                 "Eigene Blockliste",
                 "ads.example\n",
             )],
         );
-        assert_eq!(policy.classify("ads.example"), None, "allow wins");
-        assert!(policy.explain("ads.example").is_none());
+        assert_eq!(overridden.classify("ads.example"), None, "allow wins");
+        assert!(overridden.explain("ads.example").is_none());
     }
 
     #[test]
     fn policy_explain_names_the_list_only_for_custom() {
-        let policy = Policy::new(
-            DomainSet::new(),
+        let policy = policy("",
             vec![
                 source(BlockCategory::Malware, "Malware", "evil.example\n"),
                 source(BlockCategory::Custom, "Hagezi", "ads.feed\n"),
@@ -659,8 +689,7 @@ mod tests {
     fn paused_policy_blocks_everything_but_the_allow_set() {
         // A normal policy, then paused: it now blocks any name, yet the allow set
         // still wins and the block reports the schedule's label.
-        let policy = Policy::new(
-            DomainSet::from_rules("school.example\n"),
+        let policy = policy("school.example\n",
             vec![source(BlockCategory::Custom, "Eigene", "ads.example\n")],
         )
         .into_paused("Schlafenszeit".to_owned());
@@ -691,8 +720,7 @@ mod tests {
     #[test]
     fn engine_unknown_client_falls_back_to_global() {
         let engine = PolicyEngine::new();
-        let global = Policy::new(
-            DomainSet::new(),
+        let global = policy("",
             vec![source(BlockCategory::Custom, "Global", "blocked.example\n")],
         );
         engine.publish(global, vec![]);
@@ -704,14 +732,12 @@ mod tests {
     #[test]
     fn engine_device_policy_overrides_global_for_that_client() {
         let engine = PolicyEngine::new();
-        let global = Policy::new(
-            DomainSet::new(),
+        let global = policy("",
             vec![source(BlockCategory::Custom, "Global", "ads.example\n")],
         );
         // The device both un-blocks ads (empty block set) by having its own
         // resolved policy and blocks a name of its own instead.
-        let device = Policy::new(
-            DomainSet::new(),
+        let device = policy("",
             vec![source(BlockCategory::Custom, "Kids", "games.example\n")],
         );
         let matcher = justdns_clients::parse_target("192.168.20.10").unwrap();
@@ -730,13 +756,11 @@ mod tests {
     #[test]
     fn engine_prefers_the_most_specific_device_match() {
         let engine = PolicyEngine::new();
-        let global = Policy::new(DomainSet::new(), vec![]);
-        let range = Policy::new(
-            DomainSet::new(),
+        let global = policy("", vec![]);
+        let range = policy("",
             vec![source(BlockCategory::Custom, "Guest range", "r.example\n")],
         );
-        let host = Policy::new(
-            DomainSet::new(),
+        let host = policy("",
             vec![source(BlockCategory::Custom, "Guest host", "h.example\n")],
         );
         engine.publish(
