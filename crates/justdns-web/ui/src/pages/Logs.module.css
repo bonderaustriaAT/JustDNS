@@ -688,6 +688,38 @@
   background: color-mix(in srgb, var(--danger) 16%, transparent);
 }
 
+/* The reason tag on a blocked row, tinted by its category so the "why" reads at
+   a glance (a phishing/warn row already carries the phishing pill, so this one
+   only shows for block-list and threat-ip rows). */
+.reasonPill {
+  flex: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.reasonPill[data-reason="blocklist"] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.reasonPill[data-reason="threat_ip"] {
+  color: var(--rewrite);
+  background: color-mix(in srgb, var(--rewrite) 16%, transparent);
+}
+
+.reasonPill[data-reason="phishing"] {
+  color: var(--violet);
+  background: color-mix(in srgb, var(--violet) 16%, transparent);
+}
+
+.reasonPill[data-reason="warning"] {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+
 /* The addresses the query resolved to, a quiet line under the name. */
 .resolved {
   font-family: var(--font-mono);
@@ -902,6 +934,129 @@
   margin: 0;
   font-size: var(--step--1);
   color: var(--text-muted);
+}
+
+/* The decision trace: the ordered pipeline stages for one entry. */
+.trace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--line);
+}
+
+.traceTitle {
+  margin: 0;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tracePause {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.traceSteps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.traceStep {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--step--1);
+  color: var(--text);
+}
+
+.traceMark {
+  flex: none;
+  inline-size: 1.1rem;
+  text-align: center;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.traceStep[data-outcome="hit"] .traceMark {
+  color: var(--danger);
+}
+
+.traceStep[data-outcome="warn"] .traceMark {
+  color: var(--warn);
+}
+
+.traceStep[data-outcome="pass"] .traceMark {
+  color: var(--signal);
+}
+
+.traceStage {
+  font-weight: 600;
+}
+
+.traceStep[data-outcome="hit"] .traceStage {
+  color: var(--danger);
+}
+
+.traceDetail {
+  font-family: var(--font-mono);
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.traceOutcome {
+  margin-inline-start: auto;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+
+/* The deep-link that sits where a decisive stage's outcome would, pointing to
+   the page that governs the rule (the lists, the phishing page). */
+.traceLink {
+  margin-inline-start: auto;
+  font-size: var(--step--2);
+  font-weight: 600;
+  color: var(--signal-strong);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.traceLink:hover {
+  text-decoration: underline;
+}
+
+.traceToggle {
+  align-self: start;
+  font: inherit;
+  font-size: var(--step--1);
+  color: var(--signal-strong);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.traceToggle:hover {
+  text-decoration: underline;
+}
+
+.traceNode {
+  margin: 0;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 
 /* The one-click list fix, offered right in the entry's detail panel. */

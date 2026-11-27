@@ -18,11 +18,11 @@ use hickory_proto::op::DnsResponse;
 use hickory_proto::op::{Message, MessageType, Query, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, CNAME};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
-use justdns_filter::{PhishingDetector, PhishingHit, PhishingMode, PolicyEngine};
+use justdns_filter::{IpBlocker, PhishingDetector, PhishingHit, PhishingMode, PolicyEngine};
 use justdns_rewrite::Rewriter;
 
 use crate::cache::{CacheHit, CacheKey, CachedEntry, CachedResponse, DnsCache};
-use crate::observer::{AnswerSource, DnssecStatus, QueryObserver, QueryRecord};
+use crate::observer::{AnswerSource, BlockStage, DnssecStatus, QueryObserver, QueryRecord};
 use crate::router::Resolve;
 use crate::safesearch;
 
@@ -78,8 +78,22 @@ pub struct PipelineOptions {
     /// block and CNAME uncloaking are all skipped, so every name resolves
     /// normally. `0` means not paused. A shared, swappable slot so the web layer
     /// can arm it live and the deadline makes it expire on its own without any
-    /// timer. Node-local and never persisted: a restart clears it.
+    /// timer. Mirrored across an HA cluster (a pause on one node pauses them all,
+    /// to the same absolute deadline), but runtime-only and never persisted to
+    /// disk, so a full restart still clears it.
     pub pause_until: Arc<AtomicU64>,
+    /// The response-IP block set: IPv4 addresses and CIDR ranges that must not
+    /// appear in an answer. When an upstream or cached answer resolves to one of
+    /// them the whole answer is refused with the configured block response, like a
+    /// name block. The binary rebuilds and publishes it live from the user's IP
+    /// lists; `None` (the default) means no response-IP filtering.
+    pub ip_block: Option<Arc<IpBlocker>>,
+    /// The answer-IP allow set that overrides [`ip_block`](Self::ip_block): an
+    /// answer IP on this set is never treated as a block hit, so a big CDN that
+    /// shares address space with a flagged host still resolves. Holds the built-in
+    /// CDN allowlist, which is always active and not user-editable. `None` (the
+    /// default) means no override, so every block hit stands.
+    pub ip_allow: Option<Arc<IpBlocker>>,
 }
 
 /// The address the custom block page is reached at, per family. A blocked `A`
@@ -107,6 +121,8 @@ impl PipelineOptions {
             block_page: Arc::new(ArcSwapOption::empty()),
             dnssec_validate: Arc::new(AtomicBool::new(false)),
             pause_until: Arc::new(AtomicU64::new(0)),
+            ip_block: None,
+            ip_allow: None,
         }
     }
 }
@@ -126,6 +142,8 @@ struct Answered {
     /// The DNSSEC verdict for an upstream answer when validation was on; `None`
     /// for a local answer or when validation is off.
     dnssec: Option<DnssecStatus>,
+    /// Which stage refused the answer, when `source` is [`AnswerSource::Blocked`].
+    block_stage: Option<BlockStage>,
 }
 
 impl Answered {
@@ -136,6 +154,17 @@ impl Answered {
             source,
             resolver: None,
             dnssec: None,
+            block_stage: None,
+        }
+    }
+
+    /// A blocked answer refused at `stage`.
+    fn blocked(stage: BlockStage) -> Self {
+        Self {
+            source: AnswerSource::Blocked,
+            resolver: None,
+            dnssec: None,
+            block_stage: Some(stage),
         }
     }
 
@@ -147,6 +176,7 @@ impl Answered {
             source: AnswerSource::Upstream,
             resolver,
             dnssec,
+            block_stage: None,
         }
     }
 }
@@ -243,7 +273,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             .as_ref()
             .and_then(|detector| detector.check(&name));
 
-        let answered = self
+        let mut answered = self
             .answer(&query, &mut response, client, phishing.as_ref())
             .await;
 
@@ -255,6 +285,63 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         } else {
             phishing
         };
+
+        // Response-IP filter: an upstream or cached answer that resolves to a
+        // blocked IP is refused wholesale with the configured block answer, like a
+        // name block. Only resolved answers are checked: a rewrite, safe-search or
+        // local answer is trusted, and a name block has no real address to inspect.
+        // Honours the troubleshooting pause, like every other block.
+        let mut block_reason: Option<&'static str> = None;
+        if matches!(
+            answered.source,
+            AnswerSource::Upstream | AnswerSource::Cache
+        ) && !self.blocking_paused()
+        {
+            if let Some(ip_block) = &self.options.ip_block {
+                let ip_allow = self.options.ip_allow.as_deref();
+                if !ip_block.is_empty() && answer_hits_ip_block(&response, ip_block, ip_allow) {
+                    // Drop the leaked records before writing the block answer, the
+                    // same way the CNAME uncloak path does.
+                    response.answers.clear();
+                    response.metadata.response_code = ResponseCode::NoError;
+                    self.write_block_answer(&query, &mut response);
+                    answered = Answered::blocked(BlockStage::ResponseIp);
+                    block_reason = Some("threat-ip");
+                }
+            }
+        }
+
+        // IPv6 companion to the response-IP filter. The filter above only reads A
+        // (IPv4) records, so a threat domain that also publishes AAAA would stay
+        // reachable over IPv6 (Happy Eyeballs). When this is an AAAA answer and the
+        // same name's A record — already cached from its own lookup — lands on the
+        // block set, refuse the AAAA too. Best-effort: it closes the common case
+        // (the A is normally resolved alongside or before the AAAA); AAAA-off
+        // remains the complete protection, since the threat intel is IPv4-only.
+        if block_reason.is_none()
+            && matches!(
+                answered.source,
+                AnswerSource::Upstream | AnswerSource::Cache
+            )
+            && !self.blocking_paused()
+            && query.query_type() == RecordType::AAAA
+            && !response.answers.is_empty()
+        {
+            if let Some(ip_block) = &self.options.ip_block {
+                let ip_allow = self.options.ip_allow.as_deref();
+                if !ip_block.is_empty()
+                    && self
+                        .sibling_a_hits_ip_block(&query, ip_block, ip_allow)
+                        .await
+                {
+                    response.answers.clear();
+                    response.metadata.response_code = ResponseCode::NoError;
+                    self.write_block_answer(&query, &mut response);
+                    answered = Answered::blocked(BlockStage::ResponseIp);
+                    block_reason = Some("threat-ip");
+                }
+            }
+        }
 
         if let Some(observer) = &self.observer {
             observer.observe(QueryRecord {
@@ -269,6 +356,9 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
                 resolver: answered.resolver.as_deref().map(str::to_owned),
                 dnssec: answered.dnssec,
                 phishing,
+                block_reason,
+                block_stage: answered.block_stage,
+                paused: self.blocking_paused(),
             });
         }
 
@@ -308,7 +398,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if let Some(engine) = &self.policy_engine {
                 if engine.blocks(client, &query.name().to_string()) {
                     self.write_block_answer(query, response);
-                    return Answered::local(AnswerSource::Blocked);
+                    return Answered::blocked(BlockStage::NameBlock);
                 }
             }
         }
@@ -320,7 +410,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
             if let Some(hit) = phishing {
                 if hit.mode == PhishingMode::Block {
                     self.write_block_answer(query, response);
-                    return Answered::local(AnswerSource::Blocked);
+                    return Answered::blocked(BlockStage::Phishing);
                 }
             }
         }
@@ -414,6 +504,36 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         Answered::upstream(resolver, dnssec)
     }
 
+    /// Whether the IPv4 (A) answer for `query`'s name — read from the cache only,
+    /// with no extra upstream lookup — lands on the response-IP block set. Used to
+    /// carry an IPv4 response-IP block over to the name's AAAA answer so the block
+    /// is not bypassed over IPv6. Returns `false` when the A record is not cached
+    /// (nothing to decide on) or is allow-listed.
+    async fn sibling_a_hits_ip_block(
+        &self,
+        query: &Query,
+        ip_block: &IpBlocker,
+        ip_allow: Option<&IpBlocker>,
+    ) -> bool {
+        let key = CacheKey::new(query.name(), RecordType::A);
+        let Some(hit) = self.cache.get(&key).await else {
+            return false;
+        };
+        let CachedResponse::Positive(records) = hit.response else {
+            return false;
+        };
+        records.iter().any(|record| match &record.data {
+            RData::A(a) => {
+                let ip = a.0;
+                if ip_allow.is_some_and(|allow| allow.contains(ip)) {
+                    return false;
+                }
+                ip_block.contains(ip)
+            }
+            _ => false,
+        })
+    }
+
     /// Whether the troubleshooting pause is in force right now: armed (a non-zero
     /// deadline) and the deadline has not yet passed. Read once per query.
     fn blocking_paused(&self) -> bool {
@@ -462,7 +582,7 @@ impl<R: Resolve + Send + Sync + 'static> Pipeline<R> {
         response.answers.clear();
         response.metadata.response_code = ResponseCode::NoError;
         self.write_block_answer(query, response);
-        Some(Answered::local(AnswerSource::Blocked))
+        Some(Answered::blocked(BlockStage::CnameUncloak))
     }
 
     /// Refresh `key` from upstream in the background and store the fresh answer,
@@ -663,6 +783,29 @@ fn answer_addresses(response: &Message) -> Vec<IpAddr> {
         .collect()
 }
 
+/// Whether any IPv4 address in the answer is on the response-IP block set. Only
+/// A records are checked (IPv4-only for now); one match means the whole answer is
+/// refused.
+fn answer_hits_ip_block(
+    response: &Message,
+    ip_block: &IpBlocker,
+    ip_allow: Option<&IpBlocker>,
+) -> bool {
+    response.answers.iter().any(|record| match &record.data {
+        RData::A(a) => {
+            let ip = a.0;
+            // An allow-listed answer IP overrides the block: it is never a hit, so
+            // a big CDN sharing space with a flagged host still resolves. A mixed
+            // answer still blocks on its other, non-allowed IPs.
+            if ip_allow.is_some_and(|allow| allow.contains(ip)) {
+                return false;
+            }
+            ip_block.contains(ip)
+        }
+        _ => false,
+    })
+}
+
 /// Turn an upstream response into the cache entry to store for it: a positive
 /// entry at the smallest record TTL, or a negative entry at the negative TTL.
 /// Shared by the synchronous miss path and the background refresh.
@@ -727,11 +870,12 @@ mod tests {
         let engine = PolicyEngine::new();
         engine.publish(
             Policy::new(
+                std::sync::Arc::new(DomainSet::new()),
                 DomainSet::new(),
                 vec![BlockSource {
                     category: BlockCategory::AdsTrackers,
                     label: "Werbung & Tracker".into(),
-                    set: DomainSet::from_rules("ads.example\n"),
+                    set: std::sync::Arc::new(DomainSet::from_rules("ads.example\n")),
                 }],
             ),
             vec![],
@@ -755,6 +899,7 @@ mod tests {
     use hickory_proto::op::Query;
     use hickory_proto::rr::rdata::{A, AAAA, SOA};
     use hickory_proto::rr::{Name, RData, Record};
+    use justdns_filter::{IpBlocker, IpSet};
 
     use crate::upstream::UpstreamMode;
 
@@ -890,6 +1035,139 @@ mod tests {
             1,
             "second query should hit the cache"
         );
+    }
+
+    /// Build default options with a response-IP block set loaded from `rules`.
+    fn options_with_ip_block(rules: &str) -> PipelineOptions {
+        let ip_block = Arc::new(IpBlocker::new());
+        ip_block.publish(std::sync::Arc::new(IpSet::from_rules(rules)));
+        PipelineOptions {
+            ip_block: Some(ip_block),
+            ..PipelineOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn answer_resolving_to_a_blocked_ip_is_refused() {
+        let blocked = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
+        let (pipe, calls) = pipeline(Reply::A(blocked), options_with_ip_block("45.83.0.0/16\n"));
+        let req = request("malware.example.", RecordType::A);
+
+        // The upstream answered with a blocked IP, so the whole answer is refused
+        // with the configured block response (NXDOMAIN by default) and no address
+        // reaches the client.
+        let first = pipe.handle(&req, CLIENT).await;
+        assert_eq!(first.response_code, ResponseCode::NXDomain);
+        assert!(first.answers.is_empty(), "no address is delivered");
+
+        // A cache hit for the same name is blocked the same way, with no second
+        // upstream lookup: the response path checks cached answers too.
+        let second = pipe.handle(&req, CLIENT).await;
+        assert_eq!(second.response_code, ResponseCode::NXDomain);
+        assert!(second.answers.is_empty());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            1,
+            "the second answer came from the cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_allow_listed_answer_ip_overrides_the_block() {
+        // The same IP is on both the block set and the allow set. The allow set
+        // wins, so the answer is delivered: a CDN sharing space with a flagged
+        // host still resolves.
+        let shared = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
+        let ip_block = Arc::new(IpBlocker::new());
+        ip_block.publish(std::sync::Arc::new(IpSet::from_rules("45.83.0.0/16\n")));
+        let ip_allow = Arc::new(IpBlocker::new());
+        ip_allow.publish(std::sync::Arc::new(IpSet::from_rules("45.83.1.0/24\n")));
+        let options = PipelineOptions {
+            ip_block: Some(ip_block),
+            ip_allow: Some(ip_allow),
+            ..PipelineOptions::default()
+        };
+        let (pipe, _calls) = pipeline(Reply::A(shared), options);
+        let req = request("cdn.example.", RecordType::A);
+
+        let answer = pipe.handle(&req, CLIENT).await;
+        assert_eq!(answer.response_code, ResponseCode::NoError);
+        assert_eq!(answer.answers[0].data, RData::A(A(shared)));
+    }
+
+    #[tokio::test]
+    async fn answer_resolving_to_an_unlisted_ip_passes_through() {
+        let clean = Ipv4Addr::new(93, 184, 216, 34);
+        let (pipe, _calls) = pipeline(
+            Reply::A(clean),
+            options_with_ip_block("45.83.0.0/16\n203.0.113.9\n"),
+        );
+        let req = request("example.com.", RecordType::A);
+
+        let answer = pipe.handle(&req, CLIENT).await;
+        assert_eq!(answer.response_code, ResponseCode::NoError);
+        assert_eq!(answer.answers[0].data, RData::A(A(clean)));
+    }
+
+    #[tokio::test]
+    async fn an_aaaa_answer_is_blocked_when_its_sibling_a_is_on_the_block_set() {
+        // Response-IP only reads A records, so without this an AAAA answer for a
+        // threat domain would stay reachable over IPv6 (Happy Eyeballs). The name's
+        // A record is already cached (from its own lookup) and lands on the block
+        // set, so the AAAA is refused too.
+        let blocked_v4 = Ipv4Addr::new(45, 83, 1, 7); // inside 45.83.0.0/16
+        let options = options_with_ip_block("45.83.0.0/16\n");
+        options.ipv6_enabled.store(true, Ordering::Relaxed);
+        let (pipe, _calls) = pipeline(
+            Reply::Aaaa(Ipv6Addr::new(0x2606, 0x2800, 0, 0, 0, 0, 0, 1)),
+            options,
+        );
+        let name = Name::from_ascii("malware.example.").unwrap();
+
+        // Prime the sibling A record in the cache, as its own A lookup would have.
+        pipe.cache
+            .insert(
+                CacheKey::new(&name, RecordType::A),
+                CachedEntry::positive(
+                    vec![Record::from_rdata(
+                        name.clone(),
+                        120,
+                        RData::A(A(blocked_v4)),
+                    )],
+                    Duration::from_secs(120),
+                ),
+            )
+            .await;
+
+        let aaaa = pipe
+            .handle(&request("malware.example.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(aaaa.response_code, ResponseCode::NXDomain);
+        assert!(
+            aaaa.answers.is_empty(),
+            "the AAAA is refused because the sibling A is blocked"
+        );
+
+        // A name whose sibling A is not blocked still resolves over IPv6.
+        let clean = Name::from_ascii("ok.example.").unwrap();
+        pipe.cache
+            .insert(
+                CacheKey::new(&clean, RecordType::A),
+                CachedEntry::positive(
+                    vec![Record::from_rdata(
+                        clean,
+                        120,
+                        RData::A(A(Ipv4Addr::new(93, 184, 216, 34))),
+                    )],
+                    Duration::from_secs(120),
+                ),
+            )
+            .await;
+        let ok = pipe
+            .handle(&request("ok.example.", RecordType::AAAA), CLIENT)
+            .await;
+        assert_eq!(ok.response_code, ResponseCode::NoError);
+        assert_eq!(ok.answers.len(), 1, "unblocked AAAA passes through");
     }
 
     #[tokio::test]
@@ -1077,7 +1355,7 @@ mod tests {
             enabled: true,
             nrd_enabled: true,
             nrd_mode: PhishingMode::Block,
-            nrd: DomainSet::from_rules("brand-new.example\n"),
+            nrd: std::sync::Arc::new(DomainSet::from_rules("brand-new.example\n")),
             ..PhishingConfig::default()
         });
         let observer = Arc::new(Recording::default());
@@ -1121,7 +1399,7 @@ mod tests {
             enabled: true,
             nrd_enabled: true,
             nrd_mode: PhishingMode::Block,
-            nrd: DomainSet::from_rules("nas.home\n"),
+            nrd: std::sync::Arc::new(DomainSet::from_rules("nas.home\n")),
             ..PhishingConfig::default()
         });
         let rewriter = Arc::new(Rewriter::new());

@@ -3,10 +3,11 @@
 *A German version of this guide is in [secrets-at-rest.de.md](secrets-at-rest.de.md).*
 
 JustDNS keeps a few secrets on its data volume: the account list (password hashes,
-TOTP secrets, recovery codes) and the secret parts of your settings (a notification
-webhook or bot token). From this release those files are **encrypted on disk**, so a
-copied data volume, a backup or a VM snapshot is useless to whoever holds it without
-the key.
+TOTP secrets, recovery codes), the secret parts of your settings (a notification
+webhook or bot token), and — if you use a [high-availability](high-availability.md)
+cluster — the shared sync key, which alone unlocks the peer API and its credential
+snapshot. From this release those files are **encrypted on disk**, so a copied data
+volume, a backup or a VM snapshot is useless to whoever holds it without the key.
 
 There is **nothing to switch on and nothing to configure.** It happens by itself.
 
@@ -40,9 +41,9 @@ whole point, so that a copied data volume does not also hand over the key.
 
 ## Upgrading
 
-The first time the new version starts, it reads your existing plaintext `auth.json` and
-`config.json`, writes them back **encrypted**, and carries on. You do nothing, and
-nothing about how you log in or use the dashboard changes.
+The first time the new version starts, it reads your existing plaintext `auth.json`,
+`config.json` and `ha.json`, writes them back **encrypted**, and carries on. You do
+nothing, and nothing about how you log in or use the dashboard changes.
 
 This is a one-way step. An **older** JustDNS build cannot read the encrypted files, so
 once a node is on this version, do not roll its image back without also restoring a

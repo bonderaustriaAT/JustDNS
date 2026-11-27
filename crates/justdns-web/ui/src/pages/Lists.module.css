@@ -887,3 +887,28 @@
     order: 3;
   }
 }
+
+/* A brief highlight on the element a decision-trace deep-link points at, so the
+   rule the user came to manage is easy to spot. */
+.focusPulse {
+  animation: focusPulse 2.2s ease-out;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes focusPulse {
+  0%,
+  60% {
+    box-shadow: 0 0 0 2px var(--signal), 0 0 0 6px color-mix(in srgb, var(--signal) 30%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, 0 0 0 6px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focusPulse {
+    animation: none;
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+}

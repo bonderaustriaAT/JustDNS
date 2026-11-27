@@ -14,6 +14,7 @@ import {
 import { RECORD_TYPES, RESPONSE_CODES, recordTypeLabel, responseCodeLabel, sourceLabel } from "../lib/dns";
 import { countryName, describeGeo } from "../lib/geo";
 import { useI18n } from "../lib/i18n";
+import { REASON_KEY } from "../lib/trace";
 import { LOG_LIMIT, useHistory, useLogs, type LogRow } from "../lib/useLogs";
 import { LogDetail } from "./LogDetail";
 import styles from "./Logs.module.css";
@@ -803,6 +804,15 @@ function LogList({
                         </span>
                       );
                     })()}
+                  {!row.phishing && row.reason && (
+                    <span
+                      className={styles.reasonPill}
+                      data-reason={row.reason}
+                      title={t(REASON_KEY[row.reason])}
+                    >
+                      {t(REASON_KEY[row.reason])}
+                    </span>
+                  )}
                 </span>
                 {row.addresses.length > 0 ? (
                   <span className={styles.resolved} title={row.addresses.join(", ")}>

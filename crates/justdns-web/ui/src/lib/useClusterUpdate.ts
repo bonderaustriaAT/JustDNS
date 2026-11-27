@@ -62,9 +62,16 @@ export interface ClusterUpdate {
   /** The last start/error message, if any. */
   error: string | null;
   clearError: () => void;
-  /** A non-fatal notice: the restore file could not be downloaded, but the update
-   *  still ran (each node writes its own on-disk safety backup). Null otherwise. */
+  /** Whether the optional restore-file download already succeeded (label
+   *  feedback in the dialogs). */
+  downloaded: boolean;
+  /** A non-fatal notice: the restore file could not be downloaded. The update
+   *  is unaffected — every node writes its own on-disk safety backup. Null
+   *  otherwise. */
   downloadWarning: string | null;
+  /** Download the optional restore file with the typed password — a courtesy
+   *  copy, never a precondition for the update. Returns whether it succeeded. */
+  downloadFile: () => Promise<boolean>;
   /** Start the rolling cluster update with the typed password. No-op (returns
    *  `false`) unless `valid`; returns `true` once the start call succeeds. */
   start: () => Promise<boolean>;
@@ -83,6 +90,7 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState(false);
   const [downloadWarning, setDownloadWarning] = useState<string | null>(null);
 
   // One fetch to pick up a run already in progress (or the last result) — only
@@ -126,6 +134,8 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
   const resetPassword = useCallback(() => {
     setPassword("");
     setConfirm("");
+    setDownloaded(false);
+    setDownloadWarning(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -141,22 +151,28 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     }
   }, []);
 
+  // The optional courtesy copy. The update itself never waits for it: every
+  // node writes its own encrypted on-disk safety backup before it updates, so
+  // a flaky browser download (a phone, most of all) must not sit in front of
+  // a possibly urgent cluster update.
+  const downloadFile = useCallback(async (): Promise<boolean> => {
+    if (password === "") return false;
+    setDownloadWarning(null);
+    try {
+      await downloadRestore(password);
+      setDownloaded(true);
+      return true;
+    } catch {
+      setDownloadWarning(t("ha.cluster.backupDownloadFailed"));
+      return false;
+    }
+  }, [password, t]);
+
   const start = useCallback(async (): Promise<boolean> => {
     if (password === "" || password !== confirm) return false;
     setBusy(true);
     setError(null);
-    setDownloadWarning(null);
     try {
-      // Hand the admin a restore file first, then start the rolling update — the
-      // same safety net the single-node update gives. If that download fails we
-      // surface it plainly but still roll on: each node writes its own on-disk
-      // safety backup, so a flaky browser download must not block a (possibly
-      // urgent) cluster update.
-      try {
-        await downloadRestore(password);
-      } catch {
-        setDownloadWarning(t("ha.cluster.backupDownloadFailed"));
-      }
       setState(await api.haClusterUpdate(password));
       setPassword("");
       setConfirm("");
@@ -184,7 +200,9 @@ export function useClusterUpdate(enabled = true): ClusterUpdate {
     busy,
     error,
     clearError,
+    downloaded,
     downloadWarning,
+    downloadFile,
     start,
   };
 }

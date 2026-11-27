@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { InfoHint } from "../components/InfoHint";
 import { Modal } from "../components/Modal";
@@ -15,6 +15,7 @@ import {
   type Subscription,
 } from "../lib/api";
 import { useI18n, type Lang } from "../lib/i18n";
+import { usePendingFeedPoll } from "../lib/usePendingFeedPoll";
 import type { MessageKey } from "../lib/messages";
 import styles from "./Lists.module.css";
 
@@ -42,7 +43,14 @@ function relativeTime(ms: number, t: T): string {
 }
 
 /** The catalogue categories in the order the filter shows them. */
-const CATEGORY_ORDER: Preset["category"][] = ["ads", "security", "privacy", "bypass", "allow"];
+const CATEGORY_ORDER: Preset["category"][] = [
+  "ads",
+  "security",
+  "threatip",
+  "privacy",
+  "bypass",
+  "allow",
+];
 
 /** Catalogue sort rank: the JustDNS list leads, then the other recommended
  *  picks, then the long tail. Lower sorts first; equal ranks keep their original
@@ -135,6 +143,7 @@ function NoteEditor({
  *  Each entry can carry an optional note, shown under the name and edited in
  *  place; the add field has its own optional note input beside the domain. */
 function EntryEditor({
+  id,
   title,
   hint,
   accent,
@@ -146,6 +155,7 @@ function EntryEditor({
   onRemove,
   onSetNote,
 }: {
+  id?: string;
   title: string;
   hint: string;
   accent: "allow" | "block";
@@ -172,7 +182,12 @@ function EntryEditor({
   }
 
   return (
-    <section className={styles.editor} data-accent={accent} aria-labelledby={`${accent}-title`}>
+    <section
+      id={id}
+      className={styles.editor}
+      data-accent={accent}
+      aria-labelledby={`${accent}-title`}
+    >
       <div className={styles.editorHead}>
         <h3 id={`${accent}-title`} className={styles.editorTitle}>
           {title}
@@ -295,7 +310,11 @@ function PresetCard({
               </span>
             )}
             <span className={styles.kind} data-kind={preset.kind}>
-              {preset.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
+              {preset.kind === "allow"
+                ? t("lists.kindAllow")
+                : preset.kind === "blockip"
+                  ? t("lists.kindBlockIp")
+                  : t("lists.kindBlock")}
             </span>
             <span className={styles.categoryTag}>
               {t(`category.${preset.category}` as MessageKey)}
@@ -350,6 +369,8 @@ export function Lists({ section }: { section: ListsSection }) {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const [presetFilter, setPresetFilter] = useState<string>("all");
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus");
   // The list currently open in the dry-run dialog, or null when it is closed.
   const [simTarget, setSimTarget] = useState<{
     kind: "preset" | "subscription";
@@ -373,6 +394,33 @@ export function Lists({ section }: { section: ListsSection }) {
       });
     return () => controller.abort();
   }, [t]);
+
+  // A freshly activated feed downloads in the background, so the view above
+  // still shows it as "loading…". Re-pull the view while that is the case, so
+  // the row resolves to a count or an error on its own.
+  usePendingFeedPoll(view?.subscriptions ?? null, setView);
+
+  // A deep-link from the query log's decision trace carries a `focus` so the page
+  // opens on the rule behind a block: the allow editor for a name block, the
+  // threat-IP presets for a response-IP block. Scroll it into view and pulse it
+  // once the list has loaded (so the target is in the DOM).
+  useEffect(() => {
+    if (!view || !focus) return;
+    let targetId: string | null = null;
+    if (section === "mine" && focus === "allow") {
+      targetId = "list-allow";
+    } else if (section === "presets" && focus === "threatip") {
+      setPresetFilter("threatip");
+      targetId = "preset-cards";
+    }
+    if (!targetId) return;
+    const el = document.getElementById(targetId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add(styles.focusPulse);
+    const timer = setTimeout(() => el.classList.remove(styles.focusPulse), 2200);
+    return () => clearTimeout(timer);
+  }, [view, focus, section]);
 
   function mark(key: string, on: boolean) {
     setPending((prev) => {
@@ -502,6 +550,7 @@ export function Lists({ section }: { section: ListsSection }) {
       {section === "mine" ? (
       <div className={styles.editors}>
         <EntryEditor
+          id="list-allow"
           title={t("lists.allowTitle")}
           hint={t("lists.allowHint")}
           accent="allow"
@@ -554,7 +603,7 @@ export function Lists({ section }: { section: ListsSection }) {
           ))}
         </div>
 
-        <div className={styles.cards}>
+        <div id="preset-cards" className={styles.cards}>
           {visiblePresets.map((preset) => (
             <PresetCard
               key={preset.key}
@@ -608,6 +657,7 @@ export function Lists({ section }: { section: ListsSection }) {
           >
             <option value="block">{t("lists.kindBlock")}</option>
             <option value="allow">{t("lists.kindAllow")}</option>
+            <option value="blockip">{t("lists.kindBlockIp")}</option>
           </select>
           <button type="submit" className={styles.addButton} disabled={pending.has("add-feed")}>
             {t("lists.subscribe")}
@@ -625,7 +675,11 @@ export function Lists({ section }: { section: ListsSection }) {
                   <span className={styles.feedUrl}>{feed.url}</span>
                   <span className={styles.feedStatus}>
                     <span className={styles.kind} data-kind={feed.kind}>
-                      {feed.kind === "allow" ? t("lists.kindAllow") : t("lists.kindBlock")}
+                      {feed.kind === "allow"
+                        ? t("lists.kindAllow")
+                        : feed.kind === "blockip"
+                          ? t("lists.kindBlockIp")
+                          : t("lists.kindBlock")}
                     </span>
                     {feedStatusText(feed, t, lang, locale)}
                   </span>
@@ -838,7 +892,7 @@ function SimulateModal({
 /** Human-readable status for a feed row from its last-fetch fields. Number
  *  formatting follows the given locale; the relative time follows `lang`. */
 function feedStatusText(
-  feed: { lastError?: string; lastCount?: number; lastFetchedMs?: number },
+  feed: { kind?: string; lastError?: string; lastCount?: number; lastFetchedMs?: number },
   t: T,
   lang: Lang,
   locale: string = lang === "de" ? "de-DE" : "en-US",
@@ -847,12 +901,13 @@ function feedStatusText(
     return <span className={styles.statusError}>{t("lists.feedFailed")}</span>;
   }
   if (feed.lastCount !== undefined && feed.lastFetchedMs !== undefined) {
+    const count = feed.lastCount.toLocaleString(locale);
+    const time = relativeTime(feed.lastFetchedMs, t);
     return (
       <span className={styles.statusOk}>
-        {t("lists.feedCount", {
-          count: feed.lastCount.toLocaleString(locale),
-          time: relativeTime(feed.lastFetchedMs, t),
-        })}
+        {feed.kind === "blockip"
+          ? t("lists.feedCountIp", { count, time })
+          : t("lists.feedCount", { count, time })}
       </span>
     );
   }

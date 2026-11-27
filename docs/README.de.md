@@ -18,6 +18,7 @@ Neu bei JustDNS? Beginne mit [Ersteinrichtung](guides/setup.de.md), danach
 | [Ersteinrichtung](guides/setup.de.md) | Der Einrichtungs-Assistent, dein Admin-Konto, das Anmelden |
 | [Die Übersicht](guides/overview.de.md) | Das Live-Dashboard: Zähler, Diagramm, aktivste Clients |
 | [Das Protokoll](guides/query-log.de.md) | Was gefragt wurde, von welchem Gerät, wie es beantwortet wurde |
+| [Warum eine Anfrage geblockt wurde (Entscheidungs-Trace)](guides/decision-trace.de.md) | Das Grund-Tag und der Trace pro Anfrage über die Stufen, die einen Block entschieden, mit Ein-Klick-Sprung zur Regel |
 | [Privatsphäre-Dashboard](guides/privacy-trackers.de.md) | Sehen, mit welchen Firmen jedes Gerät redet; Tracker-Anfragen der Organisation dahinter zugeordnet |
 | [Land & Netz der Antworten (GeoIP)](guides/geoip.de.md) | Land und Netz (ASN) hinter jeder Antwort sehen – offline |
 | [Weltkarte & beobachtete Netze](guides/world-map.de.md) | Weltkarte, wohin die Geräte telefonieren; ein Land oder Netz beobachten, um es zu markieren und zu alarmieren |

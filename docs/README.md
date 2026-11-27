@@ -18,6 +18,7 @@ New to JustDNS? Start with [First-run setup](guides/setup.md), then
 | [First-run setup](guides/setup.md) | The setup wizard, your admin account, logging in |
 | [The overview](guides/overview.md) | The live dashboard: counters, graph, top clients |
 | [The query log](guides/query-log.md) | What was asked, by which device, how it was answered |
+| [Why a query was blocked (decision trace)](guides/decision-trace.md) | The reason tag and per-query trace of the stages that decided a block, with a one-click jump to the rule |
 | [Privacy dashboard](guides/privacy-trackers.md) | See which companies each device talks to, with tracker lookups attributed to the organisation behind them |
 | [Country & network of answers (GeoIP)](guides/geoip.md) | See the country and network (ASN) behind every answer, offline |
 | [World map & watched networks](guides/world-map.md) | A world map of where your devices phone home; watch a country or network to flag and alert on it |

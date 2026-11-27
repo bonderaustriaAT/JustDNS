@@ -231,6 +231,14 @@ pub struct Cluster {
     /// every node is then writable. When set, only the node whose own id matches
     /// may change configuration; the others serve a read-only dashboard.
     pub primary_node_id: String,
+    /// When the designation above was last set or cleared (ms since the Unix epoch),
+    /// bumped **only** by an explicit primary change — never by an ordinary settings
+    /// save. This is the cluster-wide tiebreaker for the designation: on a sync the
+    /// side with the higher value wins, so a node that has not yet learned the chosen
+    /// primary cannot clear it by merely carrying a newer last-writer-wins timestamp
+    /// from an unrelated save. 0 = never explicitly set. Kept distinct from the
+    /// ledger's entry timestamp on purpose, so the two cannot be confused.
+    pub primary_set_at_ms: i64,
 }
 
 /// Which shape a notification webhook payload takes, so the same URL field can
@@ -556,9 +564,10 @@ pub struct Modules {
 pub struct PrivacyModule {
     /// Master switch. Off by default — no worker runs until the admin turns it on.
     pub enabled: bool,
-    /// Chaff intensity, 0..=100. `0` runs the graph only (no chaff); the module
-    /// starts at a gentle base rate when first enabled. Read by the chaff
-    /// generator while the module is on.
+    /// Chaff intensity in decoys per minute, 0..=600. `0` runs the graph only
+    /// (no chaff); the module starts at a gentle base rate when first enabled.
+    /// Read by the chaff generator while the module is on, which clamps it to its
+    /// own maximum.
     pub chaff_intensity: u32,
 }
 
@@ -768,7 +777,9 @@ struct Inner {
     /// A troubleshooting pause on all blocking: the Unix-millisecond deadline the
     /// DNS pipeline compares against per query (`0` means not paused). Runtime
     /// state, not part of the saved settings: it is never persisted and a restart
-    /// clears it, so a forgotten pause cannot outlive the process.
+    /// clears it, so a forgotten pause cannot outlive the process. In an HA cluster
+    /// the deadline is mirrored to the other nodes (see the `blockingPause` HA
+    /// entry) so a pause covers every node, not just the one it was armed on.
     blocking_pause_until: Arc<AtomicU64>,
     /// Run after each change to apply settings the engine owns (router, cache)
     /// that cannot be expressed as a simple atomic flag here.
@@ -993,12 +1004,33 @@ impl ConfigStore {
         self.inner.blocking_pause_until.store(0, Ordering::Relaxed);
     }
 
+    /// Set the troubleshooting pause to an absolute Unix-millisecond deadline (`0`
+    /// clears it). Unlike [`pause_blocking`](Self::pause_blocking), which takes a
+    /// duration from now, this stores a deadline as given, so a pause armed on one
+    /// cluster node can be mirrored onto another with the same expiry. Still
+    /// runtime-only and never persisted: a restart clears it.
+    pub fn set_blocking_pause_until(&self, until_ms: u64) {
+        self.inner
+            .blocking_pause_until
+            .store(until_ms, Ordering::Relaxed);
+    }
+
     /// The current blocking-pause deadline in Unix milliseconds, or `None` when
     /// blocking is active — either never paused, or the deadline has passed. An
     /// expired deadline reads as `None` so callers never show a stale countdown.
     pub fn blocking_pause_until_ms(&self) -> Option<u64> {
         let until = self.inner.blocking_pause_until.load(Ordering::Relaxed);
         (until != 0 && now_ms() < until).then_some(until)
+    }
+
+    /// The raw stored pause deadline (0 when never armed), without the
+    /// expired-reads-as-`None` interpretation of
+    /// [`blocking_pause_until_ms`](Self::blocking_pause_until_ms). Used by the HA
+    /// apply path to decide whether a synced deadline is actually a *new* one, so a
+    /// steady sync that keeps re-setting the same deadline — even one the local
+    /// clock already considers expired — never repeatedly flushes the cache.
+    pub fn pause_until_raw(&self) -> u64 {
+        self.inner.blocking_pause_until.load(Ordering::Relaxed)
     }
 }
 
@@ -1032,8 +1064,8 @@ fn decode(
 }
 
 /// Write `bytes` (the sealed config) to `path` atomically: write a sibling temp
-/// file first, then rename over the target so a crash mid-write never leaves a
-/// half-written config.
+/// file, flush it to disk, then rename over the target so a crash leaves either
+/// the old or the new config — never a half-written one.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     let io_err = |source| ConfigError::Io {
         path: path.to_path_buf(),
@@ -1047,12 +1079,20 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     }
 
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes).map_err(|source| ConfigError::Io {
+    write_and_sync(&tmp, bytes).map_err(|source| ConfigError::Io {
         path: tmp.clone(),
         source,
     })?;
     std::fs::rename(&tmp, path).map_err(io_err)?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -1438,16 +1478,19 @@ mod tests {
     fn cluster_defaults_unset_and_round_trips() {
         // No primary designated by default — every node stays writable.
         assert!(Settings::default().cluster.primary_node_id.is_empty());
+        assert_eq!(Settings::default().cluster.primary_set_at_ms, 0);
 
         let settings = Settings {
             cluster: Cluster {
                 primary_node_id: "node-abc".to_owned(),
+                primary_set_at_ms: 1_700_000_000_000,
             },
             ..Default::default()
         };
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"cluster\":{"), "{json}");
         assert!(json.contains("\"primaryNodeId\":\"node-abc\""), "{json}");
+        assert!(json.contains("\"primarySetAtMs\":1700000000000"), "{json}");
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(back, settings);
     }
@@ -1458,6 +1501,18 @@ mod tests {
         std::fs::write(&path, r#"{"ipv6":true}"#).unwrap();
         let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
         assert!(store.get().cluster.primary_node_id.is_empty());
+        assert_eq!(store.get().cluster.primary_set_at_ms, 0);
+    }
+
+    #[test]
+    fn older_config_with_primary_but_no_set_at_loads_zero() {
+        // A config written before the set-at field existed carries only the id; it
+        // must load with set_at 0 so it is never confused with a fresh designation.
+        let (_dir, path) = temp_path();
+        std::fs::write(&path, r#"{"cluster":{"primaryNodeId":"node-xyz"}}"#).unwrap();
+        let store = ConfigStore::load(&path, Settings::default(), sealer()).unwrap();
+        assert_eq!(store.get().cluster.primary_node_id, "node-xyz");
+        assert_eq!(store.get().cluster.primary_set_at_ms, 0);
     }
 
     #[test]

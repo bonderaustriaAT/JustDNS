@@ -737,6 +737,12 @@
   flex: 1 1 12rem;
 }
 
+.encEndpointHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
 .copyButton {
   flex: 0 0 auto;
   padding: var(--space-1) var(--space-2);

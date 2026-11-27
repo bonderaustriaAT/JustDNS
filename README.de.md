@@ -50,6 +50,11 @@ fremde Konten, ohne Cloud, und ohne dass Daten deine Maschine verlassen.
   eingebauten Kategorien an oder aus, ergänze jederzeit eigene Allow-/Block-
   Einträge oder Listen-Abos und gib jedem **Gerät oder jeder Gruppe** eigene
   Regeln obendrauf.
+- **Blockt schlechte Antworten, nicht nur schlechte Namen.** Eine Response-IP-Liste
+  verwirft jede Antwort, die auf eine bekannte Schad-Adresse zeigt (IPv4 und CIDR),
+  sodass ein Name mit bösartiger Adresse auch dann gestoppt wird, wenn er selbst auf
+  keiner Liste steht. Mit der **JustDNS Threat-IPs**-Liste aus unserem eigenen
+  Honeypot-Netz, und eigene IP-Listen lassen sich per URL einbinden.
 - **Läuft als Cluster statt als Single Point of Failure.** Vernetze **bis zu vier
   gleichberechtigte Knoten** im Mesh, die synchron bleiben — was du auf einem
   Knoten änderst, fließt zu allen anderen. Nimm einen zum Neustarten oder Updaten
@@ -113,6 +118,7 @@ Unterschiede — ehrlich, Gleichstand inklusive:
 | Rollendes Update ohne DNS-Ausfall | ✅ | — | — |
 | Verschlüsselter Upstream per Vorgabe | ✅ DoT von Haus aus | ⚠️ Zusatz (cloudflared/unbound) | ✅ unterstützt |
 | DNSSEC-Validierung | ✅ | ✅ | ✅ |
+| Response-IP-Blocklisten (Antwort-IPs, IPv4 + CIDR) | ✅ | — | — |
 | Richtlinien pro Gerät & Gruppe | ✅ | ⚠️ Client-Gruppen | ✅ Clients |
 | Benutzer, Rollen & TOTP-2FA | ✅ | — ein Passwort | — ein Login |
 | Geheimnisse verschlüsselt gespeichert | ✅ | — | — |
@@ -165,6 +171,32 @@ der *System*-Seite des Dashboards — siehe [JustDNS aktualisieren](docs/guides/
 > ```bash
 > docker run -d --name justdns -p 53:53/udp -p 53:53/tcp -p 8080:8080/tcp -v justdns-data:/data ghcr.io/bonderaustriaat/justdns:latest
 > ```
+
+### Docker Hub
+
+Das Resolver-Image wird zusätzlich auf Docker Hub veröffentlicht, unter
+[`bonderosa/justdns`](https://hub.docker.com/r/bonderosa/justdns). Es wird aus
+demselben Build gespiegelt (identischer Digest), du kannst also aus der Registry
+ziehen, die dir lieber ist. Einzelner Container:
+
+```bash
+docker run -d --name justdns -p 53:53/udp -p 53:53/tcp -p 8080:8080/tcp -v justdns-data:/data docker.io/bonderosa/justdns:latest
+```
+
+Für das Zwei-Container-Bundle über Docker Hub zeigst du das App-Image in deiner
+`.env` dorthin:
+
+```bash
+JUSTDNS_IMAGE=docker.io/bonderosa/justdns
+```
+
+Das Updater-Sidecar bleibt in der GitHub Container Registry, und die One-Click-Updates
+funktionieren weiter: Der Updater liest die GitHub-Release-Tags und zieht das passende
+App-Image aus der Registry, die `JUSTDNS_IMAGE` nennt.
+
+ghcr.io bleibt die primäre Registry und der Standard. Docker Hub begrenzt die Pull-Rate
+für anonyme Nutzer (aktuell 100 Pulls pro 6 Stunden pro IP-Adresse); das reicht für eine
+normale Installation locker, und mit einem kostenlosen Docker-Login steigt sie auf 200.
 
 ## Konfiguration
 

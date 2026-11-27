@@ -4,6 +4,194 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.49.0] - 2026-11-27
+
+- Neu: **15 weitere fertige Listen im Katalog.** Werbung: OISD Small, OISD Big,
+  StevenBlack Unified, Hagezi Pop-Up Ads. Tracking: Hagezi Windows/Office-, Samsung-,
+  LG webOS-, Amazon-, Xiaomi- und TikTok-Telemetrie, Frogeye First-Party-Tracker
+  (CNAME-getarnt). Malware: URLhaus Malware-Domains, Phishing Filter, Phishing Army,
+  Hagezi Fake. Jede mit Fehlalarm-Einstufung, keine standardmaessig aktiv.
+
+## [0.48.4] - 2026-11-27
+
+- Behoben: **Eine Liste aktivieren sagt dir jetzt, wie es ausging.** Ein Feed einzuschalten
+  liess seine Zeile frueher ewig auf "wird geladen …" stehen — der Download laeuft im
+  Hintergrund, und die Seite erfuhr nie davon. Die Zeile loest jetzt von selbst auf: gruen mit
+  ihrer Domain-Anzahl, wenn der Feed da ist, rot, wenn seine Quelle versagt hat. Die NRD-Feeds
+  der Phishing-Seite bekommen dieselbe Statuszeile unter ihrem Schalter.
+- Behoben: **Deep-Links in Admin-Bereiche erklaeren sich.** Wer ohne Admin-Rechte einem
+  Lesezeichen oder geteilten Link in einen Admin-Bereich folgte, landete stumm auf der
+  Uebersicht — das sah aus wie ein kaputter Link. Jetzt gibt es eine kurze "Kein Zugriff"-Seite
+  mit der eigenen Rolle und dem Weg zurueck — und auf einer Read-Only-Cluster-Node den Hinweis,
+  wo der Cluster verwaltet wird.
+- Behoben: **Dialoge halten die Tastatur bei sich.** Die Bestaetigungsdialoge fuer destruktive
+  Aktionen (Loeschen, Updaten, Cluster-Rollout) fangen Tab jetzt genau so ein wie die grossen
+  Modaldialoge es immer taten und geben den Fokus beim Schliessen an den Ausloeser zurueck —
+  kein Tabben mehr in die Seite hinter dem Overlay.
+- Geaendert: **Die Uebersetzungskataloge werden von der CI bewacht.** Ein neuer Check haelt
+  beide Sprachen im Takt — gleiche Keys, uebereinstimmende Platzhalter, kein Aufruf eines
+  unbekannten Keys — und eine erste Raeumaktion entfernte 37 tote Eintraege, die sich ueber die
+  Zeit angesammelt hatten.
+
+## [0.48.3] - 2026-11-27
+
+- Behoben: **Mehrere Listen gleichzeitig aktivieren bringt die Box nicht mehr
+  um.** Eine fertige Liste einzuschalten hieß frueher: jeden aktiven Feed von der
+  Platte neu lesen und seine komplette Domain-Menge kopieren — einmal fuer den
+  Blocker, nochmal fuer die Geraete-Policies, tief kopiert fuer jede Gruppe und
+  jedes Geraet — waehrend die alten Mengen noch im Speicher lagen und die neuen
+  Feeds parallel herunterluden. Auf einer kleinen Box konnte das Stapel nach
+  Gigabyte greifen, und der Container starb an seinem Speicher-Limit: JustDNS war
+  weg, bis du neu gestartet hast. Ein Feed wird jetzt einmal geparst und geteilt:
+  Blocker, Policy-Engine und jede Geraete-Policy referenzieren dieselbe Menge,
+  statt Kopien davon zu halten. Feeds werden Zeile fuer Zeile gelesen, sodass der
+  volle Text einer Liste nie neben seiner Menge im Speicher liegt. Downloads
+  laufen nacheinander statt nebeneinander, und Policy-Neuaufbauten werden
+  serialisiert. Drei Listen hintereinander schalten ist jetzt ein paar
+  Referenz-Vertauschungen, nicht drei komplette Neu-Materialisierungen.
+
+## [0.48.2] - 2026-11-27
+
+- Geaendert: **Update jetzt auch vom Handy aus startbar.** Das Ein-Klick-Update begann
+  bisher immer mit einem Browser-Download der Wiederherstellungsdatei — auf dem Handy
+  laeuft der in der Web-App ins Leere und machte den ganzen Vorgang unbrauchbar. Der
+  Download ist jetzt ein deutlich freiwilliger Schritt im Dialog, und **Update starten**
+  laeuft ohne ihn. An der Sicherheit aendert das nichts: der Server schreibt vor jedem
+  Update seine eigene verschluesselte Sicherung auf die Platte — ganz gleich, ob du
+  zusaetzlich eine Kopie herunterlaedst. Das rollierende Cluster-Update bekommt dieselbe
+  Behandlung: seine Dialoge bieten den optionalen Download jetzt als Knopf an, das
+  Update wartet nie dahinter.
+
+## [0.48.1] - 2026-11-26
+
+- Behoben: **Haertung aus einem zweiten kompletten Security-Review.** Mehrere
+  Schutzkorrekturen. Der gemeinsame Sync-Schluessel eines Hochverfuegbarkeits-Clusters
+  liegt jetzt **im Ruhezustand verschluesselt** wie die anderen Geheimnisse; eine kopierte
+  oder gestohlene Daten-Partition gibt den Schluessel, der allein den Cluster oeffnet,
+  also nicht mehr her. Passwort-Pruefungen laufen vom Async-Thread auf den
+  Hintergrund-Pool, und wiederholt fehlgeschlagene Anmeldungen werden zusaetzlich zum
+  Nutzernamen **je Quell-Adresse** begrenzt — weder eine Flut paralleler Logins noch
+  erfundene Nutzernamen in Serie koennen die Box ausbremsen oder zuspammen. Die
+  Ersteinrichtung — das Anlegen des allerersten Admins — ist nur aus dem lokalen Netzwerk
+  erreichbar. Ein Passwort-Reset, das Loeschen fremden MFAs oder das Entfernen eines Kontos
+  meldet jetzt die uebrigen Sitzungen dieses Kontos ab, ein Reset als Reaktion auf eine
+  kompromittierte Anmeldung greift also sofort. Die Anfrage-Warteschlange der Blockseite
+  behaelt eine begrenzte Zahl Eintraege, der CSV-Report-Export neutralisiert Namen, die eine
+  Tabellenkalkulation als Formel lesen wuerde, geplante SMB-Backups tragen das
+  Share-Passwort nicht mehr auf der Kommandozeile, wo eine Prozessliste es sehen koennte,
+  und jede gespeicherte Datei wird vor dem atomaren Ersetzen auf die Platte gespuelt — ein
+  Crash hinterlaesst den alten oder den neuen Zustand, nie eine halb geschriebene Datei.
+  Zwei Abhaengigkeits-Advisories (`cookie`, `url`) sind mit den Upstream-Updates behoben.
+- Neu: **Ein `Secure`-Schalter fuer das Sitzungs-Cookie.** Liegt HTTPS vor deinem
+  Dashboard (eigenes Zertifikat oder Reverse Proxy), setze `JUSTDNS_COOKIE_SECURE=1`, und
+  das Login-Cookie wird nur noch ueber die verschluesselte Verbindung gesendet.
+  Standardmaessig aus: ueber einfaches HTTP — der uebliche Weg zu einem Dashboard im
+  Heimnetz — wuerde der Browser ein Secure-Cookie stillschweigend verwerfen.
+- Neu: **Die Blockseite spricht Englisch, wenn der Browser es tut.** Ihre festen Texte —
+  der Freigabe-Knopf, das Begruendungsfeld, die Bestaetigungen — folgen der
+  Browsersprache des Besuchers, standardmaessig Deutsch. Deine eigene Ueberschrift und
+  dein Text erscheinen immer wie geschrieben.
+
+## [0.48.0] - 2026-11-25
+
+- Neu: **Sehen, warum eine Anfrage geblockt wurde (Entscheidungs-Trace).** Jeder Eintrag im
+  Anfrage-Protokoll haelt jetzt fest, welchen Weg der Resolver durch seine Entscheidungsstufen
+  genommen hat. Oeffne einen Eintrag, und die Detailansicht zeigt die Stufen in Reihenfolge
+  (Blockliste, Phishing, Quelle, CNAME-Enttarnung, Antwort-IP, DNSSEC, Antwort): die entscheidende
+  Stufe ist hervorgehoben, die nur bestandenen Stufen klappen hinter einem Schalter weg, und ein
+  Banner zeigt an, wenn die Schutz-Pause aktiv war. Ein farbiges Grund-Tag in der Zeile markiert die
+  Ursache auf einen Blick (Blockliste, Threat-IP, Phishing oder eine Warnung). Die entscheidende Stufe
+  verlinkt direkt auf die Seite, die sie verwaltet, sodass ein Fehlalarm nur einen Klick von der
+  Korrektur entfernt ist. Der vollstaendige Trace liegt nur im dauerhaften Protokoll auf der Platte
+  und wird bei Bedarf gelesen, kostet also keinen zusaetzlichen Arbeitsspeicher auf dem Anfrage-Pfad.
+
+## [0.47.2] - 2026-11-24
+
+- Geaendert: **Warnungen gehen sofort raus, sobald eine Bedrohung greift.** Der Benachrichtigungs-Webhook
+  fuer einen Phishing- oder NRD-Block wartete bisher auf eine periodische Pruefung und konnte bis zu
+  einer Minute brauchen. Ein Block weckt den Melder jetzt sofort, der Webhook kommt in Sekunden. Die
+  periodische Pruefung bleibt als Fallback fuer die Bedingungen, die nicht an einen einzelnen Block
+  haengen.
+- Behoben: **Haertung aus einem kompletten Security-Review.** Mehrere Schutzkorrekturen: Listen-Feeds
+  und Benachrichtigungs-Webhooks lassen sich nicht mehr auf interne Metadata- oder Link-Local-Adressen
+  richten und folgen keinen Redirects mehr (SSRF-Schutz); ein Response-IP-Block erfasst jetzt auch eine
+  AAAA-Antwort, deren Geschwister-A-Record auf der Blockliste steht; ein Read-Only-Follower nimmt keine
+  Account-Aenderungen mehr an, die der autoritative Sync der Hauptnode sonst still zurueckgesetzt
+  haette; und ein TOTP-Einmalcode laesst sich innerhalb seines Zeitschritts nicht mehr erneut einloesen.
+
+## [0.47.1] - 2026-11-22
+
+- Behoben: **Schutz pausieren gilt jetzt fuer den ganzen Cluster.** Wenn du den Schutz voruebergehend
+  abschaltest (die Fehlersuche-Pause), pausierte bisher nur der eine Knoten, auf dem du warst. Ein
+  Geraet, das mehrere Cluster-Knoten als DNS nutzt, traf darum nach kurzer Zeit einen Knoten, der nie
+  pausiert hat, und der Schutz kam vor Ablauf des Timers zurueck. Der Pause-Ablaufzeitpunkt wird jetzt
+  auf alle Knoten gespiegelt, sodass der Schutz ueberall aus bleibt, bis er ablaeuft. Weiterhin
+  laufzeit-only: ein vollstaendiger Neustart loescht ihn. Das Pausieren leert jetzt auch den DNS-Cache,
+  sodass ein Name, der aus einem veralteten oder leeren Cache-Eintrag beantwortet wurde, sofort frisch
+  aufgeloest wird, statt bis zum Ablauf dieses Eintrags unerreichbar zu bleiben.
+- Behoben: **Grosse Dienste haengen nicht mehr, wenn eine Response-IP-Liste aktiv ist.** YouTube und
+  andere grosse Seiten wechseln staendig zwischen vielen CDN-Adressen, und eine Response-IP-Liste, die
+  zufaellig eine davon markiert, verwarf diese Antwort und brachte den Dienst zum Haengen. Eine
+  eingebaute Allowlist nimmt jetzt die veroeffentlichten IPv4-Bereiche der grossen Netze
+  (Google/YouTube, Cloudflare, Fastly) immer vom Response-IP-Block aus. Sie ist dauerhaft aktiv,
+  braucht keine Einrichtung, wird in der Listen-UI nicht angezeigt und greift nur, solange eine
+  Response-IP-Liste aktiv ist. Eine direkte Schad-IP liegt nicht in diesem Raum und bleibt geblockt,
+  und ein boesartiger Name hinter so einem CDN wird weiter vom normalen Namens-Block erfasst.
+- Geaendert: **DNS-Chaff reicht hoeher und variiert staerker.** Der Intensitaets-Regler geht jetzt bis
+  600 Schein-Abfragen pro Minute (vorher 120), und der Decoy-Pool ist auf rund 150 vielfaeltige
+  Hostnamen gewachsen, damit der Cover-Traffic besser aufgeht.
+
+## [0.47.0] - 2026-11-22
+
+- Neu: **Antworten blockieren, die auf eine bekannte Schad-IP zeigen.** Eine neue Listenart enthaelt
+  IPv4-Adressen und CIDR-Bereiche statt Domainnamen und wird gegen die Adressen geprueft, die ein
+  Resolver zurueckgibt: Zeigt eine Antwort auf eine gelistete Adresse, wird die ganze Antwort mit der
+  ueblichen Block-Antwort verworfen, sodass ein Name mit boesartiger Adresse auch dann gestoppt wird,
+  wenn der Name selbst auf keiner Liste steht. Die fertige Liste "JustDNS Threat-IPs" (C2-, Dropper-
+  und Malware-Adressen aus unserem Honeypot-Netz) ist im Katalog mit einem Klick dabei, und eigene
+  IP-Listen lassen sich wie jeder andere Feed per URL einbinden. Vorerst nur IPv4.
+
+## [0.46.3] - 2026-11-21
+
+- Geaendert: **DACH-Blockliste in ihr neues Repository umgezogen.** Die JustDNS-DACH-Ergaenzung wird
+  jetzt aus `justdns-blocklist` geladen (vorher `justdns-dach-blocklist`). Der Listeninhalt bleibt
+  gleich, gespeicherte Abos funktionieren weiter, da sie den Preset-Key statt der URL speichern.
+
+## [0.46.2] - 2026-11-21
+
+- Behoben: **Einstellungen schalten sich im Cluster nicht mehr von selbst ab.** Schutzfunktionen wie
+  der NRD-Block (newly registered domains), die Lookalike- und Homoglyph-Pruefung von URLs und das
+  Privacy-Modul konnten von allein ausgehen, und die gewaehlte Primary (Hauptnode) konnte sich selbst
+  loeschen. Im Cluster wird die Konfiguration nur auf der Primary bearbeitet, der Sync hat sie aber
+  weiter in beide Richtungen per letztem Schreibzugriff zusammengefuehrt, sodass eine noch nicht
+  konvergierte Node eine Einstellung clusterweit ueberschreiben konnte, nur weil sie etwas anderes
+  speicherte. Die Primary ist jetzt autoritativ: jede andere Node spiegelt die Konfiguration der
+  Primary und schiebt nie ihre eigene darueber. Ohne gesetzte Primary synct ein Cluster weiter in
+  beide Richtungen wie bisher, das Festlegen einer Primary laesst eine Einstellung also halten.
+
+## [0.46.1] - 2026-11-21
+
+- Behoben: **Die festgelegte Primary (Hauptnode) setzt sich nicht mehr selbst zurück.** Im Cluster ist
+  die gewählte Primary die einzige Node, die Konfiguration ändern darf; jede andere Node ist ein
+  Read-only-Follower. Ein Sync-Race konnte diese Festlegung löschen: eine Node, die die Primary noch
+  nicht kannte, stempelte bei jedem beliebigen Settings-Speichern ihre eigene leere Festlegung mit
+  neuerer Zeit und gewann den Merge, sodass das ganze Cluster wieder ohne Primary dastand und jede
+  Node wieder schreibbar wurde. Die Festlegung wird jetzt danach gereiht, wann sie explizit gesetzt
+  wurde, nicht nach dem letzten Settings-Schreiben, sodass eine leere eine gewählte Primary nicht mehr
+  überschreibt. Ein bewusstes Löschen der Primary greift weiterhin im ganzen Cluster.
+
+## [0.46.0] - 2026-11-21
+
+- Neu: **iOS-Profil für verschlüsseltes DNS.** Unter Einstellungen, Verschlüsselung gibt es jetzt
+  einen Download für ein Konfigurationsprofil (`.mobileconfig`), das iOS und iPadOS auf den
+  DNS-over-TLS-Endpunkt dieser Node zeigt. iOS hat keinen „Privates DNS"-Schalter wie Android; das
+  Profil wird über Einstellungen, Allgemein, VPN & Geräteverwaltung installiert. Mit einem öffentlich
+  vertrauten Zertifikat ist keine CA-Installation nötig.
+- Behoben: **Die DoT/DoH-Schalter und das Umstellen des Zertifikats greifen jetzt sofort.** Vorher
+  stieß jedes Speichern in diesem Bereich den vollen Richtlinien-Neuaufbau an (Millionen Domains aus
+  den Feeds neu materialisiert), obwohl nur ein TLS-Listener an- oder ausgeht. Der Neuaufbau läuft
+  jetzt nur noch, wenn sich wirklich ein Feld der DNS-Engine ändert.
+
 ## [0.45.0] - 2026-11-20
 
 - Neu: **Privatsphäre-Modul.** Ein optionales Modul, das inaktiv bleibt, bis du es einschaltest,

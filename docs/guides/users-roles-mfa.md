@@ -96,9 +96,12 @@ Each row lets you:
 - **Change the role** from the dropdown.
 - Toggle the switch in the **Required** column to demand MFA for that person (hidden
   behind **Enforced** while the global requirement above is on).
-- **Reset password** — set a new one (e.g. after someone is locked out).
+- **Reset password** — set a new one (e.g. after someone is locked out). Every
+  session of that account is signed out at once, so a reset in response to a
+  compromised login actually takes effect.
 - **Reset two-factor** — clear their MFA after a lost phone. If MFA is still
-  required for them, they enrol again at the next sign-in.
+  required for them, they enrol again at the next sign-in. Their sessions are
+  signed out too, since the second factor no longer stands guard.
 - **Delete** the account. You cannot delete your own, and the last administrator
   is protected.
 
@@ -116,8 +119,14 @@ Use it to answer "who changed this, and when".
 
 - Sessions are not stored on disk, so **restarting JustDNS signs everyone out** —
   they log straight back in. MFA and accounts themselves do persist.
+- Changing your own password (or turning your own MFA off) keeps the session you
+  made the change from and **signs out every other device** of that account.
 - Repeated wrong passwords or codes are **rate-limited** for a few minutes, to slow
-  down guessing.
+  down guessing — per username and per source address alike, so rotating made-up
+  usernames does not slip past it.
+- First-run setup — creating the very first admin on a fresh box — is only
+  reachable from the local network, so a fresh instance exposed to the internet
+  cannot be claimed by whoever finds it first.
 - Accounts and MFA are **not** part of a configuration backup, by design — a backup
   you share should not carry password hashes. Restoring a backup never touches the
   account list.

@@ -56,8 +56,9 @@ trait BackupTransport {
 }
 
 /// SMB/CIFS transport: shells out to `smbclient`, so nothing is mounted and no
-/// elevated privilege is needed. The password is passed via `-U user%pass` as a
-/// single process argument (never through a shell), and scrubbed from any error.
+/// elevated privilege is needed. The credentials ride in a short-lived
+/// owner-only file passed with `-A` (never on the command line, where a
+/// process listing would show them), and any error is scrubbed of the secret.
 struct SmbTransport {
     host: String,
     share: String,
@@ -77,15 +78,17 @@ impl SmbTransport {
         )
     }
 
-    /// The common smbclient arguments: the service, authentication (or `-N` for a
-    /// guest share), an optional workgroup, and the starting directory.
-    fn base_args(&self) -> Vec<String> {
+    /// The common smbclient arguments: the service, authentication (an `-A`
+    /// credentials file, or `-N` for a guest share), an optional workgroup,
+    /// and the starting directory.
+    fn base_args(&self, auth_file: Option<&Path>) -> Vec<String> {
         let mut args = vec![self.service()];
-        if self.username.is_empty() {
-            args.push("-N".to_owned());
-        } else {
-            args.push("-U".to_owned());
-            args.push(format!("{}%{}", self.username, self.password));
+        match auth_file {
+            Some(file) => {
+                args.push("-A".to_owned());
+                args.push(file.to_string_lossy().into_owned());
+            }
+            None => args.push("-N".to_owned()),
         }
         if !self.domain.is_empty() {
             args.push("-W".to_owned());
@@ -99,20 +102,54 @@ impl SmbTransport {
         args
     }
 
+    /// Write the share credentials to a fresh file for one smbclient run, or
+    /// `None` for a guest share (which signs in anonymously and carries no
+    /// secret). Owner-only permissions where the platform has them; the file
+    /// is deleted by the caller once the run ends.
+    fn write_auth_file(&self) -> Result<Option<PathBuf>, String> {
+        if self.username.is_empty() {
+            return Ok(None);
+        }
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "justdns-smb-auth-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut body = format!("username = {}\npassword = {}", self.username, self.password);
+        if !self.domain.is_empty() {
+            body.push_str(&format!("\ndomain = {}", self.domain));
+        }
+        std::fs::write(&path, body.as_bytes()).map_err(|error| {
+            scrub(&format!("Anmeldedatei nicht schreibbar: {error}"), &self.password)
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
+        Ok(Some(path))
+    }
+
     /// Run one smbclient `-c` command and return its stdout, or a scrubbed error.
     fn run(&self, command: &str) -> Result<String, String> {
-        let mut args = self.base_args();
+        let auth_file = self.write_auth_file()?;
+        let mut args = self.base_args(auth_file.as_deref());
         args.push("-c".to_owned());
         args.push(command.to_owned());
-        let output = Command::new("smbclient")
-            .args(&args)
-            .output()
-            .map_err(|error| {
-                scrub(
-                    &format!("smbclient konnte nicht gestartet werden: {error}"),
-                    &self.password,
-                )
-            })?;
+        let spawned = Command::new("smbclient").args(&args).output();
+        if let Some(file) = &auth_file {
+            let _ = std::fs::remove_file(file);
+        }
+        let output = spawned.map_err(|error| {
+            scrub(
+                &format!("smbclient konnte nicht gestartet werden: {error}"),
+                &self.password,
+            )
+        })?;
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
         }
@@ -543,5 +580,34 @@ mod tests {
             "login as *** failed"
         );
         assert_eq!(scrub("no secret here", ""), "no secret here");
+    }
+
+    #[test]
+    fn smb_args_carry_credentials_via_file_not_the_command_line() {
+        let smb = SmbTransport {
+            host: "nas".to_owned(),
+            share: "backups".to_owned(),
+            path: "justdns".to_owned(),
+            username: "user".to_owned(),
+            password: "hunter2".to_owned(),
+            domain: "WORKGROUP".to_owned(),
+        };
+        let args = smb.base_args(Some(Path::new("/tmp/creds")));
+        let joined = args.join(" ");
+        assert!(
+            joined.contains("-A /tmp/creds"),
+            "authentication rides in the file"
+        );
+        assert!(
+            !joined.contains("user%hunter2"),
+            "the password never appears as a process argument"
+        );
+
+        // A guest share signs in anonymously; no credentials file involved.
+        let guest = SmbTransport {
+            username: String::new(),
+            ..smb
+        };
+        assert!(guest.base_args(None).contains(&"-N".to_owned()));
     }
 }

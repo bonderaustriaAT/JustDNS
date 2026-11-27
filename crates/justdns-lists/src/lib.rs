@@ -12,9 +12,11 @@
 //!
 //! [`Blocker`]: justdns_filter::Blocker
 
+mod net_guard;
 mod presets;
 mod store;
 
+pub use net_guard::host_is_disallowed;
 pub use presets::{Preset, preset, presets};
 pub use store::{
     BlockFeedEntry, ListEntry, ListError, ListObject, ListStore, ListsView, PresetView,
@@ -39,4 +41,11 @@ pub enum ListKind {
     ///
     /// [`PhishingDetector`]: justdns_filter::PhishingDetector
     Warn,
+    /// IPv4 addresses and CIDR ranges to block in resolver answers. Entries are
+    /// response IPs, not names: when an answer resolves to one of them the whole
+    /// answer is refused. Routed to the [`IpSet`], never to the domain blocker.
+    ///
+    /// [`IpSet`]: justdns_filter::IpSet
+    #[serde(rename = "blockip")]
+    BlockIp,
 }

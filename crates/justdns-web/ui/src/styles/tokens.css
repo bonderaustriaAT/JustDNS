@@ -23,6 +23,9 @@
   /* A calm blue, set apart from the green "signal" family, to mark a local
      rewrite in the log. */
   --rewrite: #2f6fb0;
+  /* A muted violet for the phishing reason category, distinct from the red
+     block and blue threat-ip tags. */
+  --violet: #7a5bc2;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "Hanken Grotesk", system-ui, sans-serif;
@@ -64,6 +67,7 @@
     --danger: #e0695f;
     --warn: #e6a532;
     --rewrite: #6bb0ea;
+    --violet: #a890e6;
   }
 }
 
@@ -82,4 +86,5 @@
   --danger: #e0695f;
   --warn: #e6a532;
   --rewrite: #6bb0ea;
+  --violet: #a890e6;
 }

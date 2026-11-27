@@ -52,6 +52,13 @@ Everything you set in the dashboard:
   is the **log retention** you set under *Settings → Query log* (seven days by
   default): that window now both prunes the local log and bounds what is synced.
 
+- **Protection pause** — when you temporarily turn protection off (the
+  troubleshooting pause on the dashboard), it applies to the **whole cluster** until
+  the same expiry, not just the node you armed it on. Otherwise a device that uses
+  more than one node as its DNS would, after a short while, hit a node that never
+  paused and see blocking resume. It stays runtime-only: a full cluster restart
+  clears it.
+
 What is **not** synced, on purpose: anything node-local — the node id, this node's
 own address and display name, its DoT/DoH **hostname** and certificate selections,
 the **block-page server IP** (each node points blocked names at itself), the mesh
@@ -68,7 +75,9 @@ Then, on **every** node:
 2. **Turn high availability on** (step 1 of the wizard).
 3. **Set the shared key** (step 2) — a long, random secret. It must be
    **exactly the same on every node**; it is how they prove themselves to each
-   other. You can also pin it with an environment variable (below).
+   other. You can also pin it with an environment variable (below). Whichever way
+   you set it, a node keeps it **encrypted at rest** together with its other
+   secrets (see [encryption at rest](secrets-at-rest.md)).
 4. **Set this node's own address** (step 3) — the web address the other nodes
    reach it at (e.g. `http://192.168.20.5:8080`). It is prefilled from the address
    you opened the page at. This is advertised across the cluster so newly joining

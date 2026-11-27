@@ -19,7 +19,9 @@ themselves; they are only asking.
 The button is shown whenever the block page knows which site was blocked (hosted and
 reverse-proxy modes, where the blocked hostname is carried on the request). It does
 nothing for a name that is not actually blocked, so it cannot be used to plant
-arbitrary entries.
+arbitrary entries. The queue keeps the newest **500** requests; past that, the oldest
+entries are dropped in favour of fresh ones, so a scripted flood cannot grow it
+without end.
 
 ## What a request records
 

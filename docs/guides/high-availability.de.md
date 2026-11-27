@@ -59,6 +59,13 @@ Alles, was du im Dashboard einstellst:
   Tage): dieses Fenster beschneidet jetzt das lokale Log **und** begrenzt, was
   synchronisiert wird.
 
+- **Schutz-Pause** — deaktivierst du den Schutz vorübergehend (die Fehlersuche-Pause
+  auf dem Dashboard), gilt das für den **ganzen Cluster** bis zum selben
+  Ablaufzeitpunkt, nicht nur für den Knoten, an dem du sie gesetzt hast. Sonst würde
+  ein Gerät, das mehrere Knoten als DNS nutzt, nach kurzer Zeit wieder auf einen noch
+  blockenden Knoten treffen. Sie bleibt laufzeit-only: ein vollständiger Neustart des
+  Clusters löscht sie.
+
 Bewusst **nicht** synchronisiert wird alles Knotenlokale — die Knoten-ID, die eigene
 Adresse und der Anzeigename dieses Knotens, sein DoT/DoH-**Hostname** samt
 Zertifikatsauswahl, die **Block-Seiten-Server-IP** (jeder Knoten zeigt geblockte
@@ -75,7 +82,10 @@ Dann auf **jedem** Knoten:
 2. **Schalte die Hochverfügbarkeit ein** (Schritt 1 des Assistenten).
 3. **Setze den gemeinsamen Schlüssel** (Schritt 2) — ein langes, zufälliges Geheimnis.
    Er muss auf **jedem Knoten exakt gleich** sein; damit weisen sie sich gegenseitig
-   aus. Alternativ pinnst du ihn über eine Umgebungsvariable (siehe unten).
+   aus. Alternativ pinnst du ihn über eine Umgebungsvariable (siehe unten). Wie auch
+   immer du ihn setzt: Ein Knoten bewahrt ihn **im Ruhezustand verschlüsselt** auf,
+   zusammen mit seinen übrigen Geheimnissen (siehe
+   [Verschlüsselung im Ruhezustand](secrets-at-rest.de.md)).
 4. **Setze die eigene Adresse dieses Knotens** (Schritt 3) — die Web-Adresse, unter der
    die anderen Knoten ihn erreichen (z. B. `http://192.168.20.5:8080`). Sie ist aus der
    Adresse vorausgefüllt, über die du die Seite aufgerufen hast. Sie wird im Cluster

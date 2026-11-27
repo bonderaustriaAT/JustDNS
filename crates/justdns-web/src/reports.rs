@@ -655,10 +655,19 @@ pub fn to_csv(report: &Report, lang: RenderLang) -> String {
     let s = &report.summary;
     let mut out = String::new();
     let csv = |field: &str| -> String {
+        // A name from the query log is whatever a client looked up, so a cell
+        // can begin with a character a spreadsheet reads as the start of a
+        // formula (=, +, -, @). Prefix those with an apostrophe, which Excel
+        // and LibreOffice display as plain text instead of evaluating.
+        let field = if field.starts_with(['=', '+', '-', '@']) {
+            format!("'{field}")
+        } else {
+            field.to_owned()
+        };
         if field.contains([',', '"', '\n']) {
             format!("\"{}\"", field.replace('"', "\"\""))
         } else {
-            field.to_owned()
+            field
         }
     };
 
@@ -749,6 +758,47 @@ mod tests {
     fn daily_off_is_never_due() {
         let settings = ReportSettings::default();
         assert!(due_daily(&settings, tz(), at(2026, 11, 10, 8), None).is_none());
+    }
+
+    #[test]
+    fn csv_neutralises_formula_prefixes() {
+        // A name from the query log can begin with a character a spreadsheet
+        // would read as a formula. The export keeps it inert data.
+        let report = |name: &str| Report {
+            id: "daily-1".to_owned(),
+            period: ReportPeriod::Daily,
+            from_ms: 0,
+            to_ms: 1,
+            generated_at_ms: 2,
+            summary: ReportSummary {
+                total: 1,
+                blocked: 0,
+                cache: 0,
+                upstream: 1,
+                local: 0,
+                rewrite: 0,
+                avg_duration_ms: 0,
+                dnssec_secure: 0,
+                dnssec_insecure: 0,
+                dnssec_bogus: 0,
+                dnssec_indeterminate: 0,
+                top_domains: vec![TopName {
+                    name: name.to_owned(),
+                    count: 3,
+                }],
+                top_blocked: Vec::new(),
+                top_clients: Vec::new(),
+            },
+        };
+
+        let hostile = to_csv(&report("=cmd|' /C calc'!A0"), RenderLang::De);
+        assert!(
+            hostile.contains("'=cmd|' /C calc'!A0,3"),
+            "the formula prefix is apostrophe-escaped, got: {hostile}"
+        );
+        // Ordinary names pass through untouched.
+        let plain = to_csv(&report("ads.example.com"), RenderLang::De);
+        assert!(plain.contains("ads.example.com,3"));
     }
 
     #[test]

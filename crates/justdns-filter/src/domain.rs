@@ -35,9 +35,16 @@ impl DomainSet {
     /// Add every rule in `text` to this set, keeping what is already there.
     pub fn add_rules(&mut self, text: &str) {
         for line in text.lines() {
-            if let Some(domain) = parse_rule(line) {
-                self.domains.insert(domain);
-            }
+            self.add_rule(line);
+        }
+    }
+
+    /// Add one rule line to this set. Public so a huge feed can be parsed
+    /// line-by-line from disk: the file's full text never has to sit in memory
+    /// next to the set it fills.
+    pub fn add_rule(&mut self, line: &str) {
+        if let Some(domain) = parse_rule(line) {
+            self.domains.insert(domain);
         }
     }
 

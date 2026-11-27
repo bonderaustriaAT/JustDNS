@@ -243,6 +243,9 @@ fn synthesize(rng: &mut Rng) -> QueryEvent {
         resolver,
         dnssec,
         phishing,
+        block_reason: None,
+        reason: None,
+        trace: None,
     }
 }
 

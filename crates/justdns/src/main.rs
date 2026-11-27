@@ -30,7 +30,7 @@ use justdns_dns::server::Server;
 use justdns_dns::tls::TlsManager;
 use justdns_dns::upstream::{Upstream, UpstreamConfig};
 use justdns_filter::{
-    Blocker, DomainSet, PhishingConfig, PhishingDetector, PhishingMode, PolicyEngine,
+    Blocker, DomainSet, IpBlocker, PhishingConfig, PhishingDetector, PhishingMode, PolicyEngine,
 };
 use justdns_lists::ListStore;
 use justdns_rewrite::{RewriteStore, Rewriter};
@@ -274,6 +274,11 @@ async fn main() -> ExitCode {
     // now into one resolved policy per device plus a global default, and
     // republishes whenever any of them change (each store runs the rebuild through
     // its on-change hook; the ticker reruns it when a window opens or closes).
+    //
+    // The rebuilds are serialised: parallel feed downloads finishing close
+    // together each fire the hook, and two full rebuilds racing each other is
+    // wasted CPU (the shared sets make it memory-safe, the lock makes it calm).
+    let rebuild_lock = Arc::new(std::sync::Mutex::new(()));
     let policy_engine = Arc::new(PolicyEngine::new());
     rebuild_policies(
         &policy_engine,
@@ -288,6 +293,15 @@ async fn main() -> ExitCode {
     // policy engine, so a dashboard edit takes effect on the next query.
     let phishing_detector = Arc::new(PhishingDetector::new());
     configure_phishing(&phishing_detector, &config_store.get(), &lists);
+    // The response-IP block set the pipeline checks each answer against: the union
+    // of the enabled IP feeds. A list-derived global object like the phishing
+    // detector, republished live when the IP feeds change.
+    let ip_blocker = Arc::new(IpBlocker::new());
+    publish_ip_block(&ip_blocker, &lists);
+    // The answer-IP allow set that overrides the block: the built-in CDN allowlist,
+    // always active and not user-editable. Republished alongside the block set.
+    let ip_allower = Arc::new(IpBlocker::new());
+    publish_ip_allow(&ip_allower, &lists);
     {
         let engine = policy_engine.clone();
         let lists_handle = lists.clone();
@@ -295,7 +309,11 @@ async fn main() -> ExitCode {
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
         let detector = phishing_detector.clone();
+        let ip_blocker_handle = ip_blocker.clone();
+        let ip_allower_handle = ip_allower.clone();
+        let lock = rebuild_lock.clone();
         lists.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -306,6 +324,10 @@ async fn main() -> ExitCode {
             // The warn feeds live in the lists store, so a list change can change
             // the detector's NRD set too.
             configure_phishing(&detector, &config_handle.get(), &lists_handle);
+            // The IP feeds live there too, so a list change can change the
+            // response-IP block set and the answer-IP allow set.
+            publish_ip_block(&ip_blocker_handle, &lists_handle);
+            publish_ip_allow(&ip_allower_handle, &lists_handle);
         });
     }
     {
@@ -314,7 +336,9 @@ async fn main() -> ExitCode {
         let clients_handle = clients.clone();
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
+        let lock = rebuild_lock.clone();
         clients.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -330,7 +354,9 @@ async fn main() -> ExitCode {
         let clients_handle = clients.clone();
         let schedules_handle = schedules.clone();
         let config_handle = config_store.clone();
+        let lock = rebuild_lock.clone();
         schedules.on_change(move || {
+            let _serialised = lock.lock().expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -387,6 +413,8 @@ async fn main() -> ExitCode {
             block_page: block_page_target.clone(),
             dnssec_validate: dnssec_validate.clone(),
             pause_until: config_store.blocking_pause_flag(),
+            ip_block: Some(ip_blocker.clone()),
+            ip_allow: Some(ip_allower.clone()),
         },
     )
     .with_observer(observer)
@@ -475,17 +503,35 @@ async fn main() -> ExitCode {
         let dnssec_validate = dnssec_validate.clone();
         let status = status.clone();
         let detector = phishing_detector.clone();
+        let rebuild_lock = rebuild_lock.clone();
         // Mirror of the settings the engine was last reconfigured from. Seeded with
         // the startup settings (the engine above is already built from them), so the
         // first real change decides whether a rebuild is needed.
         let last_settings = std::sync::Mutex::new(settings.clone());
         config_store.on_change(move |settings| {
+            // Cheap and idempotent, so applied on every save regardless of the
+            // rebuild gate below: the encrypted-DNS listeners, the block page and
+            // the DoT/DoH status flags are driven by their own supervisors, not the
+            // DNS policy engine. apply() is a no-op when the listener/cert/page
+            // state is already current, so keeping them out of the heavy-rebuild
+            // path lets a DoT/DoH toggle or a certificate switch take effect without
+            // re-materializing the enabled feeds (millions of domains) for nothing.
+            if let Some(supervisor) = &supervisor {
+                supervisor.apply(&settings.encrypted_dns);
+            }
+            if let Some(block_page) = &block_page {
+                block_page.apply(&settings.block_page);
+            }
+            status.set_dot(settings.encrypted_dns.dot_enabled);
+            status.set_doh(settings.encrypted_dns.doh_enabled);
+
             // The config store fires this on *every* save. The policy and phishing
             // rebuilds below re-materialize the enabled feeds (millions of domains)
-            // from disk, so running them for a save that touches only the backup
-            // target, its run-status, the alert webhook or the metrics token spikes
-            // memory for nothing — enough to OOM a memory-tight node. Skip the whole
-            // rebuild unless a field the live DNS engine actually reads changed.
+            // from disk, so running them for a save that touches only a non-engine
+            // field (backup target/status, webhook, metrics token, module toggle,
+            // encrypted-DNS or block-page settings) spikes memory for nothing —
+            // enough to OOM a memory-tight node. Skip the whole rebuild unless a
+            // field the live DNS engine actually reads changed.
             {
                 let mut last = last_settings.lock().expect("settings mirror lock poisoned");
                 let needs_rebuild = !only_non_engine_fields_changed(&last, settings);
@@ -497,6 +543,9 @@ async fn main() -> ExitCode {
             let upstreams = upstreams_for(settings, overridden, &pinned);
             router.store(Router::from_config(&upstreams, dnssec_validate.clone()));
             tuning.store(Arc::new(cache_tuning_for(settings.speed_profile)));
+            let _serialised = rebuild_lock
+                .lock()
+                .expect("rebuild lock poisoned");
             rebuild_policies(
                 &engine,
                 &lists_handle,
@@ -507,17 +556,6 @@ async fn main() -> ExitCode {
             // Rebuild the phishing detector from the new settings (brands, modes,
             // NRD on/off) over the current warn set.
             configure_phishing(&detector, settings, &lists_handle);
-            // Start/stop the encrypted-DNS listeners and apply the selected
-            // certificates to match the new settings.
-            if let Some(supervisor) = &supervisor {
-                supervisor.apply(&settings.encrypted_dns);
-            }
-            // Start/stop the block page, update its text and redirect target.
-            if let Some(block_page) = &block_page {
-                block_page.apply(&settings.block_page);
-            }
-            status.set_dot(settings.encrypted_dns.dot_enabled);
-            status.set_doh(settings.encrypted_dns.doh_enabled);
             info!(
                 profile = ?settings.speed_profile,
                 dnssec = dnssec_validate.load(Ordering::Relaxed),
@@ -536,6 +574,7 @@ async fn main() -> ExitCode {
         clients.clone(),
         schedules.clone(),
         config_store.clone(),
+        rebuild_lock.clone(),
     );
 
     // Plain UDP/TCP DNS and the web API run in the same process (the select!
@@ -596,7 +635,7 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone(), shared_router.clone()) => {
+        result = justdns_web::serve(config.web_listen, store.clone(), config_store.clone(), blocker.clone(), lists.clone(), rewrites.clone(), clients.clone(), schedules.clone(), access.clone(), cache.clone(), users.clone(), sessions.clone(), audit.clone(), config.reports_path.clone(), certs.clone(), cert_reload.clone(), config.dot_listen.port(), config.doh_listen.port(), log_buffer.clone(), status.clone(), log_level.clone(), metrics_token.clone(), geo.clone(), shared_router.clone(), sealer.clone()) => {
             if let Err(error) = result {
                 error!(%error, "web server stopped");
                 return ExitCode::FAILURE;
@@ -690,6 +729,12 @@ fn only_non_engine_fields_changed(prev: &Settings, next: &Settings) -> bool {
     // before this check), not the DNS policy engine, so a module toggle or a chaff
     // intensity change must not force the heavy rebuild either.
     probe.modules = next.modules.clone();
+    // The encrypted-DNS listeners and the block page are reconciled by their own
+    // supervisors (applied before this check), not by the DNS policy engine, so a
+    // DoT/DoH toggle, certificate switch, hostname or block-page edit must not force
+    // the heavy feed rebuild either.
+    probe.encrypted_dns = next.encrypted_dns.clone();
+    probe.block_page = next.block_page.clone();
     &probe == next
 }
 
@@ -715,8 +760,23 @@ fn configure_phishing(detector: &PhishingDetector, settings: &Settings, lists: &
     detector.configure(phishing_config(&settings.phishing, nrd));
 }
 
+/// (Re)build the response-IP block set from the enabled IP feeds and publish it,
+/// so a change to the IP lists takes effect on the next answer without a restart.
+/// The set is the union of the enabled IP feeds; it is global and checked against
+/// resolver answers, never against query names.
+fn publish_ip_block(ip_blocker: &IpBlocker, lists: &ListStore) {
+    ip_blocker.publish(lists.resolved().ip_block);
+}
+
+/// Publish the answer-IP allow set that overrides the response-IP block: the
+/// built-in CDN allowlist, always active and not user-editable. Global, like the
+/// block set.
+fn publish_ip_allow(ip_allower: &IpBlocker, lists: &ListStore) {
+    ip_allower.publish(lists.resolved().ip_allow);
+}
+
 /// Map the stored phishing settings plus the warn set into the detector's config.
-fn phishing_config(phishing: &justdns_config::Phishing, nrd: DomainSet) -> PhishingConfig {
+fn phishing_config(phishing: &justdns_config::Phishing, nrd: Arc<DomainSet>) -> PhishingConfig {
     let mode = |mode: justdns_config::PhishingMode| match mode {
         justdns_config::PhishingMode::Warn => PhishingMode::Warn,
         justdns_config::PhishingMode::Block => PhishingMode::Block,
@@ -741,6 +801,7 @@ fn spawn_schedule_ticker(
     clients: ClientStore,
     schedules: ScheduleStore,
     config: ConfigStore,
+    rebuild_lock: Arc<std::sync::Mutex<()>>,
 ) {
     tokio::spawn(async move {
         // Align to the next minute so windows open and close close to HH:MM.
@@ -761,6 +822,9 @@ fn spawn_schedule_ticker(
             if now_ids != last {
                 last = now_ids;
                 let active = justdns_schedule::active_now(&snapshot, tz);
+                let _serialised = rebuild_lock
+                    .lock()
+                    .expect("rebuild lock poisoned");
                 policy::rebuild(&engine, &lists, &clients, &settings, &active);
                 info!(
                     open = active.len(),

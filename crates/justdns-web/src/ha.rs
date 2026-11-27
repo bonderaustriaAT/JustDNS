@@ -35,10 +35,20 @@ use serde_json::Value;
 use tracing::warn;
 
 use crate::ha_crypto;
+use justdns_secret::{Sealer, is_sealed};
 
 /// How far a peer's auth timestamp may be from ours before the request is rejected
 /// as stale (replay guard). Nodes are expected to keep NTP-synced clocks.
 const PEER_AUTH_MAX_SKEW_MS: u64 = 60_000;
+
+/// The at-rest purpose `ha.json` is sealed under. Distinct from every other
+/// store's purpose, so one sealed file can never be mistaken for another's.
+///
+/// The HA state carries the **sync key** — the one secret that authenticates a
+/// peer and unlocks the credential-bearing snapshot — so it gets the same
+/// at-rest treatment as the account and settings files: sealed with the
+/// machine-held key, useless to a stolen or copied data volume.
+const HA_STATE_PURPOSE: &str = "ha-v1";
 
 /// One collection's entities, keyed by their stable id, as opaque JSON. The web
 /// layer serialises each real store type (a `Rewrite`, a `Device`, …) into this
@@ -581,25 +591,36 @@ pub struct Ha {
     env_key: Option<String>,
     interval: Duration,
     version: String,
+    /// Seals `ha.json` at rest. The file carries the sync key, which alone
+    /// unlocks the peer API and its credential-bearing snapshot, so it must not
+    /// sit on the data volume in the clear.
+    sealer: Sealer,
     state: RwLock<Persisted>,
 }
 
 impl Ha {
-    /// Build the HA manager for the running `version`, loading `<data>/ha.json`
-    /// and taking the data dir, sync key and interval from the environment. A
-    /// missing node id is minted and persisted so it is stable across restarts.
-    pub fn from_env(version: &str) -> Self {
+    /// Build the HA manager for the running `version`, taking the data dir,
+    /// sync key and interval from the environment.
+    pub fn from_env(version: &str, sealer: Sealer) -> Self {
         let data_dir = env_nonempty("JUSTDNS_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR));
+        Self::from_env_at(&data_dir, version, sealer)
+    }
+
+    /// The same construction against an explicit data directory. The test suite
+    /// drives this with a throwaway temp dir, so running the tests never drops
+    /// a state file into the working directory (the code default) or into
+    /// wherever a stray environment variable happens to point.
+    pub fn from_env_at(data_dir: &Path, version: &str, sealer: Sealer) -> Self {
         let env_key = env_nonempty("JUSTDNS_SYNC_KEY");
         let interval = env_nonempty("JUSTDNS_SYNC_INTERVAL")
             .and_then(|value| value.parse::<u64>().ok())
             .map(|secs| Duration::from_secs(secs.max(MIN_SYNC_SECS)))
             .unwrap_or_else(|| Duration::from_secs(DEFAULT_SYNC_SECS));
 
-        let path = Self::state_path(&data_dir);
-        let mut state = load_state(&path).unwrap_or_default();
+        let path = Self::state_path(data_dir);
+        let mut state = load_state(&path, &sealer).unwrap_or_default();
         fold_legacy_peer(&mut state);
         if let Some(env_id) = env_nonempty("JUSTDNS_NODE_ID") {
             state.node_id = env_id;
@@ -609,13 +630,16 @@ impl Ha {
         }
 
         let ha = Self {
-            data_dir,
+            data_dir: data_dir.to_owned(),
             env_key,
             interval,
             version: version.to_owned(),
+            sealer,
             state: RwLock::new(state),
         };
-        // Persist so a freshly minted node id (or env override) survives a restart.
+        // Persist so a freshly minted node id (or env override) survives a restart
+        // — and so a legacy plaintext state file is re-sealed on the first start
+        // of this version.
         ha.save();
         ha
     }
@@ -624,10 +648,11 @@ impl Ha {
         data_dir.join("ha.json")
     }
 
-    /// Persist the current state atomically, so a crash never leaves a half file.
+    /// Persist the current state atomically (sealed at rest), so a crash never
+    /// leaves a half file and a copied volume never yields the sync key.
     fn save(&self) {
         let state = self.state.read().expect("ha state not poisoned").clone();
-        if let Err(error) = write_state(&Self::state_path(&self.data_dir), &state) {
+        if let Err(error) = write_state(&Self::state_path(&self.data_dir), &state, &self.sealer) {
             warn!(%error, "could not persist HA state");
         }
     }
@@ -1362,10 +1387,18 @@ fn fold_legacy_peer(state: &mut Persisted) {
     }
 }
 
-/// Load the HA state file, or `None` if it is absent or unreadable.
-fn load_state(path: &Path) -> Option<Persisted> {
-    let text = std::fs::read_to_string(path).ok()?;
-    match serde_json::from_str(&text) {
+/// Load the HA state file, or `None` if it is absent or unreadable. A sealed
+/// file (written by this version) is opened with the machine key; a legacy
+/// plaintext file from an older version still parses, and is re-sealed by the
+/// next save.
+fn load_state(path: &Path, sealer: &Sealer) -> Option<Persisted> {
+    let bytes = std::fs::read(path).ok()?;
+    let plain = if is_sealed(&bytes) {
+        sealer.open(HA_STATE_PURPOSE, &bytes)?
+    } else {
+        bytes
+    };
+    match serde_json::from_slice(&plain) {
         Ok(state) => Some(state),
         Err(error) => {
             warn!(%error, "ignoring unreadable ha.json");
@@ -1374,16 +1407,29 @@ fn load_state(path: &Path) -> Option<Persisted> {
     }
 }
 
-/// Write the HA state atomically (temp file then rename).
-fn write_state(path: &Path, state: &Persisted) -> std::io::Result<()> {
+/// Write the HA state atomically (temp file then rename), sealed at rest under
+/// the machine key so the sync key it carries is never on the volume in the
+/// clear.
+fn write_state(path: &Path, state: &Persisted, sealer: &Sealer) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let json = serde_json::to_vec_pretty(state)
+    let json = serde_json::to_vec(state)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let sealed = sealer.seal(HA_STATE_PURPOSE, &json);
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json)?;
+    write_and_sync(&tmp, &sealed)?;
     std::fs::rename(tmp, path)
+}
+
+/// Write `bytes` to `path` and flush it to disk before the caller renames it
+/// into place, so an atomic replace is atomic in the face of a crash too, not
+/// just of a concurrent reader.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Milliseconds since the Unix epoch.
@@ -1650,6 +1696,7 @@ mod tests {
             env_key,
             interval: Duration::from_secs(30),
             version: "v0.0.0".to_owned(),
+            sealer: Sealer::ephemeral(),
             state: RwLock::new(state),
         }
     }
@@ -1896,15 +1943,20 @@ mod tests {
     #[test]
     fn state_persists_and_reloads() {
         let dir = temp_dir();
+        // One shared sealer, so the reload below can open what save() sealed.
+        let sealer = Sealer::ephemeral();
         {
-            let ha = ha_with(
-                dir.clone(),
-                None,
-                Persisted {
+            let ha = Ha {
+                data_dir: dir.clone(),
+                env_key: None,
+                interval: Duration::from_secs(30),
+                version: "v0.0.0".to_owned(),
+                sealer: sealer.clone(),
+                state: RwLock::new(Persisted {
                     node_id: "node-xyz".to_owned(),
                     ..Default::default()
-                },
-            );
+                }),
+            };
             ha.set_enabled(true);
             ha.set_key(Some("shared".to_owned()));
             let mut ledger = Ledger::new();
@@ -1919,12 +1971,62 @@ mod tests {
             );
             ha.set_ledger(ledger);
         }
-        let reloaded = load_state(&Ha::state_path(&dir)).expect("state file written");
+        let reloaded = load_state(&Ha::state_path(&dir), &sealer).expect("state file written");
         assert_eq!(reloaded.node_id, "node-xyz");
         assert!(reloaded.enabled);
         assert_eq!(reloaded.sync_key.as_deref(), Some("shared"));
         assert_eq!(reloaded.ledger["settings/settings"].hash, 42);
         assert!(!reloaded.sync_key.as_deref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn from_env_at_writes_into_the_given_dir_and_nowhere_else() {
+        // The test constructor pins the data directory, so a test run never
+        // drops a state file into the working directory or an env-picked one.
+        let dir = temp_dir();
+        let ha = Ha::from_env_at(&dir, "v0.0.0", Sealer::ephemeral());
+        assert!(
+            Ha::state_path(&dir).exists(),
+            "the state lands in the given dir"
+        );
+        assert_eq!(ha.node_id().len(), 24, "a fresh node id is minted");
+    }
+
+    #[test]
+    fn state_file_is_sealed_and_hides_the_sync_key() {
+        // A copied or stolen data volume must not yield the sync key: the state
+        // file is sealed under the machine key, and the key's bytes appear
+        // nowhere in it.
+        let dir = temp_dir();
+        let sealer = Sealer::ephemeral();
+        let ha = Ha {
+            data_dir: dir.clone(),
+            env_key: None,
+            interval: Duration::from_secs(30),
+            version: "v0.0.0".to_owned(),
+            sealer: sealer.clone(),
+            state: RwLock::new(Persisted {
+                node_id: "n1".to_owned(),
+                sync_key: Some("wizard-secret-key".to_owned()),
+                ..Default::default()
+            }),
+        };
+        ha.save();
+
+        let raw = std::fs::read(Ha::state_path(&dir)).expect("state file written");
+        assert!(is_sealed(&raw), "the state file is sealed at rest");
+        assert!(
+            !String::from_utf8_lossy(&raw).contains("wizard-secret-key"),
+            "the sync key is not in the file in the clear"
+        );
+        // A different machine key cannot open it.
+        assert!(
+            load_state(&Ha::state_path(&dir), &Sealer::ephemeral()).is_none(),
+            "a wrong key fails closed"
+        );
+        // The right key still reads it back.
+        let state = load_state(&Ha::state_path(&dir), &sealer).expect("own key opens it");
+        assert_eq!(state.sync_key.as_deref(), Some("wizard-secret-key"));
     }
 
     #[test]
@@ -2080,7 +2182,8 @@ mod tests {
             r#"{"nodeId":"old","enabled":true,"peer":{"url":"http://p","addedAtMs":5,"peerNodeId":"p"}}"#,
         )
         .unwrap();
-        let mut state = load_state(&path).expect("legacy state parses");
+        let mut state =
+            load_state(&path, &Sealer::ephemeral()).expect("legacy state parses");
         assert!(state.peers.is_empty(), "no peers vec in the old file");
         assert!(state.legacy_peer.is_some(), "the old `peer` field is read");
 

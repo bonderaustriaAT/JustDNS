@@ -319,6 +319,21 @@
   font-size: var(--step--2);
 }
 
+/* The status line under a switched-on NRD feed: its domain count while it is
+   live, "loading" while the background download runs, an error otherwise. */
+.feedStatus {
+  font-size: var(--step--2);
+  color: var(--text-muted);
+}
+
+.feedStatus[data-state="ok"] {
+  color: var(--signal-strong);
+}
+
+.feedStatus[data-state="error"] {
+  color: var(--danger);
+}
+
 /* Recent hits */
 .hits {
   display: flex;

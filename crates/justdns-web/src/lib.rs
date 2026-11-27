@@ -10,7 +10,7 @@
 //! debug build compiles even before the UI is built.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,7 @@ use justdns_auth::{AuthError, Role, SessionState, SessionStore, User, UserStore}
 use justdns_clients::{
     ClientError, ClientResolver, ClientStore, Device, DeviceKind, Group, PolicyDelta, parse_target,
 };
-use justdns_config::{BackupProtocol, BackupSync, BlockPage, ConfigStore, Settings};
+use justdns_config::{BackupProtocol, BackupSync, BlockPage, Cluster, ConfigStore, Settings};
 use justdns_dns::cache::DnsCache;
 use justdns_dns::cert_store::{CertInfo, CertRecord, CertStore};
 use justdns_filter::Blocker;
@@ -44,7 +44,7 @@ use justdns_schedule::{
 };
 use justdns_store::{
     ActivityBucket, Cursor, DnssecStatus, DomainCount, PhishingFilter, QueryEvent, QueryFilter,
-    QuerySource, ResolverStat, Store,
+    QuerySource, QueryTrace, ResolverStat, Store,
 };
 use reports::{
     REPORT_TOP_N, RenderLang, Report, ReportPeriod, ReportStore, ReportSummary, adhoc_window,
@@ -111,8 +111,18 @@ const ACTIVE_CLIENT_WINDOW: usize = 1000;
 /// How many failed login/second-factor attempts for one username within the
 /// window before further attempts are refused.
 const MAX_LOGIN_ATTEMPTS: u32 = 10;
+/// How many failed attempts one source address may make against the login and
+/// second-factor endpoints within the window. Generous for a household signing
+/// in a few devices, tight enough that scripted guessing has to spread over
+/// many addresses instead of hiding behind ever-fresh usernames.
+const MAX_IP_LOGIN_ATTEMPTS: u32 = 40;
 /// The rolling window over which failed attempts are counted.
 const LOGIN_WINDOW: Duration = Duration::from_secs(300);
+/// Cap on distinct throttle keys held at once, so a spray of made-up usernames
+/// cannot grow the map without bound. Expired entries sweep themselves out;
+/// this is the backstop, and a fresh unknown key past it is quietly not
+/// counted rather than a live one being evicted.
+const MAX_THROTTLE_KEYS: usize = 4096;
 
 /// Smallest sync key the wizard accepts. The key alone authorises the peer
 /// snapshot, which from HA Stage B carries every password hash and TOTP secret,
@@ -127,16 +137,26 @@ const MIN_SYNC_KEY_LEN: usize = 16;
 const HA_PEER_THROTTLE_KEY: &str = "ha-peer";
 
 /// A soft, in-memory rate limiter for the login and second-factor endpoints,
-/// keyed by username. It slows an online guess of a password, TOTP or recovery
-/// code; it is not persisted, so a restart clears it (acceptable for a LAN box).
+/// keyed by username (or by source address, for the per-address budget). It
+/// slows an online guess of a password, TOTP or recovery code; it is not
+/// persisted, so a restart clears it (acceptable for a LAN box).
 #[derive(Clone)]
 struct LoginThrottle {
+    /// How many failures within the window lock the key.
+    max_attempts: u32,
     inner: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
 }
 
 impl LoginThrottle {
     fn new() -> Self {
+        Self::with_limit(MAX_LOGIN_ATTEMPTS)
+    }
+
+    /// A throttle with its own failure budget, for a limiter that is not about
+    /// usernames (the per-address login budget).
+    fn with_limit(max_attempts: u32) -> Self {
         Self {
+            max_attempts,
             inner: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -151,7 +171,7 @@ impl LoginThrottle {
                     map.remove(key);
                     false
                 } else {
-                    *count >= MAX_LOGIN_ATTEMPTS
+                    *count >= self.max_attempts
                 }
             }
             None => false,
@@ -162,6 +182,16 @@ impl LoginThrottle {
     /// one has elapsed.
     fn note_failure(&self, key: &str) {
         let mut map = self.inner.lock().expect("throttle lock poisoned");
+        // A flood of distinct keys (made-up usernames) must not grow the map
+        // without bound; sweep what has expired and, still at the cap, skip an
+        // unknown fresh key instead of evicting a live one.
+        if map.len() >= MAX_THROTTLE_KEYS {
+            let now = Instant::now();
+            map.retain(|_, (_, started)| now.duration_since(*started) < LOGIN_WINDOW);
+            if map.len() >= MAX_THROTTLE_KEYS && !map.contains_key(key) {
+                return;
+            }
+        }
         let entry = map.entry(key.to_owned()).or_insert((0, Instant::now()));
         if entry.1.elapsed() > LOGIN_WINDOW {
             *entry = (0, Instant::now());
@@ -215,6 +245,14 @@ struct AppState {
     /// which alone unlocks the credential-bearing peer snapshot — cannot be
     /// brute-forced against the peer API at line rate.
     peer_auth_throttle: LoginThrottle,
+    /// Per-address budget for the unauthenticated login endpoints, so scripted
+    /// guessing cannot hide behind ever-fresh usernames (the per-username
+    /// throttle above never bites those).
+    ip_throttle: LoginThrottle,
+    /// Mark the session cookie `Secure`. Off by default, because the dashboard
+    /// is commonly served over plain HTTP on a LAN; set for installs that put
+    /// HTTPS in front (a certificate of their own or a reverse proxy).
+    cookie_secure: bool,
     /// The shared certificate store backing DoT/DoH and the block page. `None`
     /// when TLS could not be prepared at startup, in which case the `/api/certs`
     /// and `/api/tls` endpoints report it as unavailable rather than failing.
@@ -405,6 +443,10 @@ pub async fn serve(
     metrics_token: Option<Arc<str>>,
     geo: Option<Arc<GeoDb>>,
     resolver: justdns_dns::router::SharedRouter,
+    // Seals the secret-bearing state files the web layer owns itself: ha.json,
+    // which carries the cluster sync key. The same machine key the binary
+    // already uses for the account and settings stores.
+    sealer: justdns_secret::Sealer,
 ) -> std::io::Result<()> {
     // The update checker reads GitHub (public tags) and mediates the on-disk
     // protocol the updater sidecar watches. The periodic check runs on its own
@@ -427,7 +469,9 @@ pub async fn serve(
 
     // High-availability sync. The manager loads its node-local state from
     // `<data>/ha.json`; it is inert until the user enables HA and pairs a peer.
-    let ha = Arc::new(ha::Ha::from_env(status.version()));
+    // The state file carries the sync key, so it is sealed at rest like the
+    // other secret-bearing files.
+    let ha = Arc::new(ha::Ha::from_env(status.version(), sealer));
 
     // Generated summary reports, loaded from the data volume (empty on first run).
     let reports = ReportStore::load(&reports_path);
@@ -461,6 +505,11 @@ pub async fn serve(
         audit,
         throttle: LoginThrottle::new(),
         peer_auth_throttle: LoginThrottle::new(),
+        ip_throttle: LoginThrottle::with_limit(MAX_IP_LOGIN_ATTEMPTS),
+        // Off by default: the dashboard is commonly plain HTTP on a LAN, where
+        // a Secure cookie would be dropped. Set JUSTDNS_COOKIE_SECURE=1 when
+        // HTTPS is in front (own certificate or reverse proxy).
+        cookie_secure: env_flag("JUSTDNS_COOKIE_SECURE"),
         certs,
         cert_reload,
         dot_port,
@@ -570,23 +619,31 @@ pub async fn serve(
     // expiry, a device's blocked-lookup spike) and posts to the configured
     // webhook. It reads the live config each pass, so it does nothing until the
     // admin turns notifications on — and uses the blocking `ureq` client, so it
-    // runs on its own thread like the checkers above.
+    // runs on its own thread like the checkers above. A timed pass covers the
+    // polled conditions; a phishing hit also wakes it at once (via the store's
+    // alert signal), so that webhook goes out in a moment instead of waiting up
+    // to a full interval. Each pass flushes the query log first so the just-
+    // recorded hit is already queryable.
     {
         let state = app_state.clone();
         std::thread::spawn(move || {
+            let store = state.store.clone();
             let evaluator = notify::AlertEvaluator::new(
                 state.config.clone(),
                 state.ha.clone(),
                 state.update.clone(),
                 state.certs.clone(),
-                state.store.clone(),
+                store.clone(),
                 state.clients.clone(),
                 state.geo.clone(),
             );
-            std::thread::sleep(Duration::from_secs(60));
+            // Let the node settle before the first pass (a nudge can cut it short).
+            let mut seen = store.alert_generation();
+            store.wait_for_alert(&mut seen, Duration::from_secs(15));
             loop {
+                store.flush_blocking();
                 evaluator.evaluate();
-                std::thread::sleep(ALERT_CHECK_INTERVAL);
+                store.wait_for_alert(&mut seen, ALERT_CHECK_INTERVAL);
             }
         });
     }
@@ -598,7 +655,14 @@ pub async fn serve(
 
     let listener = TcpListener::bind(addr).await?;
     info!(%addr, "serving web UI and API");
-    axum::serve(listener, router(app_state)).await
+    // Connection info travels with each request so the login endpoints can
+    // budget attempts per source address; the handlers read it softly, so a
+    // router driven without it (the test suite) simply opts out.
+    axum::serve(
+        listener,
+        router(app_state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 /// The Content-Security-Policy served with every response. It is deliberately
@@ -671,6 +735,7 @@ fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/queries", get(queries))
         .route("/api/queries/history", get(queries_history))
+        .route("/api/queries/trace", get(query_trace))
         .route("/api/privacy/trackers", get(privacy_trackers))
         .route("/api/privacy/networks", get(privacy_networks))
         .route("/api/privacy/block", post(privacy_block))
@@ -744,6 +809,7 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/notifications/test", post(notifications_test))
         .route("/api/tls", get(get_tls).put(put_tls))
+        .route("/api/tls/profile/ios", get(download_ios_profile))
         .route("/api/certs", get(list_certs).post(create_cert))
         .route("/api/certs/{id}", delete(delete_cert))
         .route("/api/certs/{id}/renew", post(renew_cert))
@@ -999,16 +1065,16 @@ async fn require_auth(
     }
 
     // Read-only follower gate: when this node is a read-only follower of the
-    // designated primary, refuse writes so the cluster is managed from one place. Two
-    // surfaces stay writable: the cluster control plane (`/api/ha`), so a follower
-    // can still be repaired or take over a dead primary, and a user's own account
-    // (`/api/account`), so anyone can still manage their own login while debugging.
-    // Reads are never blocked — a follower is a full, viewable dashboard.
+    // designated primary, refuse writes so the cluster is managed from one place.
+    // Only the cluster control plane (`/api/ha`) stays writable, so a follower can
+    // still be repaired or take over a dead primary. Account writes are NOT exempt:
+    // the authoritative sync replaces the whole user store from the primary every
+    // cycle, so a password or MFA change made on a follower would be silently
+    // reverted seconds later (and could lock the user out of the credential they
+    // just set). Account changes must be made on the primary; reads are never
+    // blocked — a follower is a full, viewable dashboard.
     let is_write = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    let exempt = path == "/api/ha"
-        || path.starts_with("/api/ha/")
-        || path == "/api/account"
-        || path.starts_with("/api/account/");
+    let exempt = path == "/api/ha" || path.starts_with("/api/ha/");
     if is_write && !exempt {
         let role = cluster_role(&state);
         if !role.is_primary {
@@ -1030,11 +1096,16 @@ async fn require_auth(
 
 /// Build the session cookie carrying `token`. Short-lived cookies are session
 /// cookies in the browser; the server-side expiry is what really bounds a login.
-fn session_cookie(token: String) -> Cookie<'static> {
+fn session_cookie(token: String, secure: bool) -> Cookie<'static> {
     let mut cookie = Cookie::new(SESSION_COOKIE, token);
     cookie.set_http_only(true);
     cookie.set_same_site(SameSite::Strict);
     cookie.set_path("/");
+    // Only set for installs that serve the dashboard over HTTPS; over plain
+    // HTTP a Secure cookie would be silently dropped by the browser.
+    if secure {
+        cookie.set_secure(true);
+    }
     cookie
 }
 
@@ -1206,7 +1277,7 @@ fn auth_error(error: AuthError) -> (StatusCode, String) {
     (status, error.to_string())
 }
 
-/// Wrap an internal error message as a 500.
+/// Wrap an error as a 500.
 fn internal(message: String) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, message)
 }
@@ -1221,39 +1292,105 @@ fn demo_auth_closed(state: &AppState) -> Result<(), (StatusCode, String)> {
     Ok(())
 }
 
+/// Run a CPU-heavy secret operation (an Argon2 hash or a password-keyed backup
+/// seal) on the blocking pool. Each such call costs tens of milliseconds and
+/// tens of megabytes; running it on an async worker would let a handful of
+/// parallel requests stall every other connection on the box. A panic in the
+/// task surfaces as a 500 rather than taking the handler down.
+async fn blocking<T, F>(task: F) -> Result<T, (StatusCode, String)>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|error| internal(format!("background task failed: {error}")))
+}
+
+/// The calling socket's address, when the server was built with connection
+/// info. Extracting softly (rather than via [`axum::extract::ConnectInfo`])
+/// keeps the router usable without it — the test suite drives handlers
+/// directly — and `None` simply opts a caller out of the per-address budget.
+struct ClientAddr(Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientAddr {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let ip = parts
+            .extensions
+            .get::<axum::extract::connect_info::ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.ip());
+        Ok(ClientAddr(ip))
+    }
+}
+
+/// Whether `ip` belongs to a local or private network: loopback, RFC 1918, a
+/// IPv6 unique-local or link-local address. First-run setup is restricted to
+/// these, so a fresh instance exposed to the internet cannot be claimed by a
+/// stranger who happens to reach it first. A reverse proxy on the same LAN
+/// presents its own private address and stays allowed.
+fn is_private_source(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+        }
+    }
+}
+
+/// Read a boolean environment switch: present and anything but `0`, `false` or
+/// empty counts as on.
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| !matches!(value.trim(), "" | "0" | "false"))
+        .unwrap_or(false)
+}
+
 /// Create the first administrator on an unconfigured box and log them straight
-/// in. Refused once an admin exists, so this cannot be used to take over.
+/// in. Refused once an admin exists, so this cannot be used to take over. The
+/// claim is also restricted to local/private source addresses: a fresh instance
+/// that reaches the internet before its admin does cannot be claimed by a
+/// stranger who gets there first.
 async fn auth_setup(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
     demo_auth_closed(&state)?;
-    match state.users.create_admin(&creds.username, &creds.password) {
-        Ok(()) => {
-            let token = state.sessions.create(&creds.username);
-            record(
-                &state,
-                AuditEntry::success(&creds.username, "setup.admin").target(&creds.username),
-            );
-            Ok((
-                jar.add(session_cookie(token)),
-                Json(LoginResponse {
-                    username: creds.username,
-                    status: LoginStatus::Authenticated,
-                }),
-            ))
-        }
-        Err(error) => Err(auth_error(error)),
+    if addr.is_some_and(|ip| !is_private_source(ip)) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "first-run setup is only available from the local network".into(),
+        ));
     }
+    let users = state.users.clone();
+    let username = creds.username.clone();
+    let password = creds.password.clone();
+    blocking(move || users.create_admin(&username, &password).map_err(auth_error)).await??;
+    let token = state.sessions.create(&creds.username);
+    record(
+        &state,
+        AuditEntry::success(&creds.username, "setup.admin").target(&creds.username),
+    );
+    Ok((
+        jar.add(session_cookie(token, state.cookie_secure)),
+        Json(LoginResponse {
+            username: creds.username,
+            status: LoginStatus::Authenticated,
+        }),
+    ))
 }
 
 /// Step one of signing in: check the username and password. On success the
 /// response says whether the login is finished or a second factor is still
-/// needed (a code, or first setting MFA up). Repeated failures are throttled.
+/// needed (a code, or first setting MFA up). Repeated failures are throttled
+/// per username and per source address.
 async fn auth_login(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(creds): Json<Credentials>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
     demo_auth_closed(&state)?;
@@ -1267,9 +1404,27 @@ async fn auth_login(
             "too many attempts, try again in a few minutes".into(),
         ));
     }
+    let ip_key = addr.map(|ip| format!("ip:{ip}"));
+    if let Some(key) = &ip_key {
+        if state.ip_throttle.is_locked(key) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many attempts from this address, try again in a few minutes".into(),
+            ));
+        }
+    }
 
-    let Some(username) = state.users.verify(&creds.username, &creds.password) else {
+    // The Argon2 verification is deliberately off the async runtime (see
+    // `blocking`), so a flood of login requests cannot stall the box.
+    let users = state.users.clone();
+    let username = creds.username.clone();
+    let password = creds.password.clone();
+    let verified = blocking(move || users.verify(&username, &password)).await?;
+    let Some(username) = verified else {
         state.throttle.note_failure(&creds.username);
+        if let Some(key) = &ip_key {
+            state.ip_throttle.note_failure(key);
+        }
         record(
             &state,
             AuditEntry::failure(&creds.username, "login.failure")
@@ -1288,7 +1443,7 @@ async fn auth_login(
             .sessions
             .create_pending(&username, SessionState::PendingMfa);
         return Ok((
-            jar.add(session_cookie(token)),
+            jar.add(session_cookie(token, state.cookie_secure)),
             Json(LoginResponse {
                 username,
                 status: LoginStatus::Mfa,
@@ -1300,7 +1455,7 @@ async fn auth_login(
             .sessions
             .create_pending(&username, SessionState::PendingEnroll);
         return Ok((
-            jar.add(session_cookie(token)),
+            jar.add(session_cookie(token, state.cookie_secure)),
             Json(LoginResponse {
                 username,
                 status: LoginStatus::Enroll,
@@ -1310,13 +1465,16 @@ async fn auth_login(
 
     // No second factor needed — finish here.
     state.throttle.clear(&username);
+    if let Some(key) = &ip_key {
+        state.ip_throttle.clear(key);
+    }
     let token = state.sessions.create(&username);
     record(
         &state,
         AuditEntry::success(&username, "login.success").target(&username),
     );
     Ok((
-        jar.add(session_cookie(token)),
+        jar.add(session_cookie(token, state.cookie_secure)),
         Json(LoginResponse {
             username,
             status: LoginStatus::Authenticated,
@@ -1329,6 +1487,7 @@ async fn auth_login(
 async fn auth_mfa(
     State(state): State<AppState>,
     jar: CookieJar,
+    ClientAddr(addr): ClientAddr,
     Json(body): Json<CodeBody>,
 ) -> Result<(CookieJar, Json<LoginResponse>), (StatusCode, String)> {
     let Some((username, SessionState::PendingMfa)) = current_pending(&state, &jar) else {
@@ -1340,17 +1499,36 @@ async fn auth_mfa(
             "too many attempts, try again in a few minutes".into(),
         ));
     }
+    let ip_key = addr.map(|ip| format!("ip:{ip}"));
+    if let Some(key) = &ip_key {
+        if state.ip_throttle.is_locked(key) {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many attempts from this address, try again in a few minutes".into(),
+            ));
+        }
+    }
 
-    let code = body.code.trim();
-    let method = if state.users.verify_totp(&username, code) {
-        Some("mfa")
-    } else if state.users.consume_recovery(&username, code) {
-        Some("recovery")
-    } else {
-        None
-    };
+    // Checking a recovery code hashes it against every stored code hash, so the
+    // attempt runs on the blocking pool like the password check.
+    let code = body.code.trim().to_owned();
+    let users = state.users.clone();
+    let for_task = username.clone();
+    let method = blocking(move || {
+        if users.verify_totp(&for_task, &code) {
+            Some("mfa")
+        } else if users.consume_recovery(&for_task, &code) {
+            Some("recovery")
+        } else {
+            None
+        }
+    })
+    .await?;
     let Some(method) = method else {
         state.throttle.note_failure(&username);
+        if let Some(key) = &ip_key {
+            state.ip_throttle.note_failure(key);
+        }
         record(
             &state,
             AuditEntry::failure(&username, "login.failure")
@@ -1363,6 +1541,9 @@ async fn auth_mfa(
     let token = cookie_token(&jar).expect("pending session had a cookie");
     state.sessions.promote(&token);
     state.throttle.clear(&username);
+    if let Some(key) = &ip_key {
+        state.ip_throttle.clear(key);
+    }
     record(
         &state,
         AuditEntry::success(&username, "login.success")
@@ -1387,7 +1568,12 @@ async fn auth_enroll_begin(
     let Some((username, SessionState::PendingEnroll)) = current_pending(&state, &jar) else {
         return Err((StatusCode::UNAUTHORIZED, "no pending enrolment".into()));
     };
-    Ok(Json(begin_enrollment(&state, &username)?))
+    // Hashing the fresh recovery codes is Argon2 work: run it on the blocking
+    // pool like every other secret computation on the login path.
+    let for_task = state.clone();
+    let name = username.clone();
+    let payload = blocking(move || begin_enrollment(&for_task, &name)).await??;
+    Ok(Json(payload))
 }
 
 /// Finish the pending user's enrolment: verify a code against the fresh secret,
@@ -1485,29 +1671,42 @@ struct ChangePasswordBody {
     new_password: String,
 }
 
-/// Change one's own password after proving the current one.
+/// Change one's own password after proving the current one. Both the verify
+/// and the new hash are Argon2 work, so the pair runs on the blocking pool;
+/// every other session of this account is ended (the current one is kept, so
+/// the change does not log its author out).
 async fn change_own_password(
     State(state): State<AppState>,
     identity: Identity,
+    jar: CookieJar,
     Json(body): Json<ChangePasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if !state
-        .users
-        .verify_password(&identity.username, &body.current_password)
-    {
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let current = body.current_password.clone();
+    let new = body.new_password.clone();
+    let outcome = blocking(move || -> Result<(), (StatusCode, String)> {
+        if !users.verify_password(&username, &current) {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "current password is incorrect".into(),
+            ));
+        }
+        users.set_password(&username, &new).map_err(auth_error)
+    })
+    .await?;
+    // Keep the audit trail for a wrong password (as before), without holding
+    // the closure to it.
+    if matches!(&outcome, Err((StatusCode::UNAUTHORIZED, _))) {
         record(
             &state,
             AuditEntry::failure(&identity.username, "account.password").target(&identity.username),
         );
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "current password is incorrect".into(),
-        ));
     }
+    outcome?;
     state
-        .users
-        .set_password(&identity.username, &body.new_password)
-        .map_err(auth_error)?;
+        .sessions
+        .remove_user_except(&identity.username, &cookie_token(&jar).unwrap_or_default());
     record(
         &state,
         AuditEntry::success(&identity.username, "account.password").target(&identity.username),
@@ -1516,12 +1715,17 @@ async fn change_own_password(
 }
 
 /// Begin enrolling oneself in MFA voluntarily. Returns the secret, QR and
-/// recovery codes to show once; MFA is not active until confirmed.
+/// recovery codes to show once; MFA is not active until confirmed. The
+/// recovery-code hashing runs on the blocking pool, like every other Argon2
+/// computation the handlers trigger.
 async fn account_mfa_begin(
     State(state): State<AppState>,
     identity: Identity,
 ) -> Result<Json<MfaSetupPayload>, (StatusCode, String)> {
-    Ok(Json(begin_enrollment(&state, &identity.username)?))
+    let for_task = state.clone();
+    let name = identity.username.clone();
+    let payload = blocking(move || begin_enrollment(&for_task, &name)).await??;
+    Ok(Json(payload))
 }
 
 /// Confirm one's own enrolment with a code, turning MFA on.
@@ -1554,10 +1758,13 @@ struct PasswordBody {
     password: String,
 }
 
-/// Turn one's own MFA off, unless it is required for the account.
+/// Turn one's own MFA off, unless it is required for the account. Other
+/// sessions of the account are ended (the current one is kept); the password
+/// check runs on the blocking pool.
 async fn account_mfa_disable(
     State(state): State<AppState>,
     identity: Identity,
+    jar: CookieJar,
     Json(body): Json<PasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if effective_require_mfa(&state, &identity.username) {
@@ -1566,16 +1773,20 @@ async fn account_mfa_disable(
             "MFA is required for your account and cannot be turned off".into(),
         ));
     }
-    if !state
-        .users
-        .verify_password(&identity.username, &body.password)
-    {
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let password = body.password.clone();
+    let verified = blocking(move || users.verify_password(&username, &password)).await?;
+    if !verified {
         return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
     }
     state
         .users
         .clear_mfa(&identity.username)
         .map_err(auth_error)?;
+    state
+        .sessions
+        .remove_user_except(&identity.username, &cookie_token(&jar).unwrap_or_default());
     record(
         &state,
         AuditEntry::success(&identity.username, "mfa.disable").target(&identity.username),
@@ -1583,7 +1794,9 @@ async fn account_mfa_disable(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Replace one's own recovery codes, after proving the password.
+/// Replace one's own recovery codes, after proving the password. Both the
+/// verify and the batch of fresh code hashes are Argon2 work, so the pair
+/// runs on the blocking pool.
 async fn account_mfa_regenerate_recovery(
     State(state): State<AppState>,
     identity: Identity,
@@ -1592,17 +1805,18 @@ async fn account_mfa_regenerate_recovery(
     if !state.users.mfa_enabled(&identity.username) {
         return Err((StatusCode::CONFLICT, "MFA is not set up".into()));
     }
-    if !state
-        .users
-        .verify_password(&identity.username, &body.password)
-    {
-        return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
-    }
-    let recovery_codes = justdns_auth::mfa::generate_recovery_codes();
-    state
-        .users
-        .replace_recovery(&identity.username, &recovery_codes)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let username = identity.username.clone();
+    let password = body.password.clone();
+    let recovery_codes = blocking(move || -> Result<Vec<String>, (StatusCode, String)> {
+        if !users.verify_password(&username, &password) {
+            return Err((StatusCode::UNAUTHORIZED, "password is incorrect".into()));
+        }
+        let codes = justdns_auth::mfa::generate_recovery_codes();
+        users.replace_recovery(&username, &codes).map_err(auth_error)?;
+        Ok(codes)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "mfa.recovery").target(&identity.username),
@@ -1633,10 +1847,17 @@ async fn add_user(
     identity: Identity,
     Json(body): Json<NewUserBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .users
-        .add_user(&body.username, &body.password, body.role, body.mfa_required)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let username = body.username.clone();
+    let password = body.password.clone();
+    let role = body.role;
+    let mfa_required = body.mfa_required;
+    blocking(move || {
+        users
+            .add_user(&username, &password, role, mfa_required)
+            .map_err(auth_error)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "user.create")
@@ -1678,17 +1899,19 @@ struct NewPasswordBody {
 }
 
 /// Reset a user's password (an admin action; the user is not asked for the old
-/// one).
+/// one). Every session of that account is ended, so a reset in response to a
+/// compromised login actually kicks the attacker out.
 async fn reset_user_password(
     State(state): State<AppState>,
     identity: Identity,
     Path(username): Path<String>,
     Json(body): Json<NewPasswordBody>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    state
-        .users
-        .set_password(&username, &body.new_password)
-        .map_err(auth_error)?;
+    let users = state.users.clone();
+    let target = username.clone();
+    let new_password = body.new_password.clone();
+    blocking(move || users.set_password(&target, &new_password).map_err(auth_error)).await??;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.password").target(&username),
@@ -1722,13 +1945,16 @@ async fn set_user_mfa_required(
 }
 
 /// Clear a user's MFA (an admin reset after a lost device). If MFA is still
-/// required for them, they must enrol again at next login.
+/// required for them, they must enrol again at next login. Their other
+/// sessions are ended — a device the second factor protected is re-proven
+/// against the password alone from here on.
 async fn reset_user_mfa(
     State(state): State<AppState>,
     identity: Identity,
     Path(username): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     state.users.clear_mfa(&username).map_err(auth_error)?;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.mfaReset").target(&username),
@@ -1750,6 +1976,7 @@ async fn delete_user(
         ));
     }
     state.users.remove_user(&username).map_err(auth_error)?;
+    state.sessions.remove_user(&username);
     record(
         &state,
         AuditEntry::success(&identity.username, "user.delete").target(&username),
@@ -3066,6 +3293,12 @@ async fn blocking_pause(
         ));
     }
     let until = state.config.pause_blocking(body.seconds);
+    // Flush the DNS cache so a name that was being answered from a stale or
+    // negative cache entry (for example a blocked domain that had a cached empty
+    // answer) resolves fresh on the very next query, instead of serving the old
+    // cached answer until its TTL runs out. Without this, "turn protection off"
+    // appears not to work for anything already in the cache.
+    state.cache.clear();
     record(
         &state,
         AuditEntry::success(&identity.username, "blocking.pause"),
@@ -3159,6 +3392,143 @@ async fn put_tls(
         .set(settings)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     Ok(Json(tls_status(&state)))
+}
+
+/// Build and download an Apple configuration profile (`.mobileconfig`) that points
+/// iOS/iPadOS at this server's DNS-over-TLS endpoint. iOS has no "Private DNS"
+/// switch like Android; encrypted client DNS is set up through a profile carrying a
+/// managed DNS-settings payload (`DNSProtocol = TLS`, `ServerName` = the DoT
+/// hostname). The profile is unsigned, so iOS shows a one-time "not verified" note
+/// on install, which is expected for a self-hosted profile. Readable like the rest
+/// of `/api/tls` (it carries a hostname, not a secret).
+async fn download_ios_profile(
+    State(state): State<AppState>,
+) -> Result<Response, (StatusCode, String)> {
+    if state.certs.is_none() {
+        return Err(certs_unavailable());
+    }
+    let hostname = state.config.get().encrypted_dns.hostname.trim().to_owned();
+    if hostname.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "set a hostname under Encryption before downloading the iOS profile".to_owned(),
+        ));
+    }
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/x-apple-aspen-config".to_owned(),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"justdns-dot.mobileconfig\"".to_owned(),
+            ),
+        ],
+        ios_dot_profile(&hostname),
+    )
+        .into_response())
+}
+
+/// Render the DNS-over-TLS `.mobileconfig` for `hostname`. Pure (no I/O), so it is
+/// unit-tested directly. The payload UUIDs are derived from the hostname so a
+/// re-download keeps the same identifiers and iOS replaces the installed profile in
+/// place instead of stacking duplicates.
+fn ios_dot_profile(hostname: &str) -> String {
+    let host_xml = xml_escape(hostname);
+    let top_uuid = stable_uuid(&format!("justdns-dot-top:{hostname}"));
+    let dns_uuid = stable_uuid(&format!("justdns-dot-dns:{hostname}"));
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>DNSSettings</key>
+			<dict>
+				<key>DNSProtocol</key>
+				<string>TLS</string>
+				<key>ServerName</key>
+				<string>{host_xml}</string>
+			</dict>
+			<key>PayloadDescription</key>
+			<string>DNS-over-TLS via JustDNS ({host_xml})</string>
+			<key>PayloadDisplayName</key>
+			<string>JustDNS (DNS-over-TLS)</string>
+			<key>PayloadIdentifier</key>
+			<string>at.justfuture.justdns.dot</string>
+			<key>PayloadType</key>
+			<string>com.apple.dnsSettings.managed</string>
+			<key>PayloadUUID</key>
+			<string>{dns_uuid}</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Richtet JustDNS als verschluesselten DNS-over-TLS-Resolver ein.</string>
+	<key>PayloadDisplayName</key>
+	<string>JustDNS verschluesseltes DNS ({host_xml})</string>
+	<key>PayloadIdentifier</key>
+	<string>at.justfuture.justdns</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>{top_uuid}</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>
+"#
+    )
+}
+
+/// A deterministic, dependency-free UUID-shaped identifier for `seed`. Not a real
+/// v4/v5 UUID, but a well-formed UUID string: two FNV-1a passes over the seed give
+/// 128 bits, formatted 8-4-4-4-12. Stable for a given seed, so the profile keeps
+/// the same UUIDs across downloads.
+fn stable_uuid(seed: &str) -> String {
+    fn fnv1a(bytes: &[u8], mut hash: u64) -> u64 {
+        for &b in bytes {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+    let hi = fnv1a(seed.as_bytes(), 0xcbf2_9ce4_8422_2325);
+    let lo = fnv1a(seed.as_bytes(), 0x8422_2325_cbf2_9ce4);
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&hi.to_be_bytes());
+    b[8..].copy_from_slice(&lo.to_be_bytes());
+    format!(
+        "{:02X}{:02X}{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5],
+        b[6],
+        b[7],
+        b[8],
+        b[9],
+        b[10],
+        b[11],
+        b[12],
+        b[13],
+        b[14],
+        b[15]
+    )
+}
+
+/// Minimal XML text escaping for values placed into the profile.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// A stored certificate as the dashboard sees it: the store's derived facts plus
@@ -3441,7 +3811,10 @@ async fn export_backup(
     redact_settings_secrets(&mut backup.settings);
     let json = serde_json::to_vec_pretty(&backup)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let sealed = justdns_secret::seal_backup(&request.password, &json);
+    // Sealing derives its key from the password with Argon2id — a deliberate
+    // tens-of-milliseconds cost — so it runs on the blocking pool.
+    let password = request.password.clone();
+    let sealed = blocking(move || justdns_secret::seal_backup(&password, &json)).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
@@ -3486,7 +3859,8 @@ async fn restore_backup(
             )
         })?;
     // An encrypted backup needs its password; a legacy plaintext backup restores
-    // as-is, so old exports keep working.
+    // as-is, so old exports keep working. The password-to-key derivation is
+    // Argon2id, so the open runs on the blocking pool.
     let json_bytes = if justdns_secret::is_backup_encrypted(&raw) {
         let password = request.password.unwrap_or_default();
         if password.is_empty() {
@@ -3495,12 +3869,15 @@ async fn restore_backup(
                 "this backup is encrypted — enter its password".to_owned(),
             ));
         }
-        justdns_secret::open_backup(&password, &raw).map_err(|error| match error {
-            justdns_secret::BackupError::WrongPassword => {
-                (StatusCode::BAD_REQUEST, "wrong backup password".to_owned())
-            }
-            other => (StatusCode::BAD_REQUEST, other.to_string()),
-        })?
+        blocking(move || {
+            justdns_secret::open_backup(&password, &raw).map_err(|error| match error {
+                justdns_secret::BackupError::WrongPassword => {
+                    (StatusCode::BAD_REQUEST, "wrong backup password".to_owned())
+                }
+                other => (StatusCode::BAD_REQUEST, other.to_string()),
+            })
+        })
+        .await??
     } else {
         raw
     };
@@ -4021,6 +4398,16 @@ fn autofill_block_page_ips(state: &AppState) {
 // `restore_backup` uses.
 // ----------------------------------------------------------------------------
 
+/// The cluster-wide troubleshooting pause, carried as its own HA entry: the
+/// absolute Unix-millisecond deadline a pause is in force until. Present only
+/// while a pause is active; its absence means blocking is on. Runtime-only, so it
+/// is sourced from the live deadline and never from the saved settings.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlockingPauseSync {
+    until_ms: u64,
+}
+
 /// Serialise this node's live configuration into the keyed collections the HA
 /// merge operates on: one entry per entity, keyed by its stable id. The settings
 /// are a single entry under `settings/settings`.
@@ -4076,6 +4463,19 @@ fn ha_collections(state: &AppState) -> BTreeMap<String, ha::Collection> {
         "cluster",
         serde_json::to_value(&settings.cluster),
     );
+    // The troubleshooting blocking pause travels as its own entry so a pause on one
+    // node pauses the whole cluster (clients that use more than one node would
+    // otherwise keep hitting a node that never paused). It is sourced from the live
+    // deadline, never the saved settings, so it stays runtime-only and a restart
+    // still clears it. Emitted only while a pause is actually in force; when it ends
+    // or expires the entry drops and its tombstone resumes blocking on every node.
+    if let Some(until_ms) = state.config.blocking_pause_until_ms() {
+        put(
+            "blockingPause",
+            "blockingPause",
+            serde_json::to_value(BlockingPauseSync { until_ms }),
+        );
+    }
     put("settings", "settings", serde_json::to_value(settings));
 
     // The certificate store is shared across the cluster: one entry per stored
@@ -4217,6 +4617,90 @@ fn ha_reconcile_mfa(
     }
 }
 
+/// The cluster config a snapshot side carries: its dedicated `cluster` entry if
+/// present, else the copy inside its settings blob (an older peer carries it only
+/// there), else the default (no primary designated).
+fn cluster_of(side: &BTreeMap<String, ha::Collection>) -> Cluster {
+    if let Some(value) = side
+        .get("cluster")
+        .and_then(|entities| entities.get("cluster"))
+    {
+        if let Ok(cluster) = serde_json::from_value::<Cluster>(value.clone()) {
+            return cluster;
+        }
+    }
+    side.get("settings")
+        .and_then(|entities| entities.get("settings"))
+        .and_then(|settings| settings.get("cluster"))
+        .and_then(|value| serde_json::from_value::<Cluster>(value.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// The node id of the designated primary (the "main node") as of this sync. The
+/// designation with the newer explicit `primary_set_at_ms` from either side wins, so
+/// a follower recognises the primary from the primary's own snapshot on the very
+/// first sync, before it has applied the designation locally; on a tie a non-empty id
+/// wins, then the larger id, so both nodes agree. Empty when no primary is designated
+/// on either side — the cluster then stays writable everywhere and syncs by
+/// last-writer-wins, exactly as before a primary is chosen.
+///
+/// This is the single gate for the authoritative sync: once it names a primary, that
+/// node owns the configuration and every other node mirrors it, so no out-of-date
+/// node can clear a setting cluster-wide. `primary_set_at_ms` moves only on an
+/// explicit primary change (see `ha_set_primary`), never on an ordinary settings
+/// save, so an unrelated save can neither move nor clear the designation.
+fn effective_primary(local: &ha::SyncSnapshot, remote: &ha::SyncSnapshot) -> String {
+    let l = cluster_of(&local.collections);
+    let r = cluster_of(&remote.collections);
+    let winner = if r.primary_set_at_ms > l.primary_set_at_ms {
+        r
+    } else if r.primary_set_at_ms < l.primary_set_at_ms {
+        l
+    } else if !r.primary_node_id.is_empty() {
+        r
+    } else {
+        l
+    };
+    winner.primary_node_id.trim().to_owned()
+}
+
+/// Resolve one sync cycle's configuration. When a primary (main node) is designated
+/// it is authoritative: a follower mirrors the primary's config wholesale and never
+/// lets its own — or another follower's — config win. That is what stops an
+/// out-of-date node from clearing a setting (a protection toggle, the chosen primary,
+/// the privacy module) cluster-wide just by saving something else with a newer stamp.
+/// With no primary designated, fall back to the previous bidirectional
+/// last-writer-wins so a plain cluster still converges, keeping the reconcile that
+/// protects confirmed MFA. Pure over the two snapshots so it is unit-testable.
+fn merge_config(local: &ha::SyncSnapshot, remote: &ha::SyncSnapshot) -> ha::Merged {
+    let primary_id = effective_primary(local, remote);
+    if primary_id.is_empty() {
+        let mut merged = ha::merge(local, remote);
+        ha_reconcile_mfa(
+            &mut merged.collections,
+            &local.collections,
+            &remote.collections,
+        );
+        merged
+    } else if remote.node_id == primary_id {
+        // The peer is the primary: adopt its whole config (collections and ledger).
+        // `ha_apply` restores this node's own identity fields afterward, so mirroring
+        // never renames the node or repoints its certificates.
+        ha::Merged {
+            collections: remote.collections.clone(),
+            ledger: remote.ledger.clone(),
+        }
+    } else {
+        // Either this node is the primary, or the peer is another follower: keep this
+        // node's own config and never adopt a non-primary's over it. A follower
+        // receives the primary's config when it syncs against the primary itself.
+        ha::Merged {
+            collections: local.collections.clone(),
+            ledger: local.ledger.clone(),
+        }
+    }
+}
+
 /// Apply a merged set of collections to the live stores, reusing the same
 /// `replace`/`set` paths as a backup restore. Rewrites go first because they are
 /// validated as they are stored, so an invalid merge is rejected before anything
@@ -4338,6 +4822,33 @@ fn ha_apply(
             .set(settings)
             .map_err(|error| error.to_string())?;
     }
+
+    // Apply the cluster-wide troubleshooting pause, independently of the settings
+    // blob: a pause armed on any node pauses them all until the shared deadline,
+    // and its removal (the entry tombstoned once the pause ends or expires) resumes
+    // blocking everywhere. Absent means no node is paused, so clear any local pause.
+    // The deadline is absolute, so every node expires together.
+    match collections
+        .get("blockingPause")
+        .and_then(|entities| entities.get("blockingPause"))
+    {
+        Some(value) => {
+            let pause: BlockingPauseSync =
+                serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
+            // Flush the cache when this node newly enters (or re-targets) a pause,
+            // so it clears stale or negative cache entries exactly like the node the
+            // pause was armed on. Compare against the *raw* stored deadline, not the
+            // expired-reads-as-None view: a steady sync re-sends the same deadline
+            // every cycle, and once the local clock passes it the None view would
+            // make every cycle look like a fresh pause and flush the cache on each
+            // one. The raw value stays equal, so a re-sent deadline never re-flushes.
+            if state.config.pause_until_raw() != pause.until_ms {
+                state.cache.clear();
+            }
+            state.config.set_blocking_pause_until(pause.until_ms);
+        }
+        None => state.config.resume_blocking(),
+    }
     Ok(())
 }
 
@@ -4363,17 +4874,7 @@ fn sync_peer(state: &AppState, peer: &ha::Peer) -> Result<(), String> {
         version: state.ha.version(),
         roster: state.ha.roster(),
     };
-    let mut merged = ha::merge(&local, &remote);
-
-    // Confirmed MFA must never be lost to a sync, and it must spread: if either
-    // side has it for an account, the merged record keeps it. Both nodes compute
-    // the same reconciliation, so they converge on "MFA on" rather than letting an
-    // arbitrary last-writer-wins order silently strip it (see ha_reconcile_mfa).
-    ha_reconcile_mfa(
-        &mut merged.collections,
-        &local.collections,
-        &remote.collections,
-    );
+    let merged = merge_config(&local, &remote);
 
     // Only touch the stores when the merge actually changed local state, so a
     // steady state does not reload lists or rewrite the config every cycle.
@@ -4885,6 +5386,13 @@ async fn ha_set_primary(
     }
     let mut settings = state.config.get();
     settings.cluster.primary_node_id = node_id.clone();
+    // Bump the designation timestamp on every explicit change (set and clear). This
+    // is the one place it moves; an ordinary settings save never touches it. The sync
+    // ranks the designation by this value, not the ledger's last-writer-wins stamp, so
+    // a node that has not yet learned the chosen primary cannot move or clear it just
+    // by saving some other setting with a newer stamp (see `effective_primary`, which
+    // then makes the chosen primary authoritative for all config in `merge_config`).
+    settings.cluster.primary_set_at_ms = now_ms() as i64;
     state
         .config
         .set(settings)
@@ -5081,13 +5589,24 @@ async fn ha_remote_update(
     };
     let backup_path = state.update.data_dir().join(HA_UPDATE_BACKUP_FILE);
     let requested_by = format!("ha:{}", caller.node_id);
-    match perform_update(
-        &state,
-        &backup_path,
-        &request.password,
-        &requested_by,
-        request.target_version.as_deref(),
-    ) {
+    // The safety backup's Argon2id seal belongs on the blocking pool, like the
+    // local one-click update.
+    let for_task = state.clone();
+    let password = request.password.clone();
+    let target_version = request.target_version.clone();
+    let requested_by_for_task = requested_by.clone();
+    let outcome = blocking(move || {
+        perform_update(
+            &for_task,
+            &backup_path,
+            &password,
+            &requested_by_for_task,
+            target_version.as_deref(),
+        )
+    })
+    .await
+    .unwrap_or_else(Err);
+    match outcome {
         Ok(target) => {
             record(
                 &state,
@@ -5842,6 +6361,13 @@ fn perform_update(
         }
     };
 
+    if !update::is_valid_release(&target) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("'{target}' is not a valid release version"),
+        ));
+    }
+
     if password.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -5913,7 +6439,15 @@ async fn start_update(
     Json(body): Json<StartUpdate>,
 ) -> Result<Json<UpdateView>, (StatusCode, String)> {
     let path = std::path::PathBuf::from(&body.backup_path);
-    let target = perform_update(&state, &path, &body.password, &identity.username, None)?;
+    // The safety backup is password-sealed (Argon2id), and the update check
+    // itself does file I/O: run the whole thing on the blocking pool.
+    let for_task = state.clone();
+    let password = body.password.clone();
+    let requested_by = identity.username.clone();
+    let target = blocking(move || {
+        perform_update(&for_task, &path, &password, &requested_by, None)
+    })
+    .await??;
     record(
         &state,
         AuditEntry::success(&identity.username, "update.start").target(&target),
@@ -7400,6 +7934,40 @@ async fn queries(
     Json(named)
 }
 
+/// Identifies one log entry whose decision trace the drawer wants: its time,
+/// client, name and record type, exactly as the row carries them.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TraceParams {
+    at_ms: i64,
+    client: String,
+    name: String,
+    record_type: u16,
+}
+
+/// The decision trace for one log entry, read from the durable log on demand
+/// when its detail drawer opens. The trace is stored only on disk (never in the
+/// hot ring), so this blocking DuckDB read runs on a blocking thread. Returns
+/// `null` when the row has no stored trace or no row matches.
+async fn query_trace(
+    State(store): State<Store>,
+    Query(params): Query<TraceParams>,
+) -> Json<Option<QueryTrace>> {
+    let trace = tokio::task::spawn_blocking(move || {
+        store.trace_for(
+            params.at_ms,
+            &params.client,
+            &params.name,
+            params.record_type,
+        )
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .flatten();
+    Json(trace)
+}
+
 /// Query parameters for the history explorer. All optional; omitting every one
 /// returns the newest page of the whole log. `source` is a comma-separated list
 /// of source labels (OR). `beforeMs`+`beforeRow` together are the keyset cursor
@@ -8102,6 +8670,24 @@ mod tests {
     }
 
     #[test]
+    fn ios_dot_profile_carries_hostname_and_stable_uuids() {
+        let p = ios_dot_profile("dns.example.at");
+        assert!(p.contains("<string>TLS</string>"), "DoT protocol");
+        assert!(p.contains("<string>dns.example.at</string>"), "hostname");
+        assert!(
+            p.contains("com.apple.dnsSettings.managed"),
+            "managed DNS payload"
+        );
+        // Deterministic for a given hostname (iOS replaces in place on re-download).
+        assert_eq!(p, ios_dot_profile("dns.example.at"));
+        // A different hostname yields different UUIDs, so the profiles differ.
+        assert_ne!(p, ios_dot_profile("dns.other.at"));
+        // The hostname is XML-escaped.
+        let e = ios_dot_profile("a&b<c");
+        assert!(e.contains("a&amp;b&lt;c"), "xml-escaped hostname");
+    }
+
+    #[test]
     fn aggregate_simulation_counts_newly_blocked_and_collateral() {
         use justdns_filter::DomainSet;
         use justdns_store::TrackerScanRow;
@@ -8260,6 +8846,8 @@ mod tests {
             audit: test_audit(),
             throttle: LoginThrottle::new(),
             peer_auth_throttle: LoginThrottle::new(),
+            ip_throttle: LoginThrottle::with_limit(MAX_IP_LOGIN_ATTEMPTS),
+            cookie_secure: false,
             certs: None,
             cert_reload: None,
             dot_port: 853,
@@ -8269,7 +8857,11 @@ mod tests {
             log_level: LogLevelControl::disabled("normal"),
             metrics_token: None,
             update: Arc::new(UpdateChecker::from_env("v0.0.0-test")),
-            ha: Arc::new(ha::Ha::from_env("v0.0.0-test")),
+            ha: Arc::new(ha::Ha::from_env_at(
+                &test_ha_dir(),
+                "v0.0.0-test",
+                justdns_secret::Sealer::ephemeral(),
+            )),
             reports: test_reports(),
             cluster_update: Arc::new(Mutex::new(ClusterUpdate::default())),
             geo: None,
@@ -8300,6 +8892,21 @@ mod tests {
         ReportStore::load(&path)
     }
 
+    /// A throwaway directory for the HA state. Without one, the HA manager
+    /// would write its state file into the working directory (the code default
+    /// when no data dir is set) or wherever a stray `JUSTDNS_DATA_DIR` points —
+    /// an untracked `ha.json` in the crate directory after every test run.
+    fn test_ha_dir() -> std::path::PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "justdns-web-ha-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     /// A router whose data API is already unlocked, plus the `Cookie` header
     /// value that unlocks it: the state carries an admin and a live session for
     /// them. Handler tests that predate the login guard attach this cookie.
@@ -8324,6 +8931,9 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -9338,6 +9948,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ha_syncs_the_blocking_pause_across_the_cluster() {
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let paused = test_state(store_a);
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let peer = test_state(store_b);
+
+        // Not paused: no entry at all, and applying leaves the peer unpaused.
+        let cols = ha_collections(&paused);
+        assert!(!cols.contains_key("blockingPause"), "no pause, no entry");
+        ha_apply(&peer, &cols).unwrap();
+        assert!(peer.config.blocking_pause_until_ms().is_none());
+
+        // A pause armed on one node travels to the peer with the same deadline, so
+        // the whole cluster pauses, not just the node the admin clicked.
+        let until = paused.config.pause_blocking(600);
+        let cols = ha_collections(&paused);
+        assert!(
+            cols.contains_key("blockingPause"),
+            "an active pause is shared"
+        );
+        ha_apply(&peer, &cols).unwrap();
+        assert_eq!(
+            peer.config.blocking_pause_until_ms(),
+            Some(until),
+            "the peer pauses until the same deadline"
+        );
+
+        // Resuming on that node drops the entry, so the peer resumes too.
+        paused.config.resume_blocking();
+        let cols = ha_collections(&paused);
+        assert!(
+            !cols.contains_key("blockingPause"),
+            "resume removes the entry"
+        );
+        ha_apply(&peer, &cols).unwrap();
+        assert!(
+            peer.config.blocking_pause_until_ms().is_none(),
+            "the peer resumes blocking too"
+        );
+    }
+
+    #[tokio::test]
     async fn ha_rejects_a_short_sync_key() {
         let (store, _w) = Store::in_memory(100).unwrap();
         let (app, cookie) = app_and_cookie(store);
@@ -9554,6 +10206,110 @@ mod tests {
         assert_eq!(
             node.config.get().cluster.primary_node_id,
             "primary-from-blob"
+        );
+    }
+
+    /// A sync snapshot for a node id, with its collections stamped at `stamp`.
+    fn snap_at(
+        node_id: &str,
+        cols: &BTreeMap<String, ha::Collection>,
+        stamp: u64,
+    ) -> ha::SyncSnapshot {
+        ha::SyncSnapshot {
+            node_id: node_id.into(),
+            collections: cols.clone(),
+            ledger: ha::restamp(cols, &ha::Ledger::new(), node_id, stamp),
+            version: String::new(),
+            roster: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn authoritative_primary_follower_mirrors_and_cannot_be_clobbered() {
+        // The regression class: a follower whose config is out of date (protections
+        // off, no primary learned yet) saved something else, got the newer stamp, and
+        // cleared settings cluster-wide. With a primary designated, the primary is
+        // authoritative: the follower mirrors it, and the follower's stale config can
+        // never win — regardless of stamps.
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let node_a = test_state(store_a);
+        let mut a = node_a.config.get();
+        a.cluster.primary_node_id = "a".into();
+        a.cluster.primary_set_at_ms = 500;
+        a.phishing.enabled = true;
+        a.phishing.nrd_enabled = true;
+        a.modules.privacy.enabled = true;
+        node_a.config.set(a).unwrap();
+
+        // Follower: no primary learned yet, every protection off (defaults).
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let node_b = test_state(store_b);
+
+        let cols_a = ha_collections(&node_a);
+        let cols_b = ha_collections(&node_b);
+        let snap_a = snap_at("a", &cols_a, 100); // primary, OLDER stamp
+        let snap_b = snap_at("b", &cols_b, 999); // follower, NEWER stamp (its unrelated save)
+
+        // From the follower's view it adopts the primary wholesale, even though its own
+        // stamp is newer.
+        let from_b = merge_config(&snap_b, &snap_a);
+        assert_eq!(
+            from_b.collections, cols_a,
+            "the follower mirrors the primary's whole config"
+        );
+        assert_eq!(
+            from_b.collections["settings"]["settings"]["phishing"]["enabled"],
+            true
+        );
+        assert_eq!(
+            from_b.collections["settings"]["settings"]["phishing"]["nrdEnabled"],
+            true
+        );
+        assert_eq!(
+            from_b.collections["settings"]["settings"]["modules"]["privacy"]["enabled"],
+            true
+        );
+        assert_eq!(
+            from_b.collections["cluster"]["cluster"]["primaryNodeId"],
+            "a"
+        );
+
+        // From the primary's view the follower's newer, protections-off config must not
+        // touch it.
+        let from_a = merge_config(&snap_a, &snap_b);
+        assert_eq!(
+            from_a.collections, cols_a,
+            "the primary keeps its own config; a follower never clobbers it"
+        );
+        assert_eq!(
+            from_a.collections["settings"]["settings"]["phishing"]["enabled"], true,
+            "the follower's stale off cannot clear the primary's protection"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_primary_still_last_writer_wins() {
+        // Without a designated primary the cluster stays writable everywhere and syncs
+        // by last-writer-wins, exactly as before a primary is chosen. This is why
+        // designating a primary is the actual fix for the self-clearing settings.
+        let (store_a, _wa) = Store::in_memory(100).unwrap();
+        let node_a = test_state(store_a);
+        let mut a = node_a.config.get();
+        a.phishing.enabled = true; // on, but no primary designated
+        node_a.config.set(a).unwrap();
+
+        let (store_b, _wb) = Store::in_memory(100).unwrap();
+        let node_b = test_state(store_b); // phishing off, no primary
+
+        let cols_a = ha_collections(&node_a);
+        let cols_b = ha_collections(&node_b);
+        let snap_a = snap_at("a", &cols_a, 100);
+        let snap_b = snap_at("b", &cols_b, 999); // newer
+
+        let from_a = merge_config(&snap_a, &snap_b);
+        assert_eq!(
+            from_a.collections["settings"]["settings"]["phishing"]["enabled"], false,
+            "with no designated primary, the newer write still wins"
         );
     }
 

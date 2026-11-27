@@ -56,7 +56,7 @@ struct Config {
 /// blocks is never re-proposed: the DACH list plus the representative Hagezi
 /// feeds. Overridable via `HARVEST_COVERAGE_URLS`.
 const DEFAULT_COVERAGE_URLS: &[&str] = &[
-    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-dach-blocklist/main/dach-ads-trackers.txt",
+    "https://raw.githubusercontent.com/bonderaustriaAT/justdns-blocklist/main/dach-ads-trackers.txt",
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
     "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt",

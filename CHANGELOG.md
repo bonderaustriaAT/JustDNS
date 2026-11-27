@@ -3,6 +3,178 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.49.0] - 2026-11-27
+
+- New: **15 more ready-made lists in the catalogue.** Ads: OISD Small, OISD Big,
+  StevenBlack Unified, Hagezi Pop-Up Ads. Tracking: Hagezi Windows/Office, Samsung, LG webOS,
+  Amazon, Xiaomi and TikTok telemetry, Frogeye first-party trackers (CNAME-cloaked).
+  Malware: URLhaus malware domains, Phishing Filter, Phishing Army, Hagezi Fake. Each one
+  with its false-positive rating, none switched on by default.
+
+## [0.48.4] - 2026-11-27
+
+- Fixed: **Activating a list now tells you how it went.** Switching a feed on used to leave
+  its row reading "loading…" forever — the download runs in the background, and the page never
+  heard back. The row now resolves on its own: green with its domain count when the feed
+  arrived, red when its source failed. The Phishing page's newly-registered-domain feeds get
+  the same status line under their switch.
+- Fixed: **Deep links into admin areas explain themselves.** A non-admin following a bookmark
+  or a shared URL into an admin-only page used to land silently on the overview, reading like
+  a broken link. They now get a short "no access" page naming their own role, with the way
+  back — and on a read-only cluster node, a hint to where the cluster is managed.
+- Fixed: **Dialogs keep the keyboard inside them.** The confirmation dialogs for destructive
+  actions (deleting, updating, rolling out a cluster update) now trap Tab exactly like the
+  large modal dialogs always did, and return focus to the trigger when they close — no more
+  tabbing into the page behind an overlay.
+- Changed: **The translation catalogues are guarded by the CI.** A new check keeps both
+  languages in step — same keys, matching placeholders, no call naming an unknown key — and a
+  first clean-up removed 37 dead entries the UI had accumulated.
+
+## [0.48.3] - 2026-11-27
+
+- Fixed: **Activating several lists at once no longer kills the box.** Switching a
+  ready-made list on used to re-read every enabled feed from disk and copy its full
+  domain set — once for the blocker, again for the per-device policies, deep-copied
+  for every group and device — while the old sets were still in memory and the new
+  feeds downloaded in parallel. On a small box that stack could reach for gigabytes,
+  and the container died at its memory limit: JustDNS was gone until you restarted
+  it. A feed is now parsed once and shared: the blocker, the policy engine and every
+  device policy reference the same set instead of holding copies of it. Feeds are
+  read line by line, so a list's full text is never in memory alongside its set.
+  Downloads run one after another instead of side by side, and policy rebuilds are
+  serialised. Toggling three lists in a row is now a few reference swaps, not three
+  full re-materialisations.
+
+## [0.48.2] - 2026-11-27
+
+- Changed: **Updates can now be started from your phone.** The one-click update used to
+  begin with a browser download of the restore file — on a phone, inside the web app,
+  that download goes nowhere and made the whole flow feel broken. The download is now a
+  clearly voluntary step in the dialog, and **Start update** runs without it. Nothing is
+  lost on safety: the server writes its own encrypted backup to disk before every
+  update, whether or not you also grab a copy. The rolling cluster update gets the same
+  treatment — its dialogs now offer the optional download as a button, and the update
+  never waits behind it.
+
+## [0.48.1] - 2026-11-26
+
+- Fixed: **Hardening from a second full security review.** Several defensive fixes. The
+  shared sync key of a high-availability cluster is now stored **encrypted at rest** like
+  the other secrets, so a copied or stolen data volume no longer hands over the one key
+  that unlocks the cluster. Password checks run off the async runtime, and repeated failed
+  sign-ins are rate-limited **per source address in addition to per username** — neither a
+  flood of parallel logins nor a rotation of made-up usernames can stall or spam the box.
+  First-run setup — creating the very first admin — is only reachable from the local
+  network. Changing a password, clearing someone's MFA or deleting an account now signs
+  out that account's other sessions, so a reset in response to a compromised login takes
+  effect immediately. The block page's request queue keeps a bounded number of entries,
+  the CSV report export neutralises names a spreadsheet would read as formulas, scheduled
+  SMB backups no longer carry the share password on the command line where a process
+  listing could see it, and every stored file is flushed to disk before its atomic
+  replace, so a crash leaves the old or the new state, never a half-written one. Two
+  dependency advisories (`cookie`, `url`) are resolved with the upstream updates.
+- Added: **A `Secure` switch for the session cookie.** If HTTPS is in front of your
+  dashboard (your own certificate or a reverse proxy), set `JUSTDNS_COOKIE_SECURE=1` and
+  the login cookie is sent only over the encrypted connection. Off by default, because
+  over plain HTTP — the usual way to reach a LAN dashboard — the browser would silently
+  drop a Secure cookie.
+- Added: **The block page speaks English when the visitor's browser does.** Its fixed
+  texts — the request button, the reason box, the confirmations — follow the browser
+  language, German by default. Your own heading and message always appear as written.
+
+## [0.48.0] - 2026-11-25
+
+- New: **See why a query was acted on (decision trace).** Every entry in the query log now records the
+  path the resolver took through its decision stages. Open an entry and the detail panel shows the
+  ordered stages (block list, phishing, source, CNAME uncloak, response-IP, DNSSEC, answer): the stage
+  that made the decision is called out, the gates that merely passed fold away behind a toggle, and a
+  banner shows when the troubleshooting pause was in effect. A coloured reason tag on the row marks the
+  cause at a glance (block list, threat IP, phishing or a warning). The decisive stage links straight
+  to the page that governs it, so a false positive is one click from the fix. The full trace is kept
+  only in the durable log on disk and read on demand, so it adds nothing to the resolver's memory on
+  the query path.
+
+## [0.47.2] - 2026-11-24
+
+- Changed: **Alerts fire the moment a threat is caught.** The notification webhook for a phishing or
+  newly-registered-domain block used to wait for a periodic check and could take up to a minute to go
+  out. A block now wakes the notifier immediately, so the webhook arrives within seconds. The periodic
+  check stays as a fallback for the conditions that are not tied to a single block.
+- Fixed: **Hardening from a full security review.** Several defensive fixes: list feeds and
+  notification webhooks can no longer be pointed at internal metadata or link-local addresses and no
+  longer follow redirects (SSRF guard); a response-IP block now also catches an AAAA answer whose
+  sibling A record is on the block list; a read-only follower no longer accepts account changes, which
+  the authoritative sync from the primary would silently revert; and a one-time TOTP code can no longer
+  be replayed within its time step.
+
+## [0.47.1] - 2026-11-22
+
+- Fixed: **Pausing protection now covers the whole cluster.** When you temporarily turn protection off
+  (the troubleshooting pause), it used to pause only the one node you were on, so a device that uses
+  more than one cluster node as its DNS would, after a short while, reach a node that never paused and
+  see blocking come back before the timer ran out. The pause deadline is now mirrored to every node, so
+  protection stays off everywhere until it expires. It is still runtime-only, and a full restart clears
+  it. Arming a pause now also flushes the DNS cache, so a name that was being answered from a stale or
+  cached empty entry resolves fresh at once instead of staying stuck until that entry expires.
+- Fixed: **Large services no longer stall when a response-IP list is active.** YouTube and other big
+  sites rotate across many CDN addresses, and a response-IP list that happened to flag one of them
+  would refuse that answer and stall the service. A built-in allowlist now always exempts the
+  published IPv4 ranges of the large eyeball networks (Google/YouTube, Cloudflare, Fastly) from
+  response-IP blocking. It is always on, needs no setup and is not shown in the list UI, and it only
+  has an effect while a response-IP list is active. A direct-IP threat is not in that space and stays
+  blocked, and a malicious name fronted by such a CDN is still caught by the ordinary name block.
+- Changed: **DNS chaff reaches higher and varies more.** The intensity slider now goes up to 600 decoy
+  lookups per minute (was 120), and the decoy pool grew to about 150 varied hostnames so the cover
+  traffic blends in better.
+
+## [0.47.0] - 2026-11-22
+
+- Added: **Block answers that resolve to a known-bad IP.** A new kind of list holds IPv4 addresses and
+  CIDR ranges instead of domain names and is checked against the addresses a resolver returns: when an
+  answer resolves to an address on the list, the whole answer is refused with the usual block response,
+  so a name whose address is malicious is stopped even when the name itself is on no list. The
+  ready-made "JustDNS Threat-IPs" list (C2, dropper and malware addresses from our honeypot network) is
+  one click away in the catalogue, and you can add your own IP lists by URL like any other feed. IPv4
+  only for now.
+
+## [0.46.3] - 2026-11-21
+
+- Changed: **DACH blocklist moved to its new repository.** The JustDNS DACH supplement is now fetched
+  from `justdns-blocklist` (previously `justdns-dach-blocklist`). The list contents are unchanged, and
+  saved subscriptions keep working because they store the preset key rather than the URL.
+
+## [0.46.2] - 2026-11-21
+
+- Fixed: **Settings no longer switch themselves off across a cluster.** Protections such as the newly
+  registered domain (NRD) block, the lookalike and homoglyph URL check and the privacy module could
+  turn off on their own, and the chosen primary (main node) could clear itself. In a cluster the
+  configuration is edited only on the primary, but the sync still merged config both ways by last
+  write, so a node that had not yet caught up could overwrite a setting cluster-wide just by saving
+  something else. The primary is now authoritative: every other node mirrors the primary's
+  configuration and never pushes its own over it. With no primary designated a cluster still syncs both
+  ways as before, so designating a primary is what makes a setting stick.
+
+## [0.46.1] - 2026-11-21
+
+- Fixed: **The designated primary (main node) no longer clears itself.** In a cluster the chosen
+  primary is the only node that may edit configuration; every other node is a read-only follower. A
+  sync race could wipe that designation: a node that had not yet learned the primary would, on any
+  unrelated settings save, stamp its own empty designation with a newer time and win the merge, so the
+  whole cluster fell back to no primary and every node turned writable again. The designation is now
+  ranked by when it was explicitly set, not by the last settings write, so an empty one can no longer
+  overwrite a chosen primary. Clearing the primary on purpose still applies across the cluster.
+
+## [0.46.0] - 2026-11-21
+
+- Added: **iOS profile for encrypted DNS.** Settings, Encryption now offers a download for a
+  configuration profile (`.mobileconfig`) that points iOS and iPadOS at this node's DNS-over-TLS
+  endpoint. iOS has no "Private DNS" switch like Android; install the profile via Settings, General,
+  VPN & Device Management. With a publicly trusted certificate no CA install is needed.
+- Fixed: **The DoT/DoH toggles and switching the certificate now take effect instantly.** Previously
+  every save in this area kicked off the full policy rebuild (millions of domains re-materialized from
+  the feeds) even though only a TLS listener goes up or down. The rebuild now runs only when a field
+  the DNS engine actually reads changes.
+
 ## [0.45.0] - 2026-11-20
 
 - New: **Privacy module.** An opt-in module that stays dormant until you switch it on, so a node that

@@ -5,7 +5,18 @@
 # Deployments point JUSTDNS_IMAGE / JUSTDNS_UPDATER_IMAGE here (the compose
 # default). GitHub's hosted runners build reliably with a shared layer cache;
 # the LAN Gitea registry no longer builds images.
-name: Image (ghcr.io)
+#
+# ghcr.io stays the primary registry (buildcache, compose default, the channel
+# the in-app updater follows). The main app image is additionally mirrored to
+# Docker Hub so the Unraid Community Apps download counter (which reads Docker
+# Hub pull counts) has a source. The mirror is a second push target of the same
+# build, not a second build: one manifest digest lands under both registries,
+# so the versions can never drift. It is opt-in and only activates when the repo
+# variable DOCKERHUB_NAMESPACE is set, together with the secrets
+# DOCKERHUB_USERNAME and DOCKERHUB_TOKEN; until then the workflow publishes to
+# ghcr.io alone. Only the app image is mirrored; the updater and harvester
+# sidecars stay ghcr.io only (the Unraid template does not use them).
+name: Image (ghcr.io + Docker Hub mirror)
 
 on:
   push:
@@ -48,6 +59,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT }}
 
+      - name: Log in to Docker Hub
+        # Opt-in mirror: only when DOCKERHUB_NAMESPACE is configured. The login
+        # owner is the secret DOCKERHUB_USERNAME when set, otherwise it falls back
+        # to the DOCKERHUB_NAMESPACE variable. They differ only when a personal
+        # account pushes into an organisation repo; for a personal namespace the
+        # username equals the namespace, so the secret can be omitted. A classic
+        # access token with Read & Write scope is kept as the secret
+        # DOCKERHUB_TOKEN.
+        if: ${{ vars.DOCKERHUB_NAMESPACE != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_NAMESPACE }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Set up Buildx
         # A persistent BuildKit builder, so layers (above all the cargo-chef
         # dependency layer) can be exported to and restored from the cache.
@@ -56,18 +82,32 @@ jobs:
       - name: Work out the image tags
         # A normal release tag publishes :latest and :vX.Y.Z (the stable channel).
         # A pre-release tag (vX.Y.Z-rc…, i.e. any tag with a '-') publishes :vX.Y.Z
-        # and the moving :beta tag, and never moves :latest — so a node on the beta
+        # and the moving :beta tag, and never moves :latest, so a node on the beta
         # channel pulls :beta while stable installs are untouched.
         # A manual run only warms the cache (push is disabled below).
+        #
+        # When DOCKERHUB_NAMESPACE is set, the same tag set is mirrored to
+        # docker.io/<namespace>/justdns and appended to the list, so the single
+        # build pushes identical tags to both registries. Empty namespace leaves
+        # the list ghcr-only. build-push-action pushes every tag of one build, so
+        # the mirror costs no extra build time.
         id: tags
+        env:
+          DH_NS: ${{ vars.DOCKERHUB_NAMESPACE }}
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
             case "${{ github.ref_name }}" in
-              *-*) TAGS="$IMAGE:${{ github.ref_name }},$IMAGE:beta" ;;
-              *)   TAGS="$IMAGE:latest,$IMAGE:${{ github.ref_name }}" ;;
+              *-*) GHCR="$IMAGE:${{ github.ref_name }},$IMAGE:beta" ;;
+              *)   GHCR="$IMAGE:latest,$IMAGE:${{ github.ref_name }}" ;;
             esac
           else
-            TAGS="$IMAGE:latest"
+            GHCR="$IMAGE:latest"
+          fi
+          TAGS="$GHCR"
+          if [ -n "$DH_NS" ]; then
+            DH_IMAGE="docker.io/$DH_NS/justdns"
+            DH=$(printf '%s' "$GHCR" | sed "s#$IMAGE#$DH_IMAGE#g")
+            TAGS="$GHCR,$DH"
           fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
 

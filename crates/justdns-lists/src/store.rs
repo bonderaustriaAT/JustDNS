@@ -16,12 +16,13 @@
 //! every block list (see the filter crate), so a whitelisted name is never
 //! refused, whatever a subscription says.
 
-use std::io::{self, Read};
+use std::collections::HashMap;
+use std::io::{self, BufRead, Read};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use justdns_filter::{BlockCategory, BlockSource, Blocker, DomainSet, parse_rule};
+use justdns_filter::{BlockCategory, BlockSource, Blocker, DomainSet, IpSet, parse_rule};
 use serde::{Deserialize, Serialize};
 
 use crate::ListKind;
@@ -240,6 +241,25 @@ struct Inner {
     /// Directory holding one cached feed file per subscription.
     cache_dir: PathBuf,
     lists: RwLock<UserLists>,
+    /// Parsed block feeds, one per subscription id, keyed by the cache file's
+    /// stamp. A feed is parsed exactly once per download; a dashboard toggle
+    /// clones the [`Arc`] instead of re-reading (and re-holding) the whole file
+    /// next to its set. Block feeds only — they are the multi-million-domain
+    /// ones, and they are shared whole, never merged.
+    block_sets: Mutex<HashMap<String, (Stamp, Arc<DomainSet>)>>,
+    /// The last merged allow set, keyed by the stamps of its inputs (the user's
+    /// allow entries plus every enabled allow feed), so a rebuild whose inputs
+    /// did not change hands out the same [`Arc`] instead of re-parsing every
+    /// feed.
+    merged_allow: Mutex<Option<(u64, Arc<DomainSet>)>>,
+    /// The same for the merged warn (newly-registered-domain) set.
+    merged_warn: Mutex<Option<(u64, Arc<DomainSet>)>>,
+    /// The same for the merged response-IP block set.
+    merged_ip: Mutex<Option<(u64, Arc<IpSet>)>>,
+    /// Serialises feed downloads. Toggling several presets at once fires one
+    /// background fetch each; without the lock their full feed bodies would sit
+    /// in memory simultaneously, tripping a small box over its limit.
+    fetch_lock: Mutex<()>,
     /// The global default blocker whose allow and custom sets we own and rebuild.
     /// It backs the dashboard's active-list counts and is the base the per-client
     /// policies are layered on; the per-client engine itself is built by the
@@ -249,17 +269,47 @@ struct Inner {
     on_change: RwLock<Option<OnChange>>,
 }
 
+/// Identifies a cache file's content for cache keying: modification time plus
+/// size, both cheap to read and both changing on every download. Deliberately
+/// coarser than a hash — a stamp only needs to tell "the file changed".
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    mtime_ms: i64,
+    len: u64,
+}
+
+impl Stamp {
+    fn of(path: &Path) -> Option<Stamp> {
+        let meta = std::fs::metadata(path).ok()?;
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|since| since.as_millis() as i64)
+            .unwrap_or(0);
+        Some(Stamp {
+            mtime_ms,
+            len: meta.len(),
+        })
+    }
+}
+
 /// One reusable block-list object the per-client policies can switch on or off:
 /// a subscribed feed, resolved to its domain set. Bundled ads/malware are added
 /// by the binary from the filter crate; this covers the user's own feeds.
+///
+/// The set rides behind an [`Arc`] so one parsed feed is shared by the blocker,
+/// the policy engine and every per-scope policy instead of being copied into
+/// each of them — a deep copy per consumer is what once pushed activating a
+/// large list past a small box's memory.
 #[derive(Clone, Debug)]
 pub struct ListObject {
     /// Stable id, referenced by a scope's list delta (the subscription id).
     pub id: String,
     /// Display name shown in the dashboard.
     pub label: String,
-    /// The domains this object blocks.
-    pub set: DomainSet,
+    /// The domains this object blocks, shared with every other consumer.
+    pub set: Arc<DomainSet>,
     /// Whether it is on in the global default (the subscription's enabled flag).
     pub enabled: bool,
 }
@@ -281,17 +331,29 @@ pub struct BlockFeedEntry {
 /// and per-scope policies: the merged allow set, the user's own manual block set,
 /// and each block feed as a switchable object. Bundled ads/malware and the config
 /// flags are added by the binary, which owns them.
+///
+/// The merged sets ride behind [`Arc`]s so handing them to the engine (and to
+/// every per-scope policy on top) is a reference bump, not a copy.
 #[derive(Clone, Debug, Default)]
 pub struct ResolvedLists {
     /// The global allow set: manual allow entries plus every enabled allow feed.
-    pub allow: DomainSet,
+    pub allow: Arc<DomainSet>,
     /// The user's own manual block entries, as one set (always on globally).
     pub own_block: DomainSet,
     /// Every block feed subscription, resolved, with its global enabled flag.
     pub block_feeds: Vec<ListObject>,
     /// The merged newly-registered-domain warn set: every enabled warn feed.
     /// Handed to the phishing detector, never to the blocking policy.
-    pub warn: DomainSet,
+    pub warn: Arc<DomainSet>,
+    /// The merged response-IP block set: every enabled IP feed. Checked against
+    /// resolver answers, never against query names, so it is global (not scoped
+    /// per device) like the warn set.
+    pub ip_block: Arc<IpSet>,
+    /// The built-in answer-IP allowlist (the large eyeball CDNs). Always active in
+    /// the background and not user-editable: an answer IP in this set overrides the
+    /// response-IP block, so a big CDN sharing space with a flagged host still
+    /// resolves. Only matters while a block-IP list is active.
+    pub ip_allow: Arc<IpSet>,
 }
 
 /// A cheap, cloneable handle to the persistent lists.
@@ -334,6 +396,11 @@ impl ListStore {
                 path,
                 cache_dir,
                 lists: RwLock::new(lists),
+                block_sets: Mutex::new(HashMap::new()),
+                merged_allow: Mutex::new(None),
+                merged_warn: Mutex::new(None),
+                merged_ip: Mutex::new(None),
+                fetch_lock: Mutex::new(()),
                 blocker,
                 on_change: RwLock::new(None),
             }),
@@ -369,55 +436,42 @@ impl ListStore {
     /// switchable object. Mirrors how [`rebuild`](Self::rebuild) assembles the
     /// global blocker, but returns the pieces as data so the binary can layer the
     /// groups' and devices' deltas on top.
+    ///
+    /// Cheap by design: block feeds come from the parse cache (a toggle clones
+    /// an [`Arc`]), and the merged allow/warn/IP sets are reused unless one of
+    /// their inputs changed. Activating several lists in a row no longer
+    /// re-materialises every enabled feed for each of them.
     pub fn resolved(&self) -> ResolvedLists {
         let lists = self.read();
 
-        let mut allow = DomainSet::new();
-        for entry in &lists.allow {
-            allow.add_rules(&entry.domain);
-        }
+        let allow = self.merged_allow(&lists);
 
         let mut own_block = DomainSet::new();
         for entry in &lists.block {
             own_block.add_rules(&entry.domain);
         }
 
+        let warn = self.merged_warn(&lists);
+        let ip_block = self.merged_ip(&lists);
+        // The answer-IP allow set is the built-in CDN allowlist: always active in
+        // the background and never surfaced in the UI, it keeps the large eyeball
+        // services from being caught by a response-IP block. It only has an effect
+        // while a block-IP list is active, since the answer path checks it only
+        // then.
+        let ip_allow = Arc::new(IpSet::from_rules(justdns_filter::BUILTIN_ANSWER_ALLOW));
         let mut block_feeds = Vec::new();
-        let mut warn = DomainSet::new();
         for sub in &lists.subscriptions {
-            match sub.kind {
-                // Allow feeds merge into the one allow set; they are global-only.
-                ListKind::Allow => {
-                    if sub.enabled {
-                        if let Some(text) = self.read_cache(&sub.id) {
-                            allow.add_rules(&text);
-                        }
-                    }
-                }
-                // Each block feed is a switchable object a scope can toggle.
-                ListKind::Block => {
-                    let mut set = DomainSet::new();
-                    if let Some(text) = self.read_cache(&sub.id) {
-                        set.add_rules(&text);
-                    }
-                    block_feeds.push(ListObject {
-                        id: sub.id.clone(),
-                        label: sub.name.clone(),
-                        set,
-                        enabled: sub.enabled,
-                    });
-                }
-                // Warn feeds (newly registered domains) merge into one global set
-                // that the binary hands to the phishing detector; they never enter
-                // the blocking policy, so they are not scoped per device.
-                ListKind::Warn => {
-                    if sub.enabled {
-                        if let Some(text) = self.read_cache(&sub.id) {
-                            warn.add_rules(&text);
-                        }
-                    }
-                }
+            // Allow/warn/IP feeds merge (cached above); each block feed stays its
+            // own switchable object a scope can toggle, shared behind an Arc.
+            if sub.kind != ListKind::Block {
+                continue;
             }
+            block_feeds.push(ListObject {
+                id: sub.id.clone(),
+                label: sub.name.clone(),
+                set: self.block_feed_set(sub).unwrap_or_else(|| Arc::new(DomainSet::new())),
+                enabled: sub.enabled,
+            });
         }
 
         ResolvedLists {
@@ -425,7 +479,93 @@ impl ListStore {
             own_block,
             block_feeds,
             warn,
+            ip_block,
+            ip_allow,
         }
+    }
+
+    /// The parsed set of one block feed — from the parse cache when the cache
+    /// file has not changed, else streamed from disk once and cached. This is
+    /// what keeps a toggle from re-reading a multi-million-domain file: the
+    /// [`Arc`] is cloned, the file is not touched again.
+    fn block_feed_set(&self, sub: &Subscription) -> Option<Arc<DomainSet>> {
+        let path = self.cache_file(&sub.id);
+        let stamp = Stamp::of(&path)?;
+        let mut cache = self.inner.block_sets.lock().expect("parse cache poisoned");
+        if let Some((cached, set)) = cache.get(&sub.id) {
+            if *cached == stamp {
+                return Some(Arc::clone(set));
+            }
+        }
+        let set = Arc::new(stream_domain_set(&path)?);
+        cache.insert(sub.id.clone(), (stamp, Arc::clone(&set)));
+        Some(set)
+    }
+
+    /// The merged allow set: the user's entries plus every enabled allow feed,
+    /// reused unless an input changed (entry or feed cache file).
+    fn merged_allow(&self, lists: &UserLists) -> Arc<DomainSet> {
+        let feeds = self.kind_stamps(lists, ListKind::Allow);
+        let key = merge_key(&lists.allow, &feeds);
+        if let Some(set) = take_cached(&self.inner.merged_allow, key) {
+            return set;
+        }
+        let mut set = DomainSet::new();
+        for entry in &lists.allow {
+            set.add_rule(&entry.domain);
+        }
+        for (id, _) in &feeds {
+            stream_into(&mut set, &self.cache_file(id));
+        }
+        store_cached(&self.inner.merged_allow, key, set)
+    }
+
+    /// The merged newly-registered-domain warn set: every enabled warn feed,
+    /// reused unless a feed cache file changed.
+    fn merged_warn(&self, lists: &UserLists) -> Arc<DomainSet> {
+        let feeds = self.kind_stamps(lists, ListKind::Warn);
+        let key = merge_key(&[], &feeds);
+        if let Some(set) = take_cached(&self.inner.merged_warn, key) {
+            return set;
+        }
+        let mut set = DomainSet::new();
+        for (id, _) in &feeds {
+            stream_into(&mut set, &self.cache_file(id));
+        }
+        store_cached(&self.inner.merged_warn, key, set)
+    }
+
+    /// The merged response-IP block set: every enabled IP feed, reused unless a
+    /// feed cache file changed.
+    fn merged_ip(&self, lists: &UserLists) -> Arc<IpSet> {
+        let feeds = self.kind_stamps(lists, ListKind::BlockIp);
+        let key = merge_key(&[], &feeds);
+        if let Some(set) = take_cached(&self.inner.merged_ip, key) {
+            return set;
+        }
+        let mut set = IpSet::new();
+        for (id, _) in &feeds {
+            if let Ok(file) = std::fs::File::open(self.cache_file(id)) {
+                for line in std::io::BufReader::new(file).lines() {
+                    let Ok(line) = line else { break };
+                    set.add_rule(&line);
+                }
+            }
+        }
+        store_cached(&self.inner.merged_ip, key, set)
+    }
+
+    /// The `(id, stamp)` pairs of every enabled feed of `kind`, in subscription
+    /// order — the merge cache's input fingerprint.
+    fn kind_stamps(&self, lists: &UserLists, kind: ListKind) -> Vec<(String, Stamp)> {
+        lists
+            .subscriptions
+            .iter()
+            .filter(|sub| sub.kind == kind && sub.enabled)
+            .filter_map(|sub| {
+                Stamp::of(&self.cache_file(&sub.id)).map(|stamp| (sub.id.clone(), stamp))
+            })
+            .collect()
     }
 
     /// The block-feed catalogue for the dashboard: each block subscription's id,
@@ -797,8 +937,11 @@ impl ListStore {
 
     /// Fetch every enabled subscription, cache the results, record the status
     /// and rebuild the blocker. Blocking (it does network I/O), so callers on an
-    /// async runtime should wrap it in `spawn_blocking`.
+    /// async runtime should wrap it in `spawn_blocking`. Downloads are
+    /// serialised like [`refresh_subscription`](Self::refresh_subscription)'s,
+    /// so a manual refresh never runs beside a background one.
     pub fn refresh_all(&self) -> Vec<RefreshOutcome> {
+        let _serialised = self.inner.fetch_lock.lock().expect("fetch lock poisoned");
         // Capture the previous rule count alongside each target, so the outcome
         // can report how a feed changed size without a second pass over the store.
         let targets: Vec<(String, String, Option<usize>)> = {
@@ -872,7 +1015,12 @@ impl ListStore {
     /// of waiting for the twelve-hour refresh. Blocking (network I/O), so an async
     /// caller wraps it in `spawn_blocking`. Returns `None` if the id is unknown or
     /// the feed is disabled.
+    ///
+    /// Downloads are serialised: toggling several presets at once fires one
+    /// fetch each, and holding several full feed bodies in memory at the same
+    /// time is exactly the spike that pushes a small box over its limit.
     pub fn refresh_subscription(&self, id: &str) -> Option<RefreshOutcome> {
+        let _serialised = self.inner.fetch_lock.lock().expect("fetch lock poisoned");
         let (url, previous) = {
             let lists = self.read();
             let sub = lists
@@ -924,16 +1072,15 @@ impl ListStore {
         })
     }
 
-    /// Rebuild the allow set and the block sources and swap them into the
-    /// blocker. The allow side stays merged, but the block side is kept as one
-    /// named source per list — the user's manual list first, then each enabled
-    /// block subscription under its own name — so a block can report the exact
-    /// list that caught the query. Reads each enabled feed's cache from disk.
+    /// Push the current lists into the live blocker. Cheap by design: the
+    /// merged allow set and every block feed come from the caches, so a
+    /// toggle assembles [`Arc`] references instead of re-reading and re-holding
+    /// every enabled feed. The block side stays one named source per list —
+    /// the user's manual list first, then each enabled block subscription under
+    /// its own name — so a block can report the exact list that caught the
+    /// query.
     fn rebuild(&self, lists: &UserLists) {
-        let mut allow = DomainSet::new();
-        for entry in &lists.allow {
-            allow.add_rules(&entry.domain);
-        }
+        let allow = self.merged_allow(lists);
 
         let mut sources: Vec<BlockSource> = Vec::new();
         // The user's own manual block list comes first, so an overlapping name is
@@ -946,34 +1093,20 @@ impl ListStore {
             sources.push(BlockSource {
                 category: BlockCategory::Custom,
                 label: "Eigene Blockliste".to_owned(),
-                set: own,
+                set: Arc::new(own),
             });
         }
 
         for sub in &lists.subscriptions {
-            if !sub.enabled {
+            if !sub.enabled || sub.kind != ListKind::Block {
                 continue;
             }
-            let Some(text) = self.read_cache(&sub.id) else {
-                continue;
-            };
-            match sub.kind {
-                // Allow feeds still merge into the one allow set.
-                ListKind::Allow => allow.add_rules(&text),
-                // Each block feed is its own named source, so the dashboard can
-                // name it as the reason for a block.
-                ListKind::Block => {
-                    let mut set = DomainSet::new();
-                    set.add_rules(&text);
-                    sources.push(BlockSource {
-                        category: BlockCategory::Custom,
-                        label: sub.name.clone(),
-                        set,
-                    });
-                }
-                // Warn (NRD) feeds never enter the blocker: they are consumed by
-                // the phishing detector via `resolved().warn`, not here.
-                ListKind::Warn => {}
+            if let Some(set) = self.block_feed_set(sub) {
+                sources.push(BlockSource {
+                    category: BlockCategory::Custom,
+                    label: sub.name.clone(),
+                    set,
+                });
             }
         }
 
@@ -1042,6 +1175,66 @@ fn build_candidate(text: &str) -> (DomainSet, usize) {
     (set, count)
 }
 
+/// Hash the inputs of a merged set — the user's entry domains (notes never
+/// change what is matched) plus the `(id, stamp)` pairs of its feeds — into the
+/// merge cache's key. Order-sensitive, but the inputs are always assembled in
+/// subscription order, so the same inputs hash the same.
+fn merge_key(entries: &[ListEntry], feeds: &[(String, Stamp)]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for entry in entries {
+        entry.domain.hash(&mut hasher);
+    }
+    for (id, stamp) in feeds {
+        id.hash(&mut hasher);
+        stamp.mtime_ms.hash(&mut hasher);
+        stamp.len.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// The cached merged set under `key`, when the cache holds that key. The lock
+/// is released before the caller builds a fresh set, so building never blocks
+/// other readers against a stale copy.
+fn take_cached<T>(slot: &Mutex<Option<(u64, Arc<T>)>>, key: u64) -> Option<Arc<T>> {
+    let cache = slot.lock().expect("merge cache poisoned");
+    cache
+        .as_ref()
+        .filter(|(cached_key, _)| *cached_key == key)
+        .map(|(_, set)| Arc::clone(set))
+}
+
+/// Store a freshly built merged set under `key` and hand it out.
+fn store_cached<T>(slot: &Mutex<Option<(u64, Arc<T>)>>, key: u64, set: T) -> Arc<T> {
+    let set = Arc::new(set);
+    *slot.lock().expect("merge cache poisoned") = Some((key, Arc::clone(&set)));
+    set
+}
+
+/// Parse a feed file into a set line-by-line, so the file's full text is never
+/// held in memory next to the set it fills. A missing file yields an empty set.
+fn stream_into(set: &mut DomainSet, path: &Path) {
+    let Ok(file) = std::fs::File::open(path) else {
+        return;
+    };
+    for line in std::io::BufReader::new(file).lines() {
+        let Ok(line) = line else { break };
+        set.add_rule(&line);
+    }
+}
+
+/// Parse a feed file into a fresh set, the streaming way. `None` when the file
+/// does not exist.
+fn stream_domain_set(path: &Path) -> Option<DomainSet> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut set = DomainSet::new();
+    for line in std::io::BufReader::new(file).lines() {
+        let Ok(line) = line else { break };
+        set.add_rule(&line);
+    }
+    Some(set)
+}
+
 /// Count how many lines of `text` parse into a usable rule, without building a
 /// set — cheap enough to run on the largest feeds.
 fn count_rules(text: &str) -> usize {
@@ -1052,14 +1245,31 @@ fn count_rules(text: &str) -> usize {
 
 /// Download `url` as text, with a timeout and a size cap.
 fn fetch(url: &str) -> Result<String, String> {
+    // SSRF guard: a hand-added subscription URL is fetched by the node itself, so
+    // refuse one that aims at the cloud metadata endpoint or another link-local
+    // address before any connection is made.
+    if crate::net_guard::host_is_disallowed(url) {
+        return Err("feed URL points at a link-local/metadata address and is not allowed".to_owned());
+    }
     // ureq 3 moved timeouts onto the config; a per-request override keeps the
     // default agent (and its connection pool) instead of building a fresh one.
+    // Redirects are not followed: otherwise a public URL could 302 to the metadata
+    // endpoint and slip past the host guard above. A feed that redirects surfaces
+    // as a fetch error (shown in the UI) and the operator uses the final URL.
     let response = ureq::get(url)
         .config()
         .timeout_global(Some(FETCH_TIMEOUT))
+        .max_redirects(0)
         .build()
         .call()
         .map_err(|error| error.to_string())?;
+    // With redirects disabled a 3xx is returned rather than followed; treat any
+    // non-success status as a fetch failure so a redirected feed never reads as an
+    // empty (zero-rule) list.
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("feed fetch returned HTTP {}", status.as_u16()));
+    }
     let mut body = String::new();
     response
         .into_body()
@@ -1093,8 +1303,9 @@ fn now_nanos() -> u128 {
         .unwrap_or(0)
 }
 
-/// Write `lists` to `path` as pretty JSON, atomically (temp file then rename),
-/// creating the parent directory if needed.
+/// Write `lists` to `path` as pretty JSON, atomically: a sibling temp file is
+/// written, flushed to disk, then renamed over the target, so a crash leaves
+/// either the old or the new state — never a half-written one.
 fn write_atomic(path: &Path, lists: &UserLists) -> Result<(), ListError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -1109,7 +1320,7 @@ fn write_atomic(path: &Path, lists: &UserLists) -> Result<(), ListError> {
         source,
     })?;
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, &json).map_err(|source| ListError::Io {
+    write_and_sync(&tmp, &json).map_err(|source| ListError::Io {
         path: tmp.clone(),
         source,
     })?;
@@ -1118,6 +1329,14 @@ fn write_atomic(path: &Path, lists: &UserLists) -> Result<(), ListError> {
         source,
     })?;
     Ok(())
+}
+
+/// Write `bytes` to `path` and flush to disk, leaving the rename to the caller.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 #[cfg(test)]
@@ -1188,6 +1407,132 @@ mod tests {
             !store.block_feed_catalog()[0].enabled,
             "the catalogue reflects the disabled flag",
         );
+    }
+
+    #[test]
+    fn ip_feed_fills_the_response_ip_block_set_and_stays_out_of_the_domain_blocker() {
+        let (_dir, store, _blocker) = store();
+        let id = store
+            .add_subscription(
+                "Threat IPs",
+                "https://example.invalid/threat-ips-v4.txt",
+                ListKind::BlockIp,
+            )
+            .unwrap();
+        // Seed the cache as a real fetch would, then resolve from it.
+        store
+            .write_cache(&id, "1.2.3.4\n10.0.0.0/8\n# comment\n")
+            .unwrap();
+
+        let resolved = store.resolved();
+        assert!(resolved.ip_block.contains("1.2.3.4".parse().unwrap()));
+        assert!(resolved.ip_block.contains("10.9.8.7".parse().unwrap()));
+        assert!(!resolved.ip_block.contains("8.8.8.8".parse().unwrap()));
+
+        // An IP feed is not a domain block feed and never enters the blocker.
+        assert!(
+            store.block_feed_catalog().is_empty(),
+            "IP feeds are not listed as domain block feeds"
+        );
+
+        // Disabling it empties the response-IP set.
+        store.set_subscription_enabled(&id, false).unwrap();
+        assert!(store.resolved().ip_block.is_empty());
+    }
+
+    #[test]
+    fn block_ip_kind_round_trips_through_serde() {
+        assert_eq!(
+            serde_json::to_value(ListKind::BlockIp).unwrap(),
+            serde_json::Value::String("blockip".to_owned()),
+        );
+        let kind: ListKind = serde_json::from_str("\"blockip\"").unwrap();
+        assert_eq!(kind, ListKind::BlockIp);
+    }
+
+    #[test]
+    fn block_feed_is_parsed_once_and_shared_until_its_file_changes() {
+        let (_dir, store, _blocker) = store();
+        let id = store
+            .add_subscription("Ads feed", "https://example.invalid/ads.txt", ListKind::Block)
+            .unwrap();
+        store.write_cache(&id, "ads.feed.example\n").unwrap();
+
+        // Two resolves hand out the very same parsed set: the toggle-and-share
+        // contract that keeps several simultaneous activations from re-reading
+        // (and re-holding) every enabled feed.
+        let first = store.resolved();
+        let second = store.resolved();
+        let a = first
+            .block_feeds
+            .iter()
+            .find(|feed| feed.id == id)
+            .expect("the feed resolves");
+        let b = second
+            .block_feeds
+            .iter()
+            .find(|feed| feed.id == id)
+            .expect("the feed resolves");
+        assert!(
+            Arc::ptr_eq(&a.set, &b.set),
+            "an unchanged feed file is parsed exactly once"
+        );
+        assert!(a.set.blocks("sub.ads.feed.example"));
+
+        // Toggling the feed does not re-parse it either.
+        store.set_subscription_enabled(&id, false).unwrap();
+        store.set_subscription_enabled(&id, true).unwrap();
+        let third = store.resolved();
+        let c = third
+            .block_feeds
+            .iter()
+            .find(|feed| feed.id == id)
+            .expect("the feed is still an object");
+        assert!(Arc::ptr_eq(&a.set, &c.set), "a toggle shares the set");
+
+        // A changed cache file (here: a longer one, so the stamp differs) is
+        // re-parsed — the cache follows the download, not the toggle.
+        store
+            .write_cache(&id, "ads.feed.example\nother.feed.example\n")
+            .unwrap();
+        let fourth = store.resolved();
+        let d = fourth
+            .block_feeds
+            .iter()
+            .find(|feed| feed.id == id)
+            .expect("the feed resolves");
+        assert!(
+            !Arc::ptr_eq(&a.set, &d.set),
+            "a new download is parsed anew"
+        );
+        assert!(d.set.blocks("other.feed.example"));
+    }
+
+    #[test]
+    fn merged_sets_are_reused_until_an_input_changes() {
+        let (_dir, store, _blocker) = store();
+        let id = store
+            .add_subscription("Allow feed", "https://example.invalid/allow.txt", ListKind::Allow)
+            .unwrap();
+        store.write_cache(&id, "allowed.example\n").unwrap();
+
+        let first = store.resolved();
+        let second = store.resolved();
+        assert!(
+            Arc::ptr_eq(&first.allow, &second.allow),
+            "unchanged inputs reuse the merged allow set"
+        );
+
+        // A new allow entry changes an input, so the merge is rebuilt.
+        store.add_allow("another.example", None).unwrap();
+        let third = store.resolved();
+        assert!(!Arc::ptr_eq(&first.allow, &third.allow));
+        assert!(third.allow.blocks("another.example"));
+        assert!(third.allow.blocks("allowed.example"), "the feed is still in");
+
+        // And then it is stable again.
+        let fourth = store.resolved();
+        assert!(Arc::ptr_eq(&third.allow, &fourth.allow));
     }
 
     #[test]

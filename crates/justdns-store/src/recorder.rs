@@ -737,6 +737,9 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -888,6 +891,9 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -1054,6 +1060,9 @@ mod tests {
             resolver: None,
             dnssec: None,
             phishing: None,
+            block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 
@@ -1116,6 +1125,9 @@ mod tests {
             resolver: Some(resolver.to_owned()),
             dnssec: None,
             phishing: None,
+            block_reason: None,
+            reason: None,
+            trace: None,
         }
     }
 

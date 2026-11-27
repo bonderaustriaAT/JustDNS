@@ -12,7 +12,7 @@ anything and never opens a pull request — the report is its only output.
 
 It exists because the built-in tracker catalogue is deliberately thin on
 German-language ad/measurement companies, so the domains worth adding to the
-[JustDNS DACH blocklist](https://github.com/bonderaustriaAT/justdns-dach-blocklist)
+[JustDNS DACH blocklist](https://github.com/bonderaustriaAT/justdns-blocklist)
 are exactly the ones slipping through *resolved, never blocked* in the log.
 
 ## Why a sidecar, and why the API
