@@ -3,6 +3,17 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.48.2] - 2026-11-27
+
+- Changed: **Updates can now be started from your phone.** The one-click update used to
+  begin with a browser download of the restore file — on a phone, inside the web app,
+  that download goes nowhere and made the whole flow feel broken. The download is now a
+  clearly voluntary step in the dialog, and **Start update** runs without it. Nothing is
+  lost on safety: the server writes its own encrypted backup to disk before every
+  update, whether or not you also grab a copy. The rolling cluster update gets the same
+  treatment — its dialogs now offer the optional download as a button, and the update
+  never waits behind it.
+
 ## [0.48.1] - 2026-11-26
 
 - Fixed: **Hardening from a second full security review.** Several defensive fixes. The

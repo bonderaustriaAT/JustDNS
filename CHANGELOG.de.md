@@ -4,6 +4,18 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.48.2] - 2026-11-27
+
+- Geaendert: **Update jetzt auch vom Handy aus startbar.** Das Ein-Klick-Update begann
+  bisher immer mit einem Browser-Download der Wiederherstellungsdatei — auf dem Handy
+  laeuft der in der Web-App ins Leere und machte den ganzen Vorgang unbrauchbar. Der
+  Download ist jetzt ein deutlich freiwilliger Schritt im Dialog, und **Update starten**
+  laeuft ohne ihn. An der Sicherheit aendert das nichts: der Server schreibt vor jedem
+  Update seine eigene verschluesselte Sicherung auf die Platte — ganz gleich, ob du
+  zusaetzlich eine Kopie herunterlaedst. Das rollierende Cluster-Update bekommt dieselbe
+  Behandlung: seine Dialoge bieten den optionalen Download jetzt als Knopf an, das
+  Update wartet nie dahinter.
+
 ## [0.48.1] - 2026-11-26
 
 - Behoben: **Haertung aus einem zweiten kompletten Security-Review.** Mehrere

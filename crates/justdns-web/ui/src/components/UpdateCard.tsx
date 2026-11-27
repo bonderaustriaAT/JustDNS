@@ -187,11 +187,11 @@ export function UpdateCard() {
     }
     setDialogError(null);
     try {
-      // Always hand the user a restore file, then kick off the update. Both the
-      // downloaded file and the server's own safety backup use the same password.
-      await downloadRestore(backupPw).catch(() => {
-        /* Non-fatal: the server still writes its own safety backup. */
-      });
+      // No download here: the server writes its own encrypted safety backup to
+      // the path shown in the dialog before the sidecar pulls anything, so the
+      // update never depends on a browser download. The restore file above is
+      // a pure courtesy copy — easy to skip on a phone, where blob downloads
+      // are flaky and the file has nowhere sensible to go anyway.
       await api.startUpdate(backupPath, backupPw);
       setFlow({
         kind: "running",
@@ -572,6 +572,21 @@ export function UpdateCard() {
                     : t("update.backupPasswordHint")}
                 </span>
               </label>
+              <button
+                type="button"
+                className={styles.secondary}
+                onClick={() => cluster.downloadFile()}
+                disabled={!cluster.valid}
+              >
+                {cluster.downloaded
+                  ? t("update.downloadDone")
+                  : t("update.downloadRestore")}
+              </button>
+              {cluster.downloadWarning && (
+                <p className={styles.dialogError} role="status">
+                  {cluster.downloadWarning}
+                </p>
+              )}
               {cluster.error && (
                 <p className={styles.dialogError} role="alert">{cluster.error}</p>
               )}
