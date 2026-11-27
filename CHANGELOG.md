@@ -3,6 +3,25 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.48.4] - 2026-11-27
+
+- Fixed: **Activating a list now tells you how it went.** Switching a feed on used to leave
+  its row reading "loading…" forever — the download runs in the background, and the page never
+  heard back. The row now resolves on its own: green with its domain count when the feed
+  arrived, red when its source failed. The Phishing page's newly-registered-domain feeds get
+  the same status line under their switch.
+- Fixed: **Deep links into admin areas explain themselves.** A non-admin following a bookmark
+  or a shared URL into an admin-only page used to land silently on the overview, reading like
+  a broken link. They now get a short "no access" page naming their own role, with the way
+  back — and on a read-only cluster node, a hint to where the cluster is managed.
+- Fixed: **Dialogs keep the keyboard inside them.** The confirmation dialogs for destructive
+  actions (deleting, updating, rolling out a cluster update) now trap Tab exactly like the
+  large modal dialogs always did, and return focus to the trigger when they close — no more
+  tabbing into the page behind an overlay.
+- Changed: **The translation catalogues are guarded by the CI.** A new check keeps both
+  languages in step — same keys, matching placeholders, no call naming an unknown key — and a
+  first clean-up removed 37 dead entries the UI had accumulated.
+
 ## [0.48.3] - 2026-11-27
 
 - Fixed: **Activating several lists at once no longer kills the box.** Switching a

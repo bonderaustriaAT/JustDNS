@@ -84,5 +84,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Guards the translation catalogues: DE/EN parity, placeholder agreement
+      # and no t() call naming an unknown key. Unreferenced keys are reported
+      # but never fail the build (template-built keys are invisible to every
+      # static check, so the report is a hint, not a verdict).
+      - name: Translation catalogue check
+        run: npm run check:i18n
+
       - name: Build
         run: npm run build

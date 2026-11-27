@@ -12,9 +12,11 @@ import {
   type Preset,
   type QueryRow,
   type ServerSettings,
+  type Subscription,
 } from "../lib/api";
 import { displayName } from "../lib/dns";
 import { useI18n } from "../lib/i18n";
+import { usePendingFeedPoll } from "../lib/usePendingFeedPoll";
 import type { MessageKey } from "../lib/messages";
 import styles from "./Phishing.module.css";
 
@@ -32,6 +34,33 @@ const GROUPS: { id: string; labelKey: "phishing.groupTechMail" | "phishing.group
   { id: "banks-at", labelKey: "phishing.groupBanksAt" },
   { id: "banks-de", labelKey: "phishing.groupBanksDe" },
 ];
+
+/** The status of one preset's background feed: which of the three status keys
+ *  the row shows. `off` is for a row whose feed is not on. */
+function feedState(subs: Subscription[], key: string): "off" | "loading" | "ok" | "error" {
+  const sub = subs.find((s) => s.preset === key);
+  if (!sub || !sub.enabled) return "off";
+  if (sub.lastError) return "error";
+  if (sub.lastFetchedMs !== undefined && sub.lastCount !== undefined) return "ok";
+  return "loading";
+}
+
+/** The status text for one preset's background feed, matching the state above. */
+function feedStatusText(
+  subs: Subscription[],
+  key: string,
+  t: ReturnType<typeof useI18n>["t"],
+  locale: string,
+): string {
+  const sub = subs.find((s) => s.preset === key);
+  if (sub?.lastError) return t("phishing.feedError");
+  if (sub?.lastFetchedMs !== undefined && sub?.lastCount !== undefined) {
+    return t("phishing.feedCount", {
+      n: sub.lastCount.toLocaleString(locale),
+    });
+  }
+  return t("phishing.feedFetching");
+}
 
 /** A two-way warn/block segmented control. */
 function ModeSegment({
@@ -68,6 +97,9 @@ export function Phishing() {
   const [settings, setSettings] = useState<ServerSettings | null>(null);
   const [brands, setBrands] = useState<PhishingBrand[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
+  // The feed rows behind the NRD presets, for the per-feed status line: what a
+  // just-activated feed is doing (loading, its domain count, or its failure).
+  const [subs, setSubs] = useState<Subscription[]>([]);
   const [hits, setHits] = useState<QueryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -86,6 +118,7 @@ export function Phishing() {
         setSettings(server);
         setBrands(brandList);
         setPresets(lists.presets);
+        setSubs(lists.subscriptions);
         setError(null);
       })
       .catch((err) => {
@@ -94,6 +127,14 @@ export function Phishing() {
       });
     return () => controller.abort();
   }, [t]);
+
+  // A freshly switched-on NRD feed downloads in the background; while that is
+  // going on, re-pull the lists view so the status line under the toggle
+  // resolves to a count or an error on its own.
+  usePendingFeedPoll(subs, (lists) => {
+    setPresets(lists.presets);
+    setSubs(lists.subscriptions);
+  });
 
   // Poll the recent query ring for rows the detector flagged, for the preview.
   useEffect(() => {
@@ -196,7 +237,10 @@ export function Phishing() {
     setRow(key, on);
     api
       .setPreset(key, on)
-      .then((lists) => setPresets(lists.presets))
+      .then((lists) => {
+        setPresets(lists.presets);
+        setSubs(lists.subscriptions);
+      })
       .catch(() => setRow(key, !on));
   }, []);
 
@@ -404,6 +448,14 @@ export function Phishing() {
                               <span className={styles.feedDesc}>
                                 {t(`phishing.feed.${preset.key}.desc` as MessageKey)}
                               </span>
+                              {(preset.active || preset.enabled) && (
+                                <span
+                                  className={styles.feedStatus}
+                                  data-state={feedState(subs, preset.key)}
+                                >
+                                  {feedStatusText(subs, preset.key, t, locale)}
+                                </span>
+                              )}
                             </div>
                             <Toggle
                               checked={preset.active && preset.enabled}

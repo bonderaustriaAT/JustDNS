@@ -4,10 +4,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { useI18n } from "../lib/i18n";
+import { focusFirst, trapTab } from "../lib/focus";
 import styles from "./Modal.module.css";
-
-const FOCUSABLE =
-  'input, select, textarea, button, [href], [tabindex]:not([tabindex="-1"])';
 
 /** A centred modal dialog over a dimmed backdrop. Closes on Escape, a backdrop
  *  click or the close button; traps focus while open and restores it to the
@@ -39,27 +37,14 @@ export function Modal({
     if (!open) return;
     restoreTo.current = document.activeElement as HTMLElement | null;
     const node = dialogRef.current;
-    node?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    focusFirst(node);
 
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onCloseRef.current();
         return;
       }
-      if (event.key !== "Tab" || !node) return;
-      const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-        (el) => !el.hasAttribute("disabled"),
-      );
-      if (items.length === 0) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (node && trapTab(node, event)) event.preventDefault();
     }
 
     document.addEventListener("keydown", onKey);
