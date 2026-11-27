@@ -61,14 +61,17 @@ jobs:
 
       - name: Log in to Docker Hub
         # Opt-in mirror: only when DOCKERHUB_NAMESPACE is configured. The login
-        # owner (DOCKERHUB_USERNAME) may differ from the image namespace, e.g. a
-        # personal account pushing into an organisation repo. A classic access
-        # token with Read & Write scope is kept as the secret DOCKERHUB_TOKEN.
+        # owner is the secret DOCKERHUB_USERNAME when set, otherwise it falls back
+        # to the DOCKERHUB_NAMESPACE variable. They differ only when a personal
+        # account pushes into an organisation repo; for a personal namespace the
+        # username equals the namespace, so the secret can be omitted. A classic
+        # access token with Read & Write scope is kept as the secret
+        # DOCKERHUB_TOKEN.
         if: ${{ vars.DOCKERHUB_NAMESPACE != '' }}
         uses: docker/login-action@v3
         with:
           registry: docker.io
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_NAMESPACE }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Buildx
