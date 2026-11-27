@@ -3,6 +3,14 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.49.0] - 2026-11-27
+
+- New: **15 more ready-made lists in the catalogue.** Ads: OISD Small, OISD Big,
+  StevenBlack Unified, Hagezi Pop-Up Ads. Tracking: Hagezi Windows/Office, Samsung, LG webOS,
+  Amazon, Xiaomi and TikTok telemetry, Frogeye first-party trackers (CNAME-cloaked).
+  Malware: URLhaus malware domains, Phishing Filter, Phishing Army, Hagezi Fake. Each one
+  with its false-positive rating, none switched on by default.
+
 ## [0.48.4] - 2026-11-27
 
 - Fixed: **Activating a list now tells you how it went.** Switching a feed on used to leave
