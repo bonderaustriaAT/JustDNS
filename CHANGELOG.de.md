@@ -4,6 +4,19 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.49.1] - 2026-11-28
+
+- Neu: **Alles auf einen Griff: der Feature-F\u00FChrer.** Ein durchsuchbarer Katalog \u00FCber jedes Feature deiner
+  Box \u2014 \u00F6ffne ihn mit der Lupe in der Kopfzeile, dem Eintrag \u201EAlles entdecken\u201C in der Seitenleiste oder
+  Strg/Cmd+K von \u00FCberall. Tippe einen Namen oder ein Stichwort (\u201ETracker\u201C, \u201EBackup\u201C, \u201EZertifikate\u201C), sieh,
+  was JustDNS kann, springe direkt hin \u2014 und folge dem \u201EMehr dazu\u201C-Link in den passenden Leitfaden auf GitHub,
+  in deiner Sprache. Gefiltert auf das, was deine Rolle erreichen kann: ein Viewer wird nie auf eine Seite
+  geschickt, die ihm verschlossen ist.
+- Neu: **\u201ENeu in dieser Version\u201C nach jedem Update.** Bringt ein Release etwas Neues, nennt eine ruhige Karte
+  auf der \u00DCbersicht es, verlinkt direkt hin und merkt sich dein Ausblenden pro Version \u2014 sie kommt nie wieder
+  f\u00FCr eine Version, die du schon gesehen hast. Erstinstallationen sehen keine Karte: Dort ist alles neu, und
+  der F\u00FChrer deckt die Entdeckung ab.
+
 ## [0.49.0] - 2026-11-27
 
 - Neu: **15 weitere fertige Listen im Katalog.** Werbung: OISD Small, OISD Big,

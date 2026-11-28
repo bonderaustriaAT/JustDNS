@@ -1657,6 +1657,135 @@ const de = {
   "blocking.resume": "Fortsetzen",
   "blocking.resuming": "Setze fort …",
   "blocking.error": "Aktion fehlgeschlagen: {error}",
+
+  // ---- Feature-Führer ("Alles entdecken") und "Neu in dieser Version" ----
+
+  "guide.open": "Alles entdecken",
+  "guide.searchPlaceholder": "Feature suchen …",
+  "guide.noResults": "Nichts gefunden.",
+  "guide.moreInfo": "Mehr dazu",
+  "guide.newBadge": "Neu",
+  "guide.openHint": "In der Liste navigieren mit ↑ und ↓, öffnen mit Eingabe.",
+  "feat.guide.title": "Alles entdecken",
+  "feat.guide.desc":
+    "Die durchsuchbare Übersicht über jedes Feature dieser Box: Suche nach Namen oder Stichwort, springe direkt hin, lies den passenden Leitfaden.",
+  "feat.overview.title": "Übersicht",
+  "feat.overview.desc":
+    "Dein Netzwerk auf einen Blick: Anfragen pro Sekunde, geblockt, aus dem Cache, aktivste Geräte und die schnellsten Resolver.",
+  "feat.logs.title": "Protokoll",
+  "feat.logs.desc":
+    "Jede Anfrage live mitverfolgen: filtern nach Gerät, Antwortcode, Quelle und Zeitraum — auch ältere Einträge aus dem dauerhaften Protokoll.",
+  "feat.trace.title": "Entscheidungs-Trace",
+  "feat.trace.desc":
+    "Zu jedem Protokolleintrag die Frage \u201Ewarum?\u201C: die Stufen der Entscheidung (Blockliste, Phishing, Antwort-IP, DNSSEC) mit der entscheidenden Stufe oben.",
+  "feat.dnssec.title": "DNSSEC",
+  "feat.dnssec.desc":
+    "Signierte Antworten erkennen: JustDNS prüft die Kryptografie der Auflösung und zeigt je Abfrage, ob sie beglaubigt, unsicher oder bemängelt war.",
+  "feat.phishing.title": "Phishing-Schutz",
+  "feat.phishing.desc":
+    "Marken-Imitate erkennen, bevor sie Schaden anrichten: getarnte Buchstaben und Punycode-Tricks in Domainnamen werden markiert, blockiert oder nur vermerkt.",
+  "feat.phishingNrd.title": "Frisch registrierte Domänen",
+  "feat.phishingNrd.desc":
+    "Neue Domänen sind ein Frühindikator für Betrug — JustDNS warnt (oder blockt) bei Seiten, die erst vor Kurzem registriert wurden.",
+  "feat.privacy.title": "Privatsphäre",
+  "feat.privacy.desc":
+    "Welche Firmen versuchen, dich zu beobachten? JustDNS listet die Tracker hinter deinen Anfragen auf — mit Firma, Kategorie und Kontaktzeit.",
+  "feat.chaff.title": "Täuschverkehr",
+  "feat.chaff.desc":
+    "Optionaler Schutzschild: JustDNS stellt gezielt Köder-Anfragen, damit niemand aus dem Timing deiner echten Anfragen ein Profil ableiten kann.",
+  "feat.map.title": "Weltkarte",
+  "feat.map.desc":
+    "Woher deine Antworten physisch kommen: JustDNS verortet die Server hinter deinen Anfragen auf einer Karte — dein Internet, geografisch.",
+  "feat.clients.title": "Geräte",
+  "feat.clients.desc":
+    "Jedes Gerät im Netz bekommt einen Namen, ein Symbol und eigene Regeln — vom Handy der Kids bis zum Fernseher.",
+  "feat.groups.title": "Gruppen",
+  "feat.groups.desc":
+    "Geräte zu Gruppen bündeln (\u201EKinder\u201C, \u201EGäste\u201C) und die Regeln einmal für die ganze Gruppe festlegen — statt Gerät für Gerät.",
+  "feat.listsMine.title": "Eigene Listen",
+  "feat.listsMine.desc":
+    "Selbst gepflegte Block- und Allow-Einträge plus Abonnements per URL: jede Liste mit Notizen, Regelnzahl und Aktualisierungsstatus.",
+  "feat.simulate.title": "Trockenlauf",
+  "feat.simulate.desc":
+    "Vor dem Aktivieren ausprobieren: \u201EWas hätte diese Liste letzten Monat geblockt?\u201C — pro Gerät, pro Domäne, mit Kollateralschäden.",
+  "feat.listsPresets.title": "Fertige Listen",
+  "feat.listsPresets.desc":
+    "Der kuratierte Katalog einsatzbereiter Blocklisten — mit Kategorie, Fehlalarm-Risiko und einem Klick zum Aktivieren. Neue Feeds erscheinen hier zuerst.",
+  "feat.services.title": "Blockbare Dienste",
+  "feat.services.desc":
+    "Ganze Dienste mit einem Klick sperren — TikTok, Instagram, Discord und weitere, mit eigener Suche im Katalog.",
+  "feat.schedules.title": "Zeitpläne",
+  "feat.schedules.desc":
+    "Zeitfenster für alles: \u201ESchlafenszeit\u201C pausiert, \u201ELernzeit\u201C blockt Ablenkung — pro Gruppe, pro Gerät oder für alle.",
+  "feat.pause.title": "Schutz pausieren",
+  "feat.pause.desc":
+    "Für die Fehlersuche: den gesamten Schutz für eine begrenzte Zeit aussetzen — mit Countdown und sicherem Einschalten danach.",
+  "feat.rewrites.title": "DNS-Rewrites",
+  "feat.rewrites.desc":
+    "Namen fest auf Adressen legen: nas.box zeigt immer auf deinen NAS — egal was der Router sonst sagt.",
+  "feat.aliases.title": "Aliase",
+  "feat.aliases.desc":
+    "Zusätzliche Namen für ein und denselben Rewrites-Eintrag — ein Ziel, viele Pforten.",
+  "feat.access.title": "Freigaben",
+  "feat.access.desc":
+    "Jemand auf einer Blockseite bittet um Zugang? Die Anfragen landen hier — mit Begründung, und du entscheidest, für wen und wie lange.",
+  "feat.settings.title": "Einstellungen",
+  "feat.settings.desc":
+    "Alles Zentrale: Schutzprofile, Upstream-Auswahl, Netzwerk, Cache — mit Suche und Expertenmodus.",
+  "feat.blockPage.title": "Eigene Blockseite",
+  "feat.blockPage.desc":
+    "Statt einer stillen Abschaltung eine eigene Seite mit Titel und Text — hinter deinem Reverse Proxy oder auf deinem eigenen Zertifikat, ohne Warnung.",
+  "feat.notifications.title": "Benachrichtigungen",
+  "feat.notifications.desc":
+    "JustDNS meldet sich, wenn etwas geschieht: Node down, Update verfügbar, Zertifikat läuft ab — per Telegram, Slack, Discord, ntfy oder Webhook.",
+  "feat.encryption.title": "Verschlüsseltes DNS",
+  "feat.encryption.desc":
+    "DoT und DoH für deine Geräte: Zertifikat wählen, Endpunkte anzeigen, iOS-Profil zum Installieren herunterladen.",
+  "feat.backup.title": "Backup & Wiederherstellung",
+  "feat.backup.desc":
+    "Die gesamte Konfiguration als verschlüsselte Datei sichern — auf Knopfdruck, geplant auf SMB/NFS, und mit einem Klick wieder einspielen.",
+  "feat.logRetention.title": "Protokoll-Aufbewahrung",
+  "feat.logRetention.desc":
+    "Wie lange Anfragen gespeichert bleiben — von \u201Enur heute\u201C bis \u201Eein Jahr\u201C. Dein Haus, deine Regel.",
+  "feat.modules.title": "Module",
+  "feat.modules.desc":
+    "Zusatzfähigkeiten einzeln schalten — etwa das Privatsphäre-Modul — statt alles auf einmal.",
+  "feat.metrics.title": "Prometheus-Metriken",
+  "feat.metrics.desc":
+    "Für die Monitoring-Ecke: ein token-geschützter Endpoint mit den Kernzahlen deiner Box.",
+  "feat.certs.title": "Zertifikate",
+  "feat.certs.desc":
+    "Dein Zertifikatsspeicher: hochladen, neu generieren, erneuern — mit Ablaufdatum und Verwendungsort auf einen Blick.",
+  "feat.update.title": "Ein-Klick-Update",
+  "feat.update.desc":
+    "Neue Version gefunden? Ein Klick, und die Box aktualisiert sich selbst — inklusive automatischem Sicherheits-Backup. Auch vom Handy aus.",
+  "feat.systemLogs.title": "System & Diagnose",
+  "feat.systemLogs.desc":
+    "Die Betriebsdaten deiner Box: Listener-Status, Versionsnummer, Log-Ring mit Filtern und einstellbarer Ausführlichkeit.",
+  "feat.ha.title": "Hochverfügbarkeit",
+  "feat.ha.desc":
+    "Zwei oder mehr Knoten, eine Konfiguration: paare sie mit einem gemeinsamen Schlüssel, und jede Änderung gilt überall — Updates rollieren automatisch.",
+  "feat.reports.title": "Berichte",
+  "feat.reports.desc":
+    "Tägliche und wöchentliche Zusammenfassungen deiner Anfragen — als druckbare HTML-Seite oder CSV, mit Top-Domänen und Geräten.",
+  "feat.users.title": "Benutzer & Rollen",
+  "feat.users.desc":
+    "Mehrere Konten mit Admin, Editor oder Viewer — mit Pflicht-Zwei-Faktor und Passwort-Zurücksetzen für den Notfall.",
+  "feat.audit.title": "Audit-Trail",
+  "feat.audit.desc":
+    "Wer hat wann was geändert? Jede sicherheitsrelevante Aktion mit Zeit, Person und Ergebnis — nachvollziehbar, nicht verhandelbar.",
+  "feat.account.title": "Mein Konto",
+  "feat.account.desc":
+    "Passwort ändern, Zwei-Faktor einrichten, Wiederherstellungscodes neu erzeugen — alles, was deine eigene Anmeldung betrifft.",
+  "feat.pwa.title": "Als App installieren",
+  "feat.pwa.desc":
+    "JustDNS aufs Handy oder den Desktop bringen: als installierbare App mit eigenem Icon — ohne Store, direkt aus dem Browser.",
+  "whatsnew.title": "Neu in {version}",
+  "whatsnew.dismiss": "Für diese Version ausblenden",
+  "whatsnew.explore": "Im Führer ansehen",
+  "whatsnew.summary.0.49.1":
+    "Feature-Führer: Alles durchsuchbar und direkt erreichbar — plus ein Hinweis, wenn nach einem Update Neues dazugekommen ist."
+
 } as const;
 
 type Catalog = Record<keyof typeof de, string>;
@@ -3285,6 +3414,135 @@ const en: Catalog = {
   "blocking.resume": "Resume",
   "blocking.resuming": "Resuming …",
   "blocking.error": "Action failed: {error}",
+
+  // ---- Feature guide ("Explore everything") and "New in this version" ----
+
+  "guide.open": "Explore everything",
+  "guide.searchPlaceholder": "Search features …",
+  "guide.noResults": "Nothing found.",
+  "guide.moreInfo": "Learn more",
+  "guide.newBadge": "New",
+  "guide.openHint": "Move with ↑ and ↓, open with Enter.",
+  "feat.guide.title": "Explore everything",
+  "feat.guide.desc":
+    "The searchable index of every feature on this box: find by name or keyword, jump straight there, read the matching guide.",
+  "feat.overview.title": "Overview",
+  "feat.overview.desc":
+    "Your network at a glance: queries per second, blocked, served from cache, busiest devices and the fastest resolvers.",
+  "feat.logs.title": "Query log",
+  "feat.logs.desc":
+    "Follow every query live: filter by device, response code, source and window — including older entries from the durable log.",
+  "feat.trace.title": "Decision trace",
+  "feat.trace.desc":
+    "The answer to 'why?' for every logged query: the stages of the decision (block list, phishing, answer IP, DNSSEC), with the decisive one on top.",
+  "feat.dnssec.title": "DNSSEC",
+  "feat.dnssec.desc":
+    "Recognise signed answers: JustDNS checks the cryptography of each resolution and shows whether it was validated, insecure or bogus.",
+  "feat.phishing.title": "Phishing protection",
+  "feat.phishing.desc":
+    "Catch brand imitations before they do damage: disguised letters and Punycode tricks in domain names get flagged, blocked or merely noted.",
+  "feat.phishingNrd.title": "Newly registered domains",
+  "feat.phishingNrd.desc":
+    "Fresh domains are an early sign of fraud — JustDNS warns (or blocks) when a site was registered only recently.",
+  "feat.privacy.title": "Privacy",
+  "feat.privacy.desc":
+    "Which companies are trying to watch you? JustDNS lists the trackers behind your queries — with company, category and contact time.",
+  "feat.chaff.title": "Chaff traffic",
+  "feat.chaff.desc":
+    "An optional shield: JustDNS sends deliberate decoy queries, so nobody can build a profile from the timing of your real ones.",
+  "feat.map.title": "World map",
+  "feat.map.desc":
+    "Where your answers physically come from: JustDNS places the servers behind your queries on a map — your internet, geographically.",
+  "feat.clients.title": "Devices",
+  "feat.clients.desc":
+    "Every device on the network gets a name, an icon and its own rules — from the kids' phones to the living room TV.",
+  "feat.groups.title": "Groups",
+  "feat.groups.desc":
+    "Bundle devices into groups ('Kids', 'Guests') and set the rules once for the whole group instead of device by device.",
+  "feat.listsMine.title": "Your own lists",
+  "feat.listsMine.desc":
+    "Hand-curated block and allow entries plus subscriptions by URL: every list with notes, rule count and refresh status.",
+  "feat.simulate.title": "Dry run",
+  "feat.simulate.desc":
+    "Try before you switch on: 'what would this list have blocked last month?' — per device, per domain, with collateral damage.",
+  "feat.listsPresets.title": "Ready-made lists",
+  "feat.listsPresets.desc":
+    "The curated catalogue of ready-to-use block lists — with category, false-positive risk and one click to activate. New feeds appear here first.",
+  "feat.services.title": "Blockable services",
+  "feat.services.desc":
+    "Block whole services with one click — TikTok, Instagram, Discord and more, with a search of the catalogue.",
+  "feat.schedules.title": "Schedules",
+  "feat.schedules.desc":
+    "Time windows for everything: 'bedtime' pauses, 'homework' blocks the distractions — per group, per device or for everyone.",
+  "feat.pause.title": "Pause protection",
+  "feat.pause.desc":
+    "For troubleshooting: disarm all blocking for a limited time — with a countdown and a safe re-arm afterwards.",
+  "feat.rewrites.title": "DNS rewrites",
+  "feat.rewrites.desc":
+    "Pin names to addresses yourself: nas.box always points at your NAS — no matter what the router says.",
+  "feat.aliases.title": "Aliases",
+  "feat.aliases.desc":
+    "Additional names for one and the same rewrite entry — one target, many doors.",
+  "feat.access.title": "Access requests",
+  "feat.access.desc":
+    "Someone on the block page asking for access? The requests land here — with their reason, and you decide for whom and how long.",
+  "feat.settings.title": "Settings",
+  "feat.settings.desc":
+    "Everything central: protection profiles, upstream choice, network, cache — with search and an expert mode.",
+  "feat.blockPage.title": "Custom block page",
+  "feat.blockPage.desc":
+    "Instead of a silent dead end, your own page with a title and a message — behind your reverse proxy or on your own certificate, without a warning.",
+  "feat.notifications.title": "Notifications",
+  "feat.notifications.desc":
+    "JustDNS speaks up when something happens: node down, update available, certificate expiring — via Telegram, Slack, Discord, ntfy or webhook.",
+  "feat.encryption.title": "Encrypted DNS",
+  "feat.encryption.desc":
+    "DoT and DoH for your devices: pick a certificate, show the endpoints, download an iOS profile to install.",
+  "feat.backup.title": "Backup & restore",
+  "feat.backup.desc":
+    "Save the entire configuration as an encrypted file — on demand, scheduled to SMB/NFS, and restored with one click.",
+  "feat.logRetention.title": "Log retention",
+  "feat.logRetention.desc":
+    "How long queries are kept — from 'today only' to 'a year'. Your house, your rule.",
+  "feat.modules.title": "Modules",
+  "feat.modules.desc":
+    "Switch extra capabilities individually — like the privacy module — instead of all at once.",
+  "feat.metrics.title": "Prometheus metrics",
+  "feat.metrics.desc":
+    "For the monitoring corner: a token-guarded endpoint with your box's key figures.",
+  "feat.certs.title": "Certificates",
+  "feat.certs.desc":
+    "Your certificate store: upload, generate, renew — with expiry and usage at a glance.",
+  "feat.update.title": "One-click update",
+  "feat.update.desc":
+    "New version found? One click and the box updates itself — including an automatic safety backup. From your phone, too.",
+  "feat.systemLogs.title": "System & diagnostics",
+  "feat.systemLogs.desc":
+    "Your box's operating data: listener status, version, a filterable log ring and adjustable verbosity.",
+  "feat.ha.title": "High availability",
+  "feat.ha.desc":
+    "Two or more nodes, one configuration: pair them with a shared key and every change applies everywhere — updates roll out automatically.",
+  "feat.reports.title": "Reports",
+  "feat.reports.desc":
+    "Daily and weekly summaries of your queries — as a printable HTML page or CSV, with top domains and devices.",
+  "feat.users.title": "Users & roles",
+  "feat.users.desc":
+    "Multiple accounts as admin, editor or viewer — with mandatory two-factor and password resets for emergencies.",
+  "feat.audit.title": "Audit trail",
+  "feat.audit.desc":
+    "Who changed what, and when? Every security-relevant action with time, actor and outcome — traceable, non-negotiable.",
+  "feat.account.title": "My account",
+  "feat.account.desc":
+    "Change your password, set up two-factor, regenerate recovery codes — everything about your own sign-in.",
+  "feat.pwa.title": "Install as an app",
+  "feat.pwa.desc":
+    "Put JustDNS on your phone or desktop: an installable app with its own icon — no store, straight from the browser.",
+  "whatsnew.title": "New in {version}",
+  "whatsnew.dismiss": "Hide for this version",
+  "whatsnew.explore": "See in the guide",
+  "whatsnew.summary.0.49.1":
+    "Feature guide: everything searchable and one jump away — plus a note whenever an update brought something new."
+
 };
 
 export type MessageKey = keyof typeof de;

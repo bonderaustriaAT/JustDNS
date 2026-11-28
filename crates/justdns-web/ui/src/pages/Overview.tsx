@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ActivityChart } from "../components/ActivityChart";
 import { BlockingPause } from "../components/BlockingPause";
+import { WhatsNew } from "../components/WhatsNew";
 import { useBlockingPause } from "../lib/useBlockingPause";
 import { useI18n } from "../lib/i18n";
 import { useOverview } from "../lib/useOverview";
@@ -75,6 +76,7 @@ export function Overview() {
 
   return (
     <div className={styles.page}>
+      <WhatsNew />
       <p className={styles.status} data-paused={isPaused || undefined}>
         <span className={styles.dot} aria-hidden="true" />
         {isPaused ? t("overview.protectionPaused") : t("overview.protectionActive")}

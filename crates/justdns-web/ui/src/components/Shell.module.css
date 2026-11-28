@@ -305,6 +305,36 @@
   margin-inline-start: auto;
 }
 
+/* The search button opening the feature guide: matches the language buttons'
+   quiet style so it reads as part of the bar, not a separate control. */
+.guideButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 32px;
+  block-size: 32px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.guideButton:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.guideButton:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.guideButton svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
 /* The hamburger and the in-bar brand are mobile-only; on desktop the sidebar
    carries the brand and the bar holds only the language and account controls. */
 .hamburger,

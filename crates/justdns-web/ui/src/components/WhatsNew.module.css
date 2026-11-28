@@ -1,0 +1,75 @@
+/* The post-update note: a quiet card above the overview grid naming what the
+   new release brought, with deep links into the feature pages and a dismissal
+   that remembers the version. */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--step-1);
+  margin: 0;
+}
+
+.dismiss {
+  font: inherit;
+  font-size: var(--step--2);
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  color: var(--text);
+}
+
+.dismiss:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-inline-size: var(--measure);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.link {
+  display: inline-block;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--signal-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+.link:hover {
+  border-color: var(--signal-strong);
+}
