@@ -451,7 +451,10 @@ pub async fn serve(
                 if config.get().update_checks {
                     update.refresh();
                 }
-                std::thread::sleep(Duration::from_secs(6 * 60 * 60));
+                // Half an hour: frequent enough that an update surfaces on its
+                // own, sparse enough that the unauthenticated GitHub endpoint
+                // stays well below its rate limit.
+                std::thread::sleep(Duration::from_secs(30 * 60));
             }
         });
     }
