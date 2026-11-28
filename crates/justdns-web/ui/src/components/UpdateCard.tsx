@@ -78,7 +78,12 @@ export function UpdateCard() {
     };
   }, []);
 
-  // Load the cached status once on mount.
+  // Load the cached status once on mount, then trigger a fresh check if the
+  // cached result is stale — arriving on the System page should always show
+  // the current state of the world, not whatever the last background tick
+  // happened to find. Stale means: never checked, or checked more than five
+  // minutes ago, so navigating back and forth within one sitting does not
+  // hammer the GitHub endpoint on every visit.
   useEffect(() => {
     const controller = new AbortController();
     api
@@ -86,11 +91,18 @@ export function UpdateCard() {
       .then((next) => {
         setInfo(next);
         setBackupPath(next.defaultBackupPath);
+        const stale =
+          next.checkedAtMs === undefined ||
+          Date.now() - next.checkedAtMs > 5 * 60 * 1000;
+        if (stale && !controller.signal.aborted) {
+          recheck();
+        }
       })
       .catch(() => {
         /* The System page already surfaces an unreachable backend. */
       });
     return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Switching the release channel is per node (never synced) and refreshes the

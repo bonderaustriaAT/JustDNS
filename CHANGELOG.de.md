@@ -4,6 +4,14 @@ Was sich in JustDNS getan hat, in einfacher Sprache. Eine englische Fassung
 dieser Datei liegt daneben: [CHANGELOG.md](CHANGELOG.md). Datumsangaben im
 Format Jahr-Monat-Tag.
 
+## [0.49.2] - 2026-11-28
+
+- Geaendert: **Update-Pruefung laeuft jetzt von selbst.** Die Hintergrund-Pruefung, die nach einer neueren
+  Version schaut, lief frueher alle sechs Stunden — viel zu selten, um sich darauf zu verlassen. Jetzt
+  prueft sie alle drei\u00DFig Minuten, und das Oeffnen der System-und-Diagnose-Seite loest ebenfalls immer
+  eine frische Pruefung aus (es sei denn, eine lief gerade erst — innerhalb von f\u00FCnf Minuten wird GitHub
+  nicht erneut angefragt). Ergebnis: Was die Seite zeigt, ist aktuell.
+
 ## [0.49.1] - 2026-11-28
 
 - Neu: **Alles auf einen Griff: der Feature-F\u00FChrer.** Ein durchsuchbarer Katalog \u00FCber jedes Feature deiner

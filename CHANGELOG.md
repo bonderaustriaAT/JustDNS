@@ -3,6 +3,13 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.49.2] - 2026-11-28
+
+- Changed: **Update check runs on its own now.** The background check that looks for a newer release used
+  to run every six hours — far too sparse to rely on. It now runs every thirty minutes, and opening the
+  System & Diagnostics page always triggers a fresh check too (unless one just ran, so navigating back and
+  forth within five minutes does not hammer GitHub). Result: whatever the page shows is current.
+
 ## [0.49.1] - 2026-11-28
 
 - Added: **Everything at your fingertips: the feature guide.** A searchable catalogue of every feature on your
