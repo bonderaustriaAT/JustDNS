@@ -25,4 +25,11 @@ edition = "2024"
 rust-version = "1.85"
 license = "AGPL-3.0-or-later"
 
+# Release compilation keeps every intermediate artifact (.rlib, .rmeta) on disk,
+# so sccache in the image build can reuse unchanged crates across builds. Without
+# incremental, each `cargo build --release` throws away intermediates even when
+# the source has not changed, defeating the cache.
+[profile.release]
+incremental = true
+
 [workspace.dependencies]

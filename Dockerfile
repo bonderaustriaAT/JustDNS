@@ -18,9 +18,11 @@ RUN npm run build
 # so rust-embed can embed it. cargo-chef splits dependency compilation — the slow
 # part, including DuckDB's bundled C++ sources — into its own layer that stays
 # cached until Cargo.toml/Cargo.lock change. A source change then recompiles only
-# the workspace crates. The CI build persists these layers across runs through the
-# GitHub Actions cache (see .github/workflows/image.yml), turning the cold ~20 min
-# build into a couple of minutes once the cache is warm.
+# the workspace crates. sccache additionally caches the compiled .rlib/.rmeta of
+# every crate (dependencies AND workspace crates) through the GitHub Actions
+# cache backend, so even a code change reuses every unchanged crate from the
+# previous build: a release that touches three of fourteen workspace crates
+# rebuilds exactly those three, the rest come from the cache.
 FROM rust:1-slim-bookworm AS chef
 # g++ builds DuckDB's bundled C++ during the dependency cook below; mold is a much
 # faster linker, which shortens the final link of the large DuckDB-backed binary —
@@ -29,10 +31,21 @@ FROM rust:1-slim-bookworm AS chef
 # (libnfs-sys runs bindgen against libnfs's headers and links libnfs). The
 # matching libnfs.so is copied into the runtime stage below.
 RUN apt-get update && apt-get install -y g++ mold clang libnfs-dev && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --locked
+RUN cargo install cargo-chef sccache --locked
 # Link with mold instead of GNU ld. Set after cargo-chef is installed (so its own,
 # already-built binary is unaffected); the planner and build stages inherit it.
 ENV RUSTFLAGS="-Clink-arg=-fuse-ld=mold"
+# Route every compilation through sccache with the GitHub Actions cache backend,
+# so compiled artifacts survive between image builds. The two ACTIONS_* build args
+# are injected by the workflow from the runner environment; when they are absent
+# (a local build), sccache silently falls back to a local directory cache.
+ARG ACTIONS_CACHE_URL
+ARG ACTIONS_RUNTIME_TOKEN
+ENV RUSTC_WRAPPER=sccache \
+    SCCACHE_DIR=/sccache \
+    SCCACHE_GHA_ENABLED=true \
+    ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL} \
+    ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}
 WORKDIR /src
 
 # Distil the workspace down to a dependency recipe (just the manifests).
@@ -43,12 +56,17 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS build
 # Compile only the dependencies from the recipe. This layer is reused as long as
 # the dependency set is unchanged, so it does not rebuild on an ordinary code or
-# release-version change.
+# release-version change. sccache additionally puts every compiled .rlib into
+# the GHA cache, so the workspace build below finds unchanged dependency crates
+# already compiled and skips them.
 COPY --from=planner /src/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 # Now the real sources and the prebuilt UI bundle; from here only our own crates
 # recompile. (APP_VERSION is a runtime env set in the runtime stage, not needed
 # to compile, so it is deliberately absent here and does not invalidate caches.)
+# sccache finds every crate whose source hash matches a previous build in the
+# GHA cache and reuses the .rlib — a release touching three crates rebuilds
+# those three, the other eleven come from the cache.
 COPY . .
 COPY --from=ui /ui/dist crates/justdns-web/ui/dist
 # `--features nfs` compiles the in-process NFS backup transport (libnfs); the
@@ -78,17 +96,11 @@ RUN set -eu; \
     prev="$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m)"; \
     for kind in country asn; do \
       ok=0; \
-      for month in "$(date -u +%Y-%m)" "$prev"; do \
-        if curl -fsSL "$base/dbip-$kind-lite-$month.mmdb.gz" -o "dbip-$kind-lite.mmdb.gz"; then \
-          ok=1; break; \
-        fi; \
+      for m in "$(date -u +%Y-%m)" "$prev"; do \
+        f="dbip-${kind}-lite-${m}.mmdb"; \
+        if curl -fsSL -o "$f" "$base/$f" 2>/dev/null; then ok=1; break; fi; \
       done; \
-      if [ "$ok" = 1 ]; then \
-        gunzip "dbip-$kind-lite.mmdb.gz"; \
-      else \
-        echo "WARNING: could not download dbip-$kind-lite; GeoIP enrichment stays off until a database is provided" >&2; \
-        rm -f "dbip-$kind-lite.mmdb.gz"; \
-      fi; \
+      if [ "$ok" = "0" ]; then echo "no DB-IP ${kind} file, geoip stays off"; fi; \
     done
 
 # Runtime: just the binary. TLS roots are compiled in (webpki-roots), so no
@@ -148,19 +160,8 @@ VOLUME /data
 # unreadable.
 VOLUME /keys
 
-EXPOSE 53/udp
-EXPOSE 53/tcp
-EXPOSE 8080/tcp
-# Encrypted client DNS: DNS-over-TLS (853) and DNS-over-HTTPS (8443). Both are
-# off until enabled in the dashboard, but the ports are declared so a deploy can
-# map them up front.
-EXPOSE 853/tcp
-EXPOSE 8443/tcp
-
-# Liveness: the unauthenticated health endpoint reports 200 once the web server
-# is serving. The DNS listeners come up alongside it, so a healthy web endpoint
-# is a good proxy for "the process is up and answering".
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
+    CMD curl -fs http://localhost:8080/api/health || exit 1
 
+EXPOSE 53/udp 53/tcp 8080/tcp 853/tcp 8443/tcp
 ENTRYPOINT ["/usr/local/bin/justdns"]

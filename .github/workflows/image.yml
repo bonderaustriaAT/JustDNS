@@ -113,17 +113,22 @@ jobs:
 
       - name: Build and push JustDNS
         # Layer cache makes repeat builds fast: the heavy dependency layer (DuckDB's
-        # bundled C++) is reused, only changed crates rebuild. The cache is a registry
-        # image (`:buildcache`), which has no expiry and no size cap. The GitHub Actions
-        # (gha) cache is intentionally not used for this image: its 280 MiB plus
-        # dependency layer filled the 10 GB per repo cap, whose LRU eviction then kept
-        # dropping that very layer (and the sidecar caches below), and exporting it on
-        # every run cost extra time for a cache the registry one already covers. Only a
-        # real release tag publishes the image; a manual run just builds and warms it.
+        # bundled C++) is reused via the registry :buildcache, and sccache (compiled
+        # .rlib/.rmeta per crate) is persisted through the GitHub Actions cache
+        # backend — sccache talks directly to the GHA cache API from inside the
+        # build, so unchanged crates from the previous build are found as cache
+        # hits and only the crates that actually changed rebuild. The two
+        # ACTIONS_* build args are the runner's cache API endpoint and token,
+        # handed through to the Docker build so sccache can reach the cache
+        # service; a local build without them simply falls back to a local
+        # sccache directory.
         uses: docker/build-push-action@v6
         with:
           context: .
-          build-args: APP_VERSION=${{ github.ref_name }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+            ACTIONS_CACHE_URL=${{ env.ACTIONS_CACHE_URL }}
+            ACTIONS_RUNTIME_TOKEN=${{ env.ACTIONS_RUNTIME_TOKEN }}
           tags: ${{ steps.tags.outputs.tags }}
           push: ${{ github.ref_type == 'tag' }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
