@@ -3,6 +3,19 @@
 What's new in JustDNS, in plain language. A German version of this file is kept
 alongside it in [CHANGELOG.de.md](CHANGELOG.de.md). Dates are year-month-day.
 
+## [0.49.1] - 2026-11-28
+
+- Added: **Everything at your fingertips: the feature guide.** A searchable catalogue of every feature on your
+  box — open it with the magnifier in the top bar, the "Alles entdecken" entry in the sidebar, or Ctrl/Cmd+K
+  from anywhere. Type a name or a keyword ("Tracker", "Backup", "Zertifikate"), see what JustDNS can do,
+  jump straight to it — and follow the "Learn more" link into the matching guide on GitHub, in your
+  language. Filtered to the features your role can act on, so a viewer never gets pointed at a page they
+  cannot open.
+- Added: **"New in this version" after each update.** When a release brings something new, a quiet card on
+  the overview names it, deep-links into it, and remembers your dismissal per version — so it never comes
+  back for a version you've already seen. First installs see no card: everything is new there, and the
+  guide covers discovery.
+
 ## [0.49.0] - 2026-11-27
 
 - New: **15 more ready-made lists in the catalogue.** Ads: OISD Small, OISD Big,
